@@ -4,7 +4,7 @@ import dotenv from "dotenv";
 import { pool } from "./db";
 import authRoutes from "./routes/auth";
 import meRoutes from "./routes/me";
-
+import parkingSpotRoutes from "./routes/parkingSpots";
 dotenv.config();
 
 const app = express();
@@ -13,7 +13,7 @@ app.use(express.json());
 
 app.use("/auth", authRoutes);
 app.use("/me", meRoutes);
-
+app.use("/parking-spots", parkingSpotRoutes);
 app.get("/health", (_req, res) => {
     res.json({ ok: true, message: "ParkingBuddies API is running" });
 });
