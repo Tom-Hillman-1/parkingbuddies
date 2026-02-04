@@ -7,6 +7,7 @@ import meRoutes from "./routes/me";
 import parkingSpotRoutes from "./routes/parkingSpots";
 import bookingRoutes from "./routes/bookings";
 import settingsRoutes from "./routes/settings";
+import dashboardRoutes from "./routes/dashboard";
 dotenv.config();
 
 const app = express();
@@ -18,6 +19,8 @@ app.use("/me", meRoutes);
 app.use("/parking-spots", parkingSpotRoutes);
 app.use("/bookings", bookingRoutes);
 app.use("/settings", settingsRoutes);
+app.use("/dashboard", dashboardRoutes);
+
 app.get("/health", (_req, res) => {
     res.json({ ok: true, message: "ParkingBuddies API is running" });
 });

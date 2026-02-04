@@ -214,5 +214,97 @@ router.get("/me", requireAuth, async (req: AuthRequest, res) => {
         return res.status(500).json({ ok: false, error: String(e) });
     }
 });
+/**
+ * PATCH /bookings/:id/cancel
+ * Driver cancels their own booking
+ */
+router.patch("/:id/cancel", requireAuth, async (req: AuthRequest, res) => {
+    const bookingId = req.params.id;
 
+    try {
+        const r = await pool.query(
+            `UPDATE bookings
+       SET status = 'cancelled', updated_at = now()
+       WHERE id = $1 AND driver_user_id = $2
+       RETURNING *`,
+            [bookingId, req.userId]
+        );
+
+        if (!r.rowCount) {
+            return res.status(404).json({ ok: false, error: "Booking not found (or not yours)" });
+        }
+
+        return res.json({ ok: true, booking: r.rows[0] });
+    } catch (e) {
+        return res.status(500).json({ ok: false, error: String(e) });
+    }
+});
+
+/**
+ * PATCH /bookings/:id/confirm
+ * Owner confirms a pending booking (simulates payment success)
+ */
+router.patch("/:id/confirm", requireAuth, async (req: AuthRequest, res) => {
+    const bookingId = req.params.id;
+
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+
+        // find booking + spot owner
+        const bookingR = await client.query(
+            `SELECT b.*, ps.owner_user_id
+       FROM bookings b
+       JOIN parking_spots ps ON ps.id = b.parking_spot_id
+       WHERE b.id = $1`,
+            [bookingId]
+        );
+
+        if (!bookingR.rowCount) {
+            await client.query("ROLLBACK");
+            return res.status(404).json({ ok: false, error: "Booking not found" });
+        }
+
+        const booking = bookingR.rows[0];
+
+        // only the parking spot owner can confirm
+        if (booking.owner_user_id !== req.userId) {
+            await client.query("ROLLBACK");
+            return res.status(403).json({ ok: false, error: "Only the listing owner can confirm this booking" });
+        }
+
+        // only confirm pending bookings (simple + logical)
+        if (booking.status !== "pending") {
+            await client.query("ROLLBACK");
+            return res.status(400).json({ ok: false, error: "Only pending bookings can be confirmed" });
+        }
+
+        // update booking status
+        const updatedR = await client.query(
+            `UPDATE bookings
+       SET status = 'confirmed', updated_at = now()
+       WHERE id = $1
+       RETURNING *`,
+            [bookingId]
+        );
+
+        // if money booking, mark payment as succeeded
+        if (booking.pay_method === "money") {
+            await client.query(
+                `UPDATE payments
+         SET status = 'succeeded', updated_at = now()
+         WHERE booking_id = $1`,
+                [bookingId]
+            );
+        }
+
+        await client.query("COMMIT");
+        return res.json({ ok: true, booking: updatedR.rows[0] });
+    } catch (e) {
+        await client.query("ROLLBACK");
+        return res.status(500).json({ ok: false, error: String(e) });
+    } finally {
+        client.release();
+    }
+});
 export default router;
