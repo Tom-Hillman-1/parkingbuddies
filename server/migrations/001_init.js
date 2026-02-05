@@ -50,7 +50,6 @@ exports.up = (pgm) => {
         lat: { type: "double precision", notNull: true },
         lng: { type: "double precision", notNull: true },
 
-        // image (mock URL ok)
         image_url: { type: "text", notNull: false },
 
         // availability window (optional)
@@ -157,7 +156,7 @@ exports.up = (pgm) => {
     });
 
     pgm.addConstraint("payments", "payments_provider_check", {
-        check: "provider IN ('stripe', 'paypal', 'gpay')",
+        check: "provider IN ('stripe')",
     });
 
     pgm.addConstraint("payments", "payments_status_check", {
