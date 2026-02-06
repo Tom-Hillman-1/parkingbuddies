@@ -117,6 +117,7 @@ export default function DashboardPage() {
     const [msg, setMsg] = useState<string | null>(null);
     const [err, setErr] = useState<string | null>(null);
     const [busyId, setBusyId] = useState<string | null>(null);
+    const [lastSeenOwnerPendingCount, setLastSeenOwnerPendingCount] = useState(0);
     const [open, setOpen] = useState({
         ownerConfirmed: false,
         ownerPending: false,
@@ -204,6 +205,12 @@ export default function DashboardPage() {
     const pendingOwnerCount = useMemo(() => {
         return auctionBids.filter((b) => String(b.status ?? "").toLowerCase() === "pending").length;
     }, [auctionBids]);
+
+    useEffect(() => {
+        if (open.ownerPending) {
+            setLastSeenOwnerPendingCount(pendingOwnerCount);
+        }
+    }, [open.ownerPending, pendingOwnerCount]);
 
     const upcoming = useMemo(() => {
         const now = Date.now();
@@ -668,6 +675,9 @@ export default function DashboardPage() {
                         <span className="badge badge--warm sectionHeaderBadge">
                             {pendingOwnerCount} pending
                         </span>
+                        {pendingOwnerCount > lastSeenOwnerPendingCount && (
+                            <span className="badge badge--rose">New</span>
+                        )}
                     </button>
                     <div className="sectionSub muted">
                         Review bids and choose the winner. Charges are captured on approval.

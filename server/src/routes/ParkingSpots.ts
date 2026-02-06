@@ -318,8 +318,8 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
     // points config
     const allow_points = isBool(body.allow_points) ? body.allow_points : false;
     const points_cost = safeInt(body.points_cost);
-    if (mode === "free" && allow_points) {
-        return res.status(400).json({ ok: false, error: "Points cannot be enabled for free listings" });
+    if (allow_points && mode !== "rent") {
+        return res.status(400).json({ ok: false, error: "Points can only be enabled for rent listings" });
     }
     if (allow_points && points_cost <= 0) {
         return res.status(400).json({ ok: false, error: "points_cost must be > 0 when allow_points is true" });
@@ -545,8 +545,8 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
 
     const allow_points = isBool(body.allow_points) ? body.allow_points : false;
     const points_cost = safeInt(body.points_cost);
-    if (mode === "free" && allow_points) {
-        return res.status(400).json({ ok: false, error: "Points cannot be enabled for free listings" });
+    if (allow_points && mode !== "rent") {
+        return res.status(400).json({ ok: false, error: "Points can only be enabled for rent listings" });
     }
     if (allow_points && points_cost <= 0) {
         return res.status(400).json({ ok: false, error: "points_cost must be > 0 when allow_points is true" });

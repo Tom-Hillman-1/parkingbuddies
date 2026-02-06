@@ -124,7 +124,6 @@ export default function SpotDetailsPage() {
     const [bidAmount, setBidAmount] = useState("");
     const [bidMsg, setBidMsg] = useState<string | null>(null);
     const [bidBusy, setBidBusy] = useState(false);
-    const [showBidAuthorized, setShowBidAuthorized] = useState(false);
     const [nextSlotOptions, setNextSlotOptions] = useState<Date[]>([]);
     const [auctionInfo, setAuctionInfo] = useState<{
         highest_pending_bid_gbp: number;
@@ -200,7 +199,6 @@ export default function SpotDetailsPage() {
     useEffect(() => {
         setClientSecret(null);
         setPaymentIntentId(null);
-        setShowBidAuthorized(false);
     }, [bidAmount, spot?.id]);
 
     useEffect(() => {
@@ -451,7 +449,7 @@ export default function SpotDetailsPage() {
             : spot.mode === "rent" ? `£${price.toFixed(2)}` : auctionPriceLabel;
 
     const showPoints = !!spot.allow_points && !!spot.points_cost;
-    const canUsePoints = showPoints && spot.mode !== "auction";
+    const canUsePoints = showPoints && spot.mode === "rent";
     const pointsLabel = showPoints ? `${spot.points_cost} pts ${priceUnitLabel(price)}` : "";
     const availabilityLabel = formatAvailability(spot);
 
@@ -616,46 +614,8 @@ export default function SpotDetailsPage() {
         </div>
     );
 
-    const bidAuthorizedModal = showBidAuthorized ? (
-        <div className="modalOverlay" role="dialog" aria-modal="true">
-            <div className="modalCard receiptCard">
-                <div className="receiptHeader">
-                    <div className="h2">Authorization complete</div>
-                    <div className="muted tiny">You won’t be charged yet</div>
-                </div>
-                <div className="receiptBody">
-                    <div className="receiptRow">
-                        <span className="muted">Bid amount</span>
-                        <strong>£{Number(bidAmount || 0).toFixed(2)}</strong>
-                    </div>
-                    <div className="receiptRow">
-                        <span className="muted">Charge timing</span>
-                        <strong>You’ll only be charged if the owner accepts your bid.</strong>
-                    </div>
-                </div>
-                <div className="receiptActions">
-                    <button className="btn" type="button" onClick={() => setShowBidAuthorized(false)}>
-                        Cancel bid
-                    </button>
-                    <button
-                        className="btn btn-primary"
-                        type="button"
-                        onClick={async () => {
-                            setShowBidAuthorized(false);
-                            await placeBid();
-                        }}
-                        disabled={bidBusy}
-                    >
-                        Place bid
-                    </button>
-                </div>
-            </div>
-        </div>
-    ) : null;
-
     return (
         <div className="container">
-            {bidAuthorizedModal}
             <div className="spotDetails">
                 <aside className="spotMedia">
                     <Link to="/" className="muted tiny" style={{ textDecoration: "none" }}>← Back to results</Link>
@@ -987,21 +947,13 @@ export default function SpotDetailsPage() {
                                             <BidCardForm
                                                 clientSecret={clientSecret}
                                                 busy={bidBusy}
-                                                onAuthorized={() => setShowBidAuthorized(true)}
+                                                onAuthorized={() => {
+                                                    if (bidBusy) return;
+                                                    setBidMsg("Authorization complete. Placing bid…");
+                                                    placeBid();
+                                                }}
                                             />
                                         </Elements>
-                                    )}
-                                    {showBidAuthorized && (
-                                        <div className="rowInline" style={{ marginTop: 10 }}>
-                                            <button
-                                                onClick={placeBid}
-                                                disabled={!canBook || busy || bidBusy || auctionSoldOut}
-                                                className="btn btn-primary"
-                                            >
-                                                Place bid
-                                            </button>
-                                            <div className="tiny muted">Authorization complete. Submit your bid.</div>
-                                        </div>
                                     )}
                                 </>
                             )}

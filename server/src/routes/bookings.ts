@@ -386,7 +386,10 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
             const balance = Number(userR.rows[0].points_balance ?? 0);
             if (balance < (total_points ?? 0)) {
                 await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: "Not enough points" });
+                return res.status(400).json({
+                    ok: false,
+                    error: `Not enough points. Need ${total_points ?? 0}, you have ${balance}.`,
+                });
             }
 
             await client.query(
@@ -421,6 +424,17 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
                 `INSERT INTO reward_transactions (user_id, type, amount, reason, related_booking_id, related_spot_id)
                  VALUES ($1,'spend',$2,'booking_with_points',$3,$4)`,
                     [req.userId, total_points, booking.id, parking_spot_id]
+            );
+            await client.query(
+                `UPDATE users
+                 SET points_balance = points_balance + $1, updated_at = now()
+                 WHERE id = $2`,
+                [total_points, spot.owner_user_id]
+            );
+            await client.query(
+                `INSERT INTO reward_transactions (user_id, type, amount, reason, related_booking_id, related_spot_id)
+                 VALUES ($1,'earn',$2,'booking_points_received',$3,$4)`,
+                [spot.owner_user_id, total_points, booking.id, parking_spot_id]
             );
         } else {
             // only create payment row if there is something to pay
