@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { apiGet } from "../lib/api";
 import type { ParkingSpot } from "../types";
 import SpotsMap from "../components/SpotsMap";
+import logoImg from "../assets/logo.png";
 
 type UserLoc = { lat: number; lng: number } | null;
 type SortMode = "recommended" | "distance" | "price_low" | "price_high";
@@ -41,14 +42,36 @@ function availabilityLabel(spot: ParkingSpot) {
     const rules = extractAvailabilityRules(spot);
     if (!rules.length) return "Limited";
 
-    const isAllDay =
-        rules.length === 7 &&
-        rules.every((r) => r.start === "00:00" && r.end === "23:59");
+    const isAllDay = isExplicitAllDay(spot, rules);
     if (isAllDay) return "24/7";
 
     const today = new Date().getDay();
     const todaysRules = rules.filter((r) => r.dow === today);
     return todaysRules.length ? "Available today" : "Limited";
+}
+
+function estimateTotalForDuration(spot: ParkingSpot, durationMinutes: number) {
+    const unit = (spot as any).price_unit ?? "hour";
+    const price = toMoney((spot as any).price_gbp);
+    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return 0;
+    if (spot.mode === "auction") return 0;
+    if (spot.mode === "free" || price <= 0) return 0;
+
+    const minutes = durationMinutes;
+    if (unit === "hour") {
+        const roundedMinutes = Math.max(5, Math.ceil(minutes / 5) * 5);
+        const units = roundedMinutes / 60;
+        return price * units;
+    }
+    if (unit === "day") {
+        const units = Math.max(1, Math.ceil(minutes / (60 * 24)));
+        return price * units;
+    }
+    if (unit === "week") {
+        const units = Math.max(1, Math.ceil(minutes / (60 * 24 * 7)));
+        return price * units;
+    }
+    return price;
 }
 
 export default function HomePage() {
@@ -60,7 +83,7 @@ export default function HomePage() {
     // UI state
     const [q, setQ] = useState("");
     const [sort, setSort] = useState<SortMode>("recommended");
-    const [maxPrice, setMaxPrice] = useState<number>(30);
+    const [maxPrice, setMaxPrice] = useState<number>(0);
     const [onlyFree, setOnlyFree] = useState(false);
     const [modes, setModes] = useState<{ free: boolean; rent: boolean; auction: boolean }>({
         free: true,
@@ -78,7 +101,7 @@ export default function HomePage() {
     // Applied filters (only update when user presses Search)
     const [appliedQ, setAppliedQ] = useState("");
     const [appliedSort, setAppliedSort] = useState<SortMode>("recommended");
-    const [appliedMaxPrice, setAppliedMaxPrice] = useState<number>(30);
+    const [appliedMaxPrice, setAppliedMaxPrice] = useState<number>(0);
     const [appliedOnlyFree, setAppliedOnlyFree] = useState(false);
     const [appliedModes, setAppliedModes] = useState<{ free: boolean; rent: boolean; auction: boolean }>({
         free: true,
@@ -127,21 +150,10 @@ export default function HomePage() {
         );
     }
 
-    function applySearch() {
-        setAppliedQ(q);
-        setAppliedSort(sort);
-        setAppliedMaxPrice(maxPrice);
-        setAppliedOnlyFree(onlyFree);
-        setAppliedModes(modes);
-        setAppliedDate(desiredDate);
-        setAppliedTime(desiredTime);
-        setAppliedDuration(desiredDuration);
-    }
-
     function resetFilters() {
         setQ("");
         setSort("recommended");
-        setMaxPrice(30);
+        setMaxPrice(0);
         setOnlyFree(false);
         setModes({ free: true, rent: true, auction: true });
         setDesiredDate("");
@@ -150,7 +162,7 @@ export default function HomePage() {
 
         setAppliedQ("");
         setAppliedSort("recommended");
-        setAppliedMaxPrice(30);
+        setAppliedMaxPrice(0);
         setAppliedOnlyFree(false);
         setAppliedModes({ free: true, rent: true, auction: true });
         setAppliedDate("");
@@ -160,6 +172,24 @@ export default function HomePage() {
         setSortOpen(false);
         setTimeFilterOpen(false);
     }
+
+    useEffect(() => {
+        const handle = setTimeout(() => {
+            setAppliedQ(q);
+        }, 250);
+        return () => clearTimeout(handle);
+    }, [q]);
+
+    useEffect(() => {
+        setAppliedSort(sort);
+        setAppliedMaxPrice(maxPrice);
+        setAppliedOnlyFree(onlyFree);
+        setAppliedModes(modes);
+        setAppliedDate(desiredDate);
+        setAppliedTime(desiredTime);
+        setAppliedDuration(desiredDuration);
+    }, [sort, maxPrice, onlyFree, modes, desiredDate, desiredTime, desiredDuration]);
+
 
     const filtered = useMemo(() => {
         const query = appliedQ.trim().toLowerCase();
@@ -272,9 +302,10 @@ export default function HomePage() {
 
             const recommended = distanceWeighted * distancePenalty;
 
-            return { spot: s, distKm, price, availLabel, recommended };
+            const estimatedTotal = estimateTotalForDuration(s, appliedDuration);
+            return { spot: s, distKm, price, availLabel, recommended, estimatedTotal };
         });
-    }, [timeFiltered, userLoc]);
+    }, [timeFiltered, userLoc, appliedDuration]);
 
     const sorted = useMemo(() => {
         const arr = enriched.slice();
@@ -287,15 +318,32 @@ export default function HomePage() {
         return arr;
     }, [enriched, appliedSort]);
 
+    const timeFilteredByBookings = useMemo(() => {
+        if (!appliedDate || !appliedTime) return sorted;
+        const start = new Date(`${appliedDate}T${appliedTime}`);
+        if (Number.isNaN(start.getTime())) return sorted;
+
+        return sorted.filter(({ spot }) => {
+            const count = bookingCounts[spot.id] ?? 0;
+            const capacity = Number((spot as any).capacity_total ?? 1);
+            const isPublic = (spot as any).parking_type === "public";
+
+            if (isPublic) {
+                return count < Math.max(1, capacity);
+            }
+            return count === 0;
+        });
+    }, [sorted, appliedDate, appliedTime, bookingCounts]);
+
     const mapCenter = useMemo(() => {
         if (userLoc) return userLoc;
         if (selectedId) {
-            const hit = sorted.find((x) => x.spot.id === selectedId);
+            const hit = timeFilteredByBookings.find((x) => x.spot.id === selectedId);
             if (hit) return { lat: hit.spot.lat, lng: hit.spot.lng };
         }
-        if (sorted.length) return { lat: sorted[0].spot.lat, lng: sorted[0].spot.lng };
+        if (timeFilteredByBookings.length) return { lat: timeFilteredByBookings[0].spot.lat, lng: timeFilteredByBookings[0].spot.lng };
         return { lat: 51.5074, lng: -0.1278 };
-    }, [userLoc, sorted, selectedId]);
+    }, [userLoc, timeFilteredByBookings, selectedId]);
 
     const viewToggle = (
         <div style={{ position: "relative" }}>
@@ -363,9 +411,6 @@ export default function HomePage() {
                                     placeholder="Try: Upper Street, garage, cheap…"
                                 />
                             </label>
-                            <button className="btn" onClick={applySearch} type="button">
-                                Search
-                            </button>
                             <button className="btn btn-primary" onClick={requestLocation} type="button">
                                 Use my location
                             </button>
@@ -490,7 +535,7 @@ export default function HomePage() {
                         )}
 
                         <div className="tiny muted">
-                            {loading ? "Loading…" : error ? "Error loading spots." : `${sorted.length} spot${sorted.length === 1 ? "" : "s"} found`}
+                            {loading ? "Loading…" : error ? "Error loading spots." : `${timeFilteredByBookings.length} spot${timeFilteredByBookings.length === 1 ? "" : "s"} found`}
                             {" · "}
                             {userLoc ? "sorted based on your current location" : "enable location for better results"}
                         </div>
@@ -505,7 +550,7 @@ export default function HomePage() {
                             </div>
                         )}
 
-                        {!loading && !error && sorted.length === 0 && (
+                        {!loading && !error && timeFilteredByBookings.length === 0 && (
                             <div className="card" style={{ padding: 12 }}>
                                 <div className="h3">No results</div>
                                 <div className="muted" style={{ marginTop: 6 }}>
@@ -514,18 +559,25 @@ export default function HomePage() {
                             </div>
                         )}
 
-                        {!loading && !error && sorted.map(({ spot, distKm, price, availLabel, recommended }) => {
+                        {!loading && !error && timeFilteredByBookings.map(({ spot, distKm, price, availLabel, recommended, estimatedTotal }) => {
                             const active = spot.id === selectedId;
+
+                            const highestPending = Number((spot as any).auction_highest_pending_gbp ?? 0);
+                            const startPrice = Number((spot as any).auction_start_price_gbp ?? 0);
+                            const auctionPriceLabel = highestPending > 0
+                                ? `Bid £${highestPending.toFixed(2)}`
+                                : `Start £${startPrice.toFixed(2)}`;
 
                             const pill =
                                 spot.mode === "free" ? "Free"
                                     : spot.mode === "rent" ? `£${price.toFixed(2)}`
-                                        : "Auction";
+                                        : auctionPriceLabel;
                             const nextWindow = getNextAvailableWindow(spot, bookingWindows[spot.id] ?? []);
 
                             const bookedCount = bookingCounts[spot.id] ?? 0;
                             const capacity = Number((spot as any).capacity_total ?? 1);
                             const fullyBooked = bookedCount >= Math.max(1, capacity);
+                            const auctionSoldOut = Boolean((spot as any).auction_sold_out);
 
                             return (
                                 <button
@@ -540,7 +592,7 @@ export default function HomePage() {
                                                 {spot.image_url ? (
                                                     <img src={spot.image_url} alt={spot.title} loading="lazy" />
                                                 ) : (
-                                                    <div className="thumbFallback"></div>
+                                                    <img className="thumbLogo" src={logoImg} alt="ParkingBuddies logo" />
                                                 )}
                                             </div>
 
@@ -551,8 +603,11 @@ export default function HomePage() {
                                                 </div>
                                             </div>
                                         </div>
-
-                                        <div className="pill">{pill}</div>
+                                        <div style={{ display: "grid", gap: 6, justifyItems: "end" }}>
+                                            <div className="pill pill--price">
+                                                {pill}
+                                            </div>
+                                        </div>
                                     </div>
 
                                     <div className="meta">
@@ -560,12 +615,20 @@ export default function HomePage() {
                                         <span className="badge">{availLabel}</span>
                                         <span className="badge">{userLoc ? `${distKm.toFixed(1)} km` : "Enable location"}</span>
                                         {fullyBooked && <span className="badge badge--rose">Fully booked</span>}
+                                        {spot.mode === "auction" && auctionSoldOut && (
+                                            <span className="badge badge--rose">Sold out</span>
+                                        )}
                                         {(spot as any).parking_type === "public" && (
                                             <span className="badge badge--cool">
                                                 {(spot as any).capacity_available ?? 0}/{(spot as any).capacity_total ?? 0} spaces
                                             </span>
                                         )}
                                         <span className="badge">Score {Math.round(recommended * 100)}</span>
+                                        {appliedDate && appliedTime && spot.mode !== "auction" && (
+                                            <span className="badge">
+                                                Est. £{estimatedTotal.toFixed(2)}
+                                            </span>
+                                        )}
                                     </div>
 
                                     {nextWindow && (
@@ -574,16 +637,29 @@ export default function HomePage() {
                                         </div>
                                     )}
 
-                                    <div className="resultFooter">
-                                        <Link
-                                            className="btn btn-accent"
-                                            to={`/spots/${spot.id}`}
-                                            onClick={(e) => e.stopPropagation()}
-                                        >
-                                            View details
-                                        </Link>
-                                        <div className="tiny muted">
-                                            {spot.mode === "rent" ? "Request booking" : spot.mode === "free" ? "Book a slot" : "Auction soon"}
+                                    <div className="resultFooter" style={{ justifyContent: "space-between", gap: 12 }}>
+                                        <div className="rowInline" style={{ alignItems: "center", gap: 8 }}>
+                                            <Link
+                                                className="btn btn-accent"
+                                                to={
+                                                    appliedDate && appliedTime
+                                                        ? `/spots/${spot.id}?date=${encodeURIComponent(appliedDate)}&time=${encodeURIComponent(appliedTime)}&duration=${encodeURIComponent(String(appliedDuration))}`
+                                                        : `/spots/${spot.id}`
+                                                }
+                                                onClick={(e) => e.stopPropagation()}
+                                            >
+                                                View details
+                                            </Link>
+                                            {(spot as any).allow_points && Number((spot as any).points_cost ?? 0) > 0 && (
+                                                <span className="badge badge--rose">Available with points</span>
+                                            )}
+                                        </div>
+                                        <div style={{ display: "grid", gap: 6, justifyItems: "end" }}>
+                                            {(spot as any).allow_points && Number((spot as any).points_cost ?? 0) > 0 && (
+                                                <div className="pill pill--price" style={{ background: "transparent", border: "none", padding: 0 }}>
+                                                    {(spot as any).points_cost} points
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </button>
@@ -609,9 +685,6 @@ export default function HomePage() {
                                     placeholder="Try: Upper Street, garage, cheap…"
                                 />
                             </label>
-                            <button className="btn" onClick={applySearch} type="button">
-                                Search
-                            </button>
                             <button className="btn btn-primary" onClick={requestLocation} type="button">
                                 Use my location
                             </button>
@@ -634,7 +707,7 @@ export default function HomePage() {
                     </div>
                 )}
                 <SpotsMap
-                    spots={sorted.map((x) => x.spot)}
+                    spots={timeFilteredByBookings.map((x) => x.spot)}
                     center={mapCenter}
                     selectedId={selectedId}
                     onSelect={(id) => setSelectedId(id)}
@@ -671,6 +744,32 @@ function extractAvailabilityRules(spot: ParkingSpot) {
     return rules;
 }
 
+function isExplicitAllDay(
+    spot: ParkingSpot,
+    rules: Array<{ dow: number; start: string; end: string }>
+) {
+    const a: any = (spot as any).availability_json;
+    if (a?.type === "24_7") return true;
+    if (a?.type === "same_everyday" && a.start && a.end) {
+        return a.start === "00:00" && a.end === "23:59";
+    }
+    if (a?.type === "custom_weekly" && Array.isArray(a.rules)) {
+        return rules.length === 7 && rules.every((r) => r.start === "00:00" && r.end === "23:59");
+    }
+
+    if ((spot as any).availability_type === "24_7") return true;
+    if ((spot as any).availability_type === "weekly") {
+        const ds = (spot as any).daily_start?.slice(0, 5);
+        const de = (spot as any).daily_end?.slice(0, 5);
+        const days = (spot as any).available_days;
+        if (Array.isArray(days) && days.length === 7 && ds && de) {
+            return ds === "00:00" && de === "23:59";
+        }
+    }
+
+    return false;
+}
+
 function setTime(d: Date, hhmm: string) {
     const [h, m] = hhmm.split(":").map((x) => Number(x));
     const out = new Date(d);
@@ -683,6 +782,12 @@ function isSpotAvailableFor(spot: ParkingSpot, start: Date, end: Date) {
 
     const rules = extractAvailabilityRules(spot);
     if (!rules.length) return true;
+
+    const a: any = (spot as any).availability_json;
+    const dateFrom = a?.date_from ? new Date(`${a.date_from}T00:00:00`) : null;
+    const dateTo = a?.date_to ? new Date(`${a.date_to}T23:59:59`) : null;
+    if (dateFrom && start < dateFrom) return false;
+    if (dateTo && end > dateTo) return false;
 
     const dow = start.getDay();
     const dayRules = rules.filter((r) => r.dow === dow);

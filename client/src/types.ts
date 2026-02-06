@@ -11,6 +11,8 @@ export type ParkingSpot = {
     price_unit?: "hour" | "day" | "week";
     auction_end?: string | null;
     auction_start_price_gbp?: number | null;
+    auction_highest_pending_gbp?: number | null;
+    auction_sold_out?: boolean;
     parking_type?: "private" | "public";
     capacity_total?: number;
     capacity_available?: number;

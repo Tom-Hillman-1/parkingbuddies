@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import logoFull from "../assets/logo.png";
 
 export default function LoginPage() {
     const { login } = useAuth();
@@ -48,12 +49,15 @@ export default function LoginPage() {
 
     return (
         <div className="container authPage">
-            <div className="pageHeader">
-                <div className="heroKicker">WELCOME BACK</div>
-                <div className="heroTitle">Log in to ParkingBuddies</div>
-                <div className="heroSub muted">
-                    Jump back into your bookings, listings, and rewards.
+            <div className="pageHeaderWithLogo">
+                <div className="pageHeader">
+                    <div className="heroKicker">WELCOME BACK</div>
+                    <div className="heroTitle">Log in to ParkingBuddies</div>
+                    <div className="heroSub muted">
+                        Jump back into your bookings, listings, and rewards.
+                    </div>
                 </div>
+                <img className="pageHeaderLogo" src={logoFull} alt="ParkingBuddies logo" />
             </div>
 
             <div className="authGrid authGrid--single">

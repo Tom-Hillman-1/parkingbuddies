@@ -487,7 +487,7 @@ export default function CreateListingPage() {
 
         return (
             <div className="container">
-                <div className="pageHeader">
+                <div className="pageHeader formNarrow">
                     <div className="heroKicker">LIST YOUR SPACE</div>
                     <div className="heroTitle">{isEdit ? "Edit listing" : "Create a listing"}</div>
                     <div className="heroSub muted">

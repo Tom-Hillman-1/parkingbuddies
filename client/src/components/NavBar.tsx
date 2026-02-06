@@ -1,15 +1,25 @@
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import logoMark from "../assets/logo_logo.png";
 
 export default function NavBar() {
     const { user, token, isLoading, logout } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
+    const isHome = location.pathname === "/";
+    const isCreateListing = location.pathname.startsWith("/create-listing");
+    const isAuth = location.pathname === "/login" || location.pathname === "/signup";
 
     return (
         <div className="nav">
-            <div className="nav-inner">
+            <div
+                className={`nav-inner${isHome ? " nav-inner--home" : ""}${isCreateListing ? " nav-inner--narrow" : ""}${isAuth ? " nav-inner--auth" : ""}`}
+            >
                 <Link to="/" className="nav-left">
-                    <span className="brand">ParkingBuddies</span>
+                    <span className="brand">
+                        <img className="brand-logo brand-logo--mark" src={logoMark} alt="ParkingBuddies logo" />
+                        <span>ParkingBuddies</span>
+                    </span>
                 </Link>
 
                 <div className="nav-links">

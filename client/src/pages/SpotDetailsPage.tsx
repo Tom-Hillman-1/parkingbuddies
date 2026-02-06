@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import { apiGet, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import SpotsMap from "../components/SpotsMap";
@@ -101,6 +101,7 @@ function BidCardForm({
 
 export default function SpotDetailsPage() {
     const { id } = useParams<{ id: string }>();
+    const [searchParams] = useSearchParams();
     const { token, user } = useAuth();
 
     const [spot, setSpot] = useState<ParkingSpot | null>(null);
@@ -126,12 +127,14 @@ export default function SpotDetailsPage() {
     const [showBidAuthorized, setShowBidAuthorized] = useState(false);
     const [nextSlotOptions, setNextSlotOptions] = useState<Date[]>([]);
     const [auctionInfo, setAuctionInfo] = useState<{
-        highest_bid_gbp: number;
+        highest_pending_bid_gbp: number;
         auction_end?: string | null;
         auction_start_price_gbp?: number | null;
-        bids?: Array<{ id: string; amount_gbp: number; status: string; bidder_name?: string; bidder_email?: string }>;
+        pending_bids?: Array<{ id: string; amount_gbp: number; status: string; start_time?: string; end_time?: string; bidder_name?: string; bidder_email?: string }>;
+        approved_bids?: Array<{ id: string; amount_gbp: number; status: string; start_time?: string; end_time?: string; created_at?: string }>;
+        sold_out?: boolean;
     } | null>(null);
-    const [auctionMe, setAuctionMe] = useState<{ status?: string; amount_gbp?: number } | null>(null);
+    const [auctionMe, setAuctionMe] = useState<{ status?: string; amount_gbp?: number; start_time?: string; end_time?: string } | null>(null);
 
     useEffect(() => {
         if (!id) return;
@@ -143,6 +146,24 @@ export default function SpotDetailsPage() {
             .catch((e) => setErr(e.message || "Failed to load spot"))
             .finally(() => setLoading(false));
     }, [id]);
+
+    useEffect(() => {
+        const date = searchParams.get("date");
+        const time = searchParams.get("time");
+        const duration = searchParams.get("duration");
+        if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            setStartDate(date);
+        }
+        if (time && /^\d{2}:\d{2}$/.test(time)) {
+            setStartTime(time);
+        }
+        if (duration) {
+            const minutes = Number(duration);
+            if (Number.isFinite(minutes) && minutes > 0) {
+                setDurationMinutes(minutes);
+            }
+        }
+    }, [searchParams]);
 
     useEffect(() => {
         if (!id) return;
@@ -188,6 +209,17 @@ export default function SpotDetailsPage() {
 
     useEffect(() => {
         if (!spot || spot.mode !== "auction") return;
+        const max = getMaxDurationMinutes(spot, startDate, startTime);
+        const options = getDurationOptions(max);
+        if (!options.length) return;
+        const last = options[options.length - 1]?.minutes ?? durationMinutes;
+        if (durationMinutes > last) {
+            setDurationMinutes(last);
+        }
+    }, [spot, startDate, startTime, durationMinutes]);
+
+    useEffect(() => {
+        if (!spot || spot.mode !== "auction") return;
         const id = setInterval(() => {
             refreshAuction();
         }, 8000);
@@ -197,9 +229,14 @@ export default function SpotDetailsPage() {
 
 
     const price = useMemo(() => Number(spot?.price_gbp ?? 0), [spot]);
+    const highestPending = Number(auctionInfo?.highest_pending_bid_gbp ?? 0);
+    const auctionStart = Number(spot?.auction_start_price_gbp ?? 0);
+    const auctionPriceLabel = highestPending > 0
+        ? `Highest pending £${highestPending.toFixed(2)}`
+        : `Start £${auctionStart.toFixed(2)}`;
     const priceLabel =
         spot?.mode === "auction"
-            ? `Auction start £${Number(spot.auction_start_price_gbp ?? 0).toFixed(2)}`
+            ? auctionPriceLabel
             : price > 0
                 ? `£${price.toFixed(2)}`
                 : "Free";
@@ -210,6 +247,7 @@ export default function SpotDetailsPage() {
 
     const canBook = !!token;
     const isOwner = !!user && !!spot && user.id === spot.owner_user_id;
+    const auctionSoldOut = Boolean(auctionInfo?.sold_out);
     const nextWindow = useMemo(() => (spot ? getNextAvailableWindow(spot, spotBookings) : null), [spot, spotBookings]);
 
     function estimateTotal(startIso: string, endIso: string) {
@@ -267,6 +305,18 @@ export default function SpotDetailsPage() {
             return;
         }
         setSlot(slots[0], durationMinutes, "Next available slot applied.");
+        setNextSlotOptions(slots);
+    };
+
+    const findNextHourSlots = () => {
+        if (!spot) return;
+        const slots = getNextNonOverlappingSlots(spot, spotBookings, 60, 4);
+        if (!slots.length) {
+            setBidMsg("No 1-hour slots available.");
+            return;
+        }
+        setSlot(slots[0], 60, "Next 1-hour slot applied.");
+        setBidMsg("Next 1-hour slot applied.");
         setNextSlotOptions(slots);
     };
 
@@ -333,6 +383,10 @@ export default function SpotDetailsPage() {
 
     async function placeBid() {
         if (!token || !spot) return;
+        if (auctionSoldOut) {
+            setBidMsg("This auction is sold out.");
+            return;
+        }
         const amount = Number(bidAmount);
         if (!Number.isFinite(amount) || amount <= 0) {
             setBidMsg("Enter a valid bid amount.");
@@ -342,12 +396,23 @@ export default function SpotDetailsPage() {
             setBidMsg("Missing payment authorization. Please try again.");
             return;
         }
+        const bidStart = new Date(`${startDate}T${startTime}`);
+        const bidEnd = addMinutes(bidStart, durationMinutes);
+        if (Number.isNaN(bidStart.getTime()) || Number.isNaN(bidEnd.getTime()) || !(bidStart < bidEnd)) {
+            setBidMsg("Choose a valid time slot.");
+            return;
+        }
         setBidBusy(true);
         setBidMsg(null);
         try {
             await apiPost<{ auction: any }>(
                 `/auctions/${spot.id}/bid`,
-                { amount_gbp: amount, payment_intent_id: paymentIntentId },
+                {
+                    amount_gbp: amount,
+                    payment_intent_id: paymentIntentId,
+                    start_time: bidStart.toISOString(),
+                    end_time: bidEnd.toISOString(),
+                },
                 token
             );
             setBidMsg("Bid placed. Awaiting owner approval.");
@@ -383,12 +448,15 @@ export default function SpotDetailsPage() {
 
     const pill =
         spot.mode === "free" ? "Free"
-            : spot.mode === "rent" ? `£${price.toFixed(2)}` : "Auction";
+            : spot.mode === "rent" ? `£${price.toFixed(2)}` : auctionPriceLabel;
 
     const showPoints = !!spot.allow_points && !!spot.points_cost;
     const canUsePoints = showPoints && spot.mode !== "auction";
     const pointsLabel = showPoints ? `${spot.points_cost} pts ${priceUnitLabel(price)}` : "";
     const availabilityLabel = formatAvailability(spot);
+
+    const approvedBids = auctionInfo?.approved_bids ?? [];
+    const pendingBids = auctionInfo?.pending_bids ?? [];
 
     const bookingPanel = (
         <div className="card spotBook">
@@ -509,7 +577,16 @@ export default function SpotDetailsPage() {
                 >
                     Request booking
                 </button>
-                {actionMsg && <div className="tiny">{actionMsg}</div>}
+                {actionMsg && (
+                    <div className="tiny">
+                        {actionMsg}{" "}
+                        {booking && (
+                            <Link to="/dashboard?tab=myBookings" style={{ textDecoration: "underline" }}>
+                                View in dashboard
+                            </Link>
+                        )}
+                    </div>
+                )}
             </div>
 
             {conflicts.length > 0 && (
@@ -617,6 +694,16 @@ export default function SpotDetailsPage() {
                         <div className="meta">
                             <span className="badge">Listing: {spot.mode}</span>
                             <span className="badge">Location: {spot.address_text}</span>
+                            {spot.mode === "auction" && (
+                                <span className="badge">
+                                    {highestPending > 0
+                                        ? `Highest pending £${highestPending.toFixed(2)}`
+                                        : `Start £${auctionStart.toFixed(2)}`}
+                                </span>
+                            )}
+                            {spot.mode === "auction" && auctionSoldOut && (
+                                <span className="badge badge--rose">Sold out</span>
+                            )}
                             {showPoints && <span className="badge">Points: {pointsLabel}</span>}
                         </div>
                     </div>
@@ -699,11 +786,22 @@ export default function SpotDetailsPage() {
                                     You’re the owner of this listing.
                                 </div>
                             )}
+                            {auctionSoldOut && (
+                                <div className="spotAlert">
+                                    This auction is sold out. No time slots remaining.
+                                </div>
+                            )}
 
                             <div className="rowInline">
                                 <span className="badge badge--warm">
                                     Start £{Number(spot.auction_start_price_gbp ?? 0).toFixed(2)}
                                 </span>
+                                {highestPending > 0 && (
+                                    <span className="badge">
+                                        Highest pending £{highestPending.toFixed(2)}
+                                    </span>
+                                )}
+                                {auctionSoldOut && <span className="badge badge--rose">Sold out</span>}
                                 {spot.auction_end && (
                                     <span className="badge badge--rose">
                                         Ends {formatLocalDateTime(new Date(spot.auction_end))}
@@ -711,12 +809,45 @@ export default function SpotDetailsPage() {
                                 )}
                             </div>
 
-                            <div className="rowInline">
-                                <span className="tiny muted">Highest bid</span>
-                                <span className="badge">
-                                    £{Number(auctionInfo?.highest_bid_gbp ?? 0).toFixed(2)}
-                                </span>
-                            </div>
+                            {approvedBids.length > 0 && (
+                                <div className="stack" style={{ marginTop: 8 }}>
+                                    <div className="tiny muted">Recent approved bids</div>
+                                    {approvedBids.map((b) => (
+                                        <div key={b.id} className="card spotBookingCard">
+                                            <div className="rowInline">
+                                                <span className="badge badge--green">£{Number(b.amount_gbp).toFixed(2)}</span>
+                                                <span className="badge">Approved</span>
+                                            </div>
+                                            <div className="tiny muted" style={{ marginTop: 6 }}>
+                                                {formatBidWindow(b.start_time, b.end_time)}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {pendingBids.length > 0 && (
+                                <div className="stack" style={{ marginTop: 8 }}>
+                                    <div className="tiny muted">Current bids</div>
+                                    {pendingBids.slice(0, 5).map((b) => (
+                                        <div key={b.id} className="card spotBookingCard">
+                                            <div className="rowInline">
+                                                <span className="badge">£{Number(b.amount_gbp).toFixed(2)}</span>
+                                                <span className="badge">{b.status}</span>
+                                            </div>
+                                            <div className="tiny muted" style={{ marginTop: 6 }}>
+                                                {formatBidWindow(b.start_time, b.end_time)}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {approvedBids.length === 0 && pendingBids.length === 0 && (
+                                <div className="muted tiny" style={{ marginTop: 8 }}>
+                                    No bids yet. Starting price £{Number(spot.auction_start_price_gbp ?? 0).toFixed(2)}.
+                                </div>
+                            )}
 
                             {auctionMe?.status && (
                                 <div className="card spotBookingCard">
@@ -730,9 +861,19 @@ export default function SpotDetailsPage() {
                                                     ? "Won — awaiting owner approval"
                                                     : auctionMe.status}
                                     </div>
+                                    <div className="tiny muted" style={{ marginTop: 6 }}>
+                                        <Link to="/dashboard?tab=myAuctionBids" style={{ textDecoration: "underline" }}>
+                                            View in dashboard
+                                        </Link>
+                                    </div>
                                     {auctionMe.amount_gbp != null && (
                                         <div className="tiny muted" style={{ marginTop: 6 }}>
                                             £{Number(auctionMe.amount_gbp).toFixed(2)}
+                                        </div>
+                                    )}
+                                    {auctionMe.start_time && auctionMe.end_time && (
+                                        <div className="tiny muted" style={{ marginTop: 6 }}>
+                                            {formatBidWindow(auctionMe.start_time, auctionMe.end_time)}
                                         </div>
                                     )}
                                 </div>
@@ -740,6 +881,83 @@ export default function SpotDetailsPage() {
 
                             {!isOwner && (
                                 <>
+                                    <div className="rowInline" style={{ marginBottom: 6 }}>
+                                        <button
+                                            type="button"
+                                            className="btn"
+                                            onClick={findNextHourSlots}
+                                            disabled={!canBook || busy || bidBusy || auctionSoldOut}
+                                        >
+                                            Next 1-hour slot
+                                        </button>
+                                        <div className="tiny muted">We’ll place the nearest available 1-hour slot.</div>
+                                    </div>
+                                    {bidMsg && (
+                                        <div className="tiny" style={{ marginBottom: 6 }}>
+                                            {bidMsg}
+                                        </div>
+                                    )}
+                                    {nextSlotOptions.length > 1 && (
+                                        <div className="rowInline" style={{ marginTop: 6, flexWrap: "wrap" }}>
+                                            {nextSlotOptions.slice(1, 4).map((d, i) => (
+                                                <button
+                                                    key={`${d.toISOString()}-${i}`}
+                                                    type="button"
+                                                    className="btn"
+                                                    onClick={() => setSlot(d, 60, "Alternate 1-hour slot applied.")}
+                                                    disabled={!canBook || busy || bidBusy || auctionSoldOut}
+                                                >
+                                                    {formatSlotLabel(d, 60)}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    <div className="row">
+                                        <label>
+                                            <span>Start date</span>
+                                            <input
+                                                className="input"
+                                                type="date"
+                                                value={startDate}
+                                                onChange={(e) => setStartDate(e.target.value)}
+                                                disabled={!canBook || busy || bidBusy || auctionSoldOut}
+                                            />
+                                        </label>
+                                        <label>
+                                            <span>Start time</span>
+                                            <input
+                                                className="input"
+                                                type="time"
+                                                value={startTime}
+                                                onChange={(e) => setStartTime(e.target.value)}
+                                                disabled={!canBook || busy || bidBusy || auctionSoldOut}
+                                            />
+                                        </label>
+                                    </div>
+                                    <label>
+                                        <span>Duration</span>
+                                        <select
+                                            className="input"
+                                            value={durationMinutes}
+                                            onChange={(e) => setDurationMinutes(Number(e.target.value))}
+                                            disabled={!canBook || busy || bidBusy || auctionSoldOut}
+                                        >
+                                            {(() => {
+                                                const max = getMaxDurationMinutes(spot, startDate, startTime);
+                                                const options = getDurationOptions(max);
+                                                if (!options.length) {
+                                                    return <option value={15}>No valid durations</option>;
+                                                }
+                                                return options.map((o) => (
+                                                    <option key={o.minutes} value={o.minutes}>
+                                                        {o.label}
+                                                    </option>
+                                                ));
+                                            })()}
+                                        </select>
+                                    </label>
+
                                     <label>
                                         <span>Your bid (£)</span>
                                         <input
@@ -749,7 +967,7 @@ export default function SpotDetailsPage() {
                                             step="0.5"
                                             value={bidAmount}
                                             onChange={(e) => setBidAmount(e.target.value)}
-                                            disabled={!canBook || busy || bidBusy}
+                                            disabled={!canBook || busy || bidBusy || auctionSoldOut}
                                             placeholder="e.g. 12.00"
                                         />
                                     </label>
@@ -757,12 +975,11 @@ export default function SpotDetailsPage() {
                                     <div className="rowInline">
                                         <button
                                             onClick={startBidAuthorization}
-                                            disabled={!canBook || busy || bidBusy}
+                                            disabled={!canBook || busy || bidBusy || auctionSoldOut}
                                             className="btn btn-primary"
                                         >
                                             Continue to card
                                         </button>
-                                        {bidMsg && <div className="tiny">{bidMsg}</div>}
                                     </div>
 
                                     {clientSecret && (
@@ -774,13 +991,25 @@ export default function SpotDetailsPage() {
                                             />
                                         </Elements>
                                     )}
+                                    {showBidAuthorized && (
+                                        <div className="rowInline" style={{ marginTop: 10 }}>
+                                            <button
+                                                onClick={placeBid}
+                                                disabled={!canBook || busy || bidBusy || auctionSoldOut}
+                                                className="btn btn-primary"
+                                            >
+                                                Place bid
+                                            </button>
+                                            <div className="tiny muted">Authorization complete. Submit your bid.</div>
+                                        </div>
+                                    )}
                                 </>
                             )}
 
-                            {isOwner && auctionInfo?.bids?.length ? (
+                            {isOwner && pendingBids.length ? (
                                 <div className="stack">
                                     <div className="tiny muted">Incoming bids</div>
-                                    {auctionInfo.bids.map((b) => (
+                                    {pendingBids.map((b) => (
                                         <div key={b.id} className="card spotBookingCard">
                                             <div className="rowInline">
                                                 <span className="badge">£{Number(b.amount_gbp).toFixed(2)}</span>
@@ -788,6 +1017,9 @@ export default function SpotDetailsPage() {
                                             </div>
                                             <div className="tiny muted" style={{ marginTop: 6 }}>
                                                 {b.bidder_name ?? b.bidder_email ?? "Bidder"}
+                                            </div>
+                                            <div className="tiny muted" style={{ marginTop: 6 }}>
+                                                {formatBidWindow(b.start_time, b.end_time)}
                                             </div>
                                             <div className="rowInline" style={{ marginTop: 10 }}>
                                                 <button
@@ -810,7 +1042,10 @@ export default function SpotDetailsPage() {
                     )}
                     {spot.mode === "auction" && (auctionMe?.status === "accepted" || auctionMe?.status === "won") && (
                         <div className="spotAlert" style={{ marginTop: 12 }}>
-                            Your bid was accepted. Your booking is confirmed for the full listing availability window.
+                            Your bid was accepted. Your booking is confirmed for the selected time slot.{" "}
+                            <Link to="/dashboard?tab=myBookings" style={{ textDecoration: "underline" }}>
+                                View in dashboard
+                            </Link>
                         </div>
                     )}
                 </main>
@@ -936,8 +1171,55 @@ function formatSlotLabel(start: Date, minutes: number) {
     return `${dowLabel(start.getDay())} ${localTimeStr(start)}–${localTimeStr(end)}`;
 }
 
+function formatBidWindow(start?: string, end?: string) {
+    if (!start || !end) return "Time not set";
+    return `${formatLocalDateTime(new Date(start))} → ${formatLocalDateTime(new Date(end))}`;
+}
+
+function getDurationOptions(maxMinutes = 30 * 24 * 60) {
+    const options: Array<{ label: string; minutes: number }> = [];
+    for (let m = 15; m <= 8 * 60; m += 15) {
+        const hours = m / 60;
+        if (m <= maxMinutes) {
+            options.push({ label: m < 60 ? `${m} minutes` : `${hours} hour${hours === 1 ? "" : "s"}`, minutes: m });
+        }
+    }
+    for (let h = 9; h <= 23; h += 1) {
+        const minutes = h * 60;
+        if (minutes <= maxMinutes) {
+            options.push({ label: `${h} hours`, minutes });
+        }
+    }
+    for (let d = 1; d <= 30; d += 1) {
+        const minutes = d * 24 * 60;
+        if (minutes <= maxMinutes) {
+            options.push({ label: `${d} day${d === 1 ? "" : "s"}`, minutes });
+        }
+    }
+    return options;
+}
+
+function getMaxDurationMinutes(spot: ParkingSpot, startDate: string, startTime: string) {
+    const a: any = spot.availability_json;
+    const dateFrom = a?.date_from ? new Date(`${a.date_from}T00:00:00`) : null;
+    const dateTo = a?.date_to ? new Date(`${a.date_to}T23:59:59`) : null;
+
+    let start = new Date(`${startDate}T${startTime}`);
+    if (Number.isNaN(start.getTime())) {
+        start = dateFrom ? new Date(dateFrom) : new Date();
+    }
+    if (dateFrom && start < dateFrom) start = new Date(dateFrom);
+
+    let maxMinutes = 30 * 24 * 60;
+    if (dateTo) {
+        const diff = Math.floor((dateTo.getTime() - start.getTime()) / 60000);
+        maxMinutes = Math.min(maxMinutes, diff);
+    }
+    return Math.max(0, maxMinutes);
+}
+
 function getNextAvailableWindow(spot: ParkingSpot, bookings: Booking[]) {
-    const windows = buildAvailabilityWindows(spot, 14);
+    const windows = buildAvailabilityWindows(spot, 30);
     const now = new Date();
     const normalized = bookings
         .filter((b) => b.start_time && b.end_time)
@@ -956,7 +1238,7 @@ function getNextAvailableWindow(spot: ParkingSpot, bookings: Booking[]) {
 }
 
 function getNextSlots(spot: ParkingSpot, bookings: Booking[], minutes: number, count = 3) {
-    const windows = buildAvailabilityWindows(spot, 14);
+    const windows = buildAvailabilityWindows(spot, 30);
     const now = new Date();
     const normalized = bookings
         .filter((b) => b.start_time && b.end_time)
@@ -978,6 +1260,20 @@ function getNextSlots(spot: ParkingSpot, bookings: Booking[], minutes: number, c
     return results;
 }
 
+function getNextNonOverlappingSlots(spot: ParkingSpot, bookings: Booking[], minutes: number, count = 4) {
+    const candidates = getNextSlots(spot, bookings, minutes, Math.max(count * 4, 12));
+    const results: Date[] = [];
+    let lastEnd: Date | null = null;
+    for (const c of candidates) {
+        if (!lastEnd || c >= lastEnd) {
+            results.push(c);
+            lastEnd = addMinutes(c, minutes);
+        }
+        if (results.length >= count) break;
+    }
+    return results;
+}
+
 function buildAvailabilityWindows(spot: ParkingSpot, daysForward: number) {
     const rules = extractAvailabilityRules(spot);
     if (!rules.length) return [];
@@ -987,20 +1283,24 @@ function buildAvailabilityWindows(spot: ParkingSpot, daysForward: number) {
     const dateTo = a?.date_to ? new Date(`${a.date_to}T23:59:59`) : null;
 
     const now = new Date();
+    const startDay = dateFrom && dateFrom > now ? new Date(dateFrom) : new Date(now);
+    startDay.setHours(0, 0, 0, 0);
+    const endCap = new Date(startDay);
+    endCap.setDate(endCap.getDate() + daysForward);
+    const endDay = dateTo && dateTo < endCap ? new Date(dateTo) : endCap;
+    endDay.setHours(23, 59, 59, 999);
+
     const windows: Array<{ start: Date; end: Date }> = [];
-    for (let i = 0; i <= daysForward; i += 1) {
-        const day = new Date(now);
-        day.setDate(day.getDate() + i);
-        day.setHours(0, 0, 0, 0);
+    for (let day = new Date(startDay); day <= endDay; day.setDate(day.getDate() + 1)) {
+        const d = new Date(day);
+        if (dateFrom && d < dateFrom) continue;
+        if (dateTo && d > dateTo) continue;
 
-        if (dateFrom && day < dateFrom) continue;
-        if (dateTo && day > dateTo) continue;
-
-        const dow = day.getDay();
+        const dow = d.getDay();
         const dayRules = rules.filter((r) => r.dow === dow);
         for (const r of dayRules) {
-            const start = setTime(day, r.start);
-            const end = setTime(day, r.end);
+            const start = setTime(d, r.start);
+            const end = setTime(d, r.end);
             if (end <= now) continue;
             windows.push({ start, end });
         }

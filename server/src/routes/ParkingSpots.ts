@@ -64,9 +64,121 @@ function safeMoney(x: unknown) {
     return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
+
 function safeInt(x: unknown) {
     const n = Number(x ?? 0);
     return Number.isFinite(n) ? Math.floor(n) : 0;
+}
+
+let auctionSchemaReady = false;
+async function ensureAuctionBidSchema() {
+    if (auctionSchemaReady) return;
+    try {
+        await pool.query(
+            `ALTER TABLE auction_bids
+             ADD COLUMN IF NOT EXISTS start_time timestamptz,
+             ADD COLUMN IF NOT EXISTS end_time timestamptz`
+        );
+        auctionSchemaReady = true;
+    } catch {
+        // ignore
+    }
+}
+
+function extractAvailabilityRules(spot: any) {
+    const rules: Array<{ dow: number; start: string; end: string }> = [];
+    const a = spot?.availability_json;
+
+    if (a?.type === "24_7") {
+        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: "00:00", end: "23:59" }));
+    }
+    if (a?.type === "same_everyday" && a.start && a.end) {
+        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: a.start, end: a.end }));
+    }
+    if (a?.type === "custom_weekly" && Array.isArray(a.rules)) {
+        return a.rules.slice();
+    }
+
+    if (spot?.availability_type === "24_7") {
+        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: "00:00", end: "23:59" }));
+    }
+    if (spot?.availability_type === "weekly" && Array.isArray(spot?.available_days)) {
+        const ds = spot?.daily_start?.slice(0, 5) ?? "00:00";
+        const de = spot?.daily_end?.slice(0, 5) ?? "23:59";
+        return spot.available_days.map((dow: number) => ({ dow, start: ds, end: de }));
+    }
+    return rules;
+}
+
+function setTime(d: Date, hhmm: string) {
+    const [h, m] = hhmm.split(":").map((x) => Number(x));
+    const out = new Date(d);
+    out.setHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0);
+    return out;
+}
+
+function buildAvailabilityWindows(spot: any, maxDaysForward = 30) {
+    const rules = extractAvailabilityRules(spot);
+    if (!rules.length) return [];
+
+    const a: any = spot?.availability_json;
+    const dateFrom = a?.date_from ? new Date(`${a.date_from}T00:00:00`) : null;
+    const dateTo = a?.date_to ? new Date(`${a.date_to}T23:59:59`) : null;
+
+    const now = new Date();
+    const maxEnd = new Date(now.getTime() + maxDaysForward * 24 * 60 * 60 * 1000);
+    const startDay = dateFrom && dateFrom > now ? new Date(dateFrom) : new Date(now);
+    startDay.setHours(0, 0, 0, 0);
+
+    const hardEnd = dateTo && dateTo < maxEnd ? new Date(dateTo) : maxEnd;
+    hardEnd.setHours(23, 59, 59, 999);
+
+    const windows: Array<{ start: Date; end: Date }> = [];
+    for (let d = new Date(startDay); d <= hardEnd; d.setDate(d.getDate() + 1)) {
+        const day = new Date(d);
+        const dow = day.getDay();
+        const dayRules = rules.filter((r) => r.dow === dow);
+        for (const r of dayRules) {
+            const start = setTime(day, r.start);
+            const end = setTime(day, r.end);
+            if (end <= now) continue;
+            windows.push({ start, end });
+        }
+    }
+    return windows;
+}
+
+function subtractBookings(
+    window: { start: Date; end: Date },
+    bookings: Array<{ start: Date; end: Date }>
+) {
+    let segments: Array<{ start: Date; end: Date }> = [{ ...window }];
+    for (const b of bookings) {
+        if (b.end <= window.start || b.start >= window.end) continue;
+        const next: Array<{ start: Date; end: Date }> = [];
+        for (const seg of segments) {
+            if (b.end <= seg.start || b.start >= seg.end) {
+                next.push(seg);
+            } else {
+                if (b.start > seg.start) next.push({ start: seg.start, end: b.start });
+                if (b.end < seg.end) next.push({ start: b.end, end: seg.end });
+            }
+        }
+        segments = next;
+    }
+    return segments;
+}
+
+function remainingMinutes(spot: any, approved: Array<{ start: Date; end: Date }>) {
+    const windows = buildAvailabilityWindows(spot, 30);
+    let total = 0;
+    for (const w of windows) {
+        const segments = subtractBookings(w, approved);
+        for (const s of segments) {
+            total += Math.max(0, (s.end.getTime() - s.start.getTime()) / 60000);
+        }
+    }
+    return total;
 }
 
 /**
@@ -575,13 +687,52 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
  */
 router.get("/", async (_req, res) => {
     try {
+        await ensureAuctionBidSchema();
         const r = await pool.query(
             `SELECT *
        FROM parking_spots
        WHERE is_active = true
        ORDER BY created_at DESC`
         );
-        return res.json({ ok: true, parking_spots: r.rows });
+        const spots = r.rows ?? [];
+        const auctionIds = spots.filter((s: any) => s.mode === "auction").map((s: any) => s.id);
+
+        if (auctionIds.length) {
+            const bidsR = await pool.query(
+                `SELECT parking_spot_id, amount_gbp, status, start_time, end_time
+                 FROM auction_bids
+                 WHERE parking_spot_id = ANY($1)`,
+                [auctionIds]
+            );
+
+            const highestPending = new Map<string, number>();
+            const approvedBySpot = new Map<string, Array<{ start: Date; end: Date }>>();
+
+            for (const b of bidsR.rows) {
+                const spotId = b.parking_spot_id as string;
+                const amt = safeMoney(b.amount_gbp);
+                if (b.status === "pending") {
+                    const prev = highestPending.get(spotId) ?? 0;
+                    if (amt > prev) highestPending.set(spotId, amt);
+                }
+                if (b.status === "accepted" && b.start_time && b.end_time) {
+                    const arr = approvedBySpot.get(spotId) ?? [];
+                    arr.push({ start: new Date(b.start_time), end: new Date(b.end_time) });
+                    approvedBySpot.set(spotId, arr);
+                }
+            }
+
+            for (const s of spots) {
+                if (s.mode !== "auction") continue;
+                const hp = highestPending.get(s.id) ?? 0;
+                const approved = approvedBySpot.get(s.id) ?? [];
+                const remaining = remainingMinutes(s, approved);
+                s.auction_highest_pending_gbp = hp;
+                s.auction_sold_out = remaining < 16;
+            }
+        }
+
+        return res.json({ ok: true, parking_spots: spots });
     } catch (e) {
         return res.status(500).json({ ok: false, error: String(e) });
     }

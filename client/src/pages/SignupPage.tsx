@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import logoFull from "../assets/logo.png";
 
 export default function SignupPage() {
     const { signup } = useAuth();
@@ -62,12 +63,15 @@ export default function SignupPage() {
 
     return (
         <div className="container authPage">
-            <div className="pageHeader">
-                <div className="heroKicker">GET STARTED</div>
-                <div className="heroTitle">Create your ParkingBuddies account</div>
-                <div className="heroSub muted">
-                    Set up your profile, list spaces, and start booking in minutes.
+            <div className="pageHeaderWithLogo">
+                <div className="pageHeader">
+                    <div className="heroKicker">GET STARTED</div>
+                    <div className="heroTitle">Create your ParkingBuddies account</div>
+                    <div className="heroSub muted">
+                        Set up your profile, list spaces, and start booking in minutes.
+                    </div>
                 </div>
+                <img className="pageHeaderLogo" src={logoFull} alt="ParkingBuddies logo" />
             </div>
 
             <div className="authGrid authGrid--single">
