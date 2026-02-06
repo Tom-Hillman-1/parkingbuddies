@@ -20,6 +20,11 @@ async function ensureAuctionBidSchema() {
              ADD COLUMN IF NOT EXISTS start_time timestamptz,
              ADD COLUMN IF NOT EXISTS end_time timestamptz`
         );
+        await pool.query(
+            `ALTER TABLE auction_bids
+             ALTER COLUMN status SET DEFAULT 'pending'`
+        );
+        await pool.query(`UPDATE auction_bids SET status = 'pending' WHERE status IS NULL`);
         auctionSchemaReady = true;
     } catch {
         // Best-effort: if this fails, later queries will surface errors.
@@ -524,8 +529,8 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
         }
 
         await client.query(
-            `INSERT INTO auction_bids (parking_spot_id, bidder_user_id, amount_gbp, payment_intent_id, start_time, end_time)
-             VALUES ($1,$2,$3,$4,$5,$6)`,
+            `INSERT INTO auction_bids (parking_spot_id, bidder_user_id, amount_gbp, payment_intent_id, start_time, end_time, status)
+             VALUES ($1,$2,$3,$4,$5,$6,'pending')`,
             [spotId, req.userId, amount.toFixed(2), paymentIntentId, start.toISOString(), end.toISOString()]
         );
 
