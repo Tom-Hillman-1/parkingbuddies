@@ -11,9 +11,18 @@ const router = Router();
 router.get("/me", requireAuth, async (req: AuthRequest, res) => {
     try {
         const userR = await pool.query(
-            `SELECT id, email, name, points_balance, created_at, updated_at
-       FROM users
-       WHERE id = $1`,
+            `SELECT id,
+                    email,
+                    name,
+                    points_balance,
+                    stripe_account_id,
+                    stripe_charges_enabled,
+                    stripe_payouts_enabled,
+                    stripe_details_submitted,
+                    created_at,
+                    updated_at
+             FROM users
+             WHERE id = $1`,
             [req.userId]
         );
 
@@ -34,6 +43,26 @@ router.get("/me", requireAuth, async (req: AuthRequest, res) => {
        WHERE driver_user_id = $1`,
             [req.userId]
         );
+
+        const pointsR = await pool.query(
+            `SELECT COALESCE(SUM(CASE WHEN type = 'earn' THEN amount ELSE -amount END), 0) AS balance
+             FROM reward_transactions
+             WHERE user_id = $1`,
+            [req.userId]
+        );
+        const computed = Number(pointsR.rows[0]?.balance ?? 0);
+        const current = Number(userR.rows[0].points_balance ?? 0);
+        if (computed !== current) {
+            try {
+                await pool.query(
+                    `UPDATE users SET points_balance = $1, updated_at = now() WHERE id = $2`,
+                    [computed, req.userId]
+                );
+                userR.rows[0].points_balance = computed;
+            } catch {
+                userR.rows[0].points_balance = computed;
+            }
+        }
 
         return res.json({
             ok: true,

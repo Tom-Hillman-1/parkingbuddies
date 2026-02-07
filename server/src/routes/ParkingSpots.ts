@@ -318,8 +318,8 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
     // points config
     const allow_points = isBool(body.allow_points) ? body.allow_points : false;
     const points_cost = safeInt(body.points_cost);
-    if (allow_points && mode !== "rent") {
-        return res.status(400).json({ ok: false, error: "Points can only be enabled for rent listings" });
+    if (allow_points && mode !== "rent" && mode !== "auction") {
+        return res.status(400).json({ ok: false, error: "Points can only be enabled for rent or auction listings" });
     }
     if (allow_points && points_cost <= 0) {
         return res.status(400).json({ ok: false, error: "points_cost must be > 0 when allow_points is true" });
@@ -545,8 +545,8 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
 
     const allow_points = isBool(body.allow_points) ? body.allow_points : false;
     const points_cost = safeInt(body.points_cost);
-    if (allow_points && mode !== "rent") {
-        return res.status(400).json({ ok: false, error: "Points can only be enabled for rent listings" });
+    if (allow_points && mode !== "rent" && mode !== "auction") {
+        return res.status(400).json({ ok: false, error: "Points can only be enabled for rent or auction listings" });
     }
     if (allow_points && points_cost <= 0) {
         return res.status(400).json({ ok: false, error: "points_cost must be > 0 when allow_points is true" });
@@ -679,6 +679,85 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
         return res.json({ ok: true, parking_spot: r.rows[0] });
     } catch (e) {
         return res.status(500).json({ ok: false, error: String(e) });
+    }
+});
+
+/**
+ * DELETE /parking-spots/:id
+ * Deletes a parking spot (owner only) and clears dependent data so the listing is removed app-wide.
+ */
+router.delete("/:id", requireAuth, async (req: AuthRequest, res) => {
+    const spotId = req.params.id;
+    const userId = req.userId;
+
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+
+        const ownedSpot = await client.query(
+            `SELECT id, title
+             FROM parking_spots
+             WHERE id = $1 AND owner_user_id = $2`,
+            [spotId, userId]
+        );
+
+        if (!ownedSpot.rowCount) {
+            await client.query("ROLLBACK");
+            return res.status(404).json({ ok: false, error: "Parking spot not found or not owned by user" });
+        }
+
+        // Keep reward history rows but detach them from the removed listing.
+        await client.query(
+            `UPDATE reward_transactions
+             SET related_spot_id = NULL
+             WHERE related_spot_id = $1`,
+            [spotId]
+        );
+
+        // Backwards-compatible cleanup for environments that may not have full FK cascade coverage.
+        const bookingIdsRes = await client.query(
+            `SELECT id FROM bookings WHERE parking_spot_id = $1`,
+            [spotId]
+        );
+        const bookingIds = bookingIdsRes.rows.map((r: { id: string }) => r.id);
+        if (bookingIds.length > 0) {
+            await client.query(
+                `DELETE FROM payments
+                 WHERE booking_id = ANY($1::uuid[])`,
+                [bookingIds]
+            );
+        }
+
+        await client.query(
+            `DELETE FROM bookings
+             WHERE parking_spot_id = $1`,
+            [spotId]
+        );
+
+        // auction_bids table may not exist in older DB snapshots.
+        try {
+            await client.query(
+                `DELETE FROM auction_bids
+                 WHERE parking_spot_id = $1`,
+                [spotId]
+            );
+        } catch {
+            // ignore when auction_bids is unavailable
+        }
+
+        await client.query(
+            `DELETE FROM parking_spots
+             WHERE id = $1 AND owner_user_id = $2`,
+            [spotId, userId]
+        );
+
+        await client.query("COMMIT");
+        return res.json({ ok: true, deleted: true, parking_spot: ownedSpot.rows[0] });
+    } catch (e) {
+        await client.query("ROLLBACK");
+        return res.status(500).json({ ok: false, error: String(e) });
+    } finally {
+        client.release();
     }
 });
 

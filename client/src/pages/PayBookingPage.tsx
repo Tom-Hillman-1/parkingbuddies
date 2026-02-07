@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useElements, useStripe } from "@stripe/react-stripe-js";
-import { apiGet, apiPatch, apiPost } from "../lib/api";
+import { apiGet, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string);
@@ -10,11 +10,13 @@ const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as 
 function CardForm({
                       bookingId,
                       clientSecret,
+                      paymentIntentId,
                       onPaid,
                       token,
                   }: {
     bookingId: string;
     clientSecret: string;
+    paymentIntentId: string;
     onPaid: () => void;
     token: string;
 }) {
@@ -50,12 +52,25 @@ function CardForm({
         setStatus("Payment successful ✅");
         setBusy(false);
 
-        try {
-            await apiPatch(`/bookings/${bookingId}/mark-paid`, undefined, token);
-        } catch {
-            // ignore for demo; receipt will still display
+        const confirmedIntentId = result.paymentIntent?.id ?? paymentIntentId;
+        if (!confirmedIntentId) {
+            setStatus("Payment succeeded but confirmation ID was missing.");
+            return;
         }
-        onPaid();
+
+        try {
+            await apiPost(
+                "/payments/confirm-intent",
+                {
+                    booking_id: bookingId,
+                    payment_intent_id: confirmedIntentId,
+                },
+                token
+            );
+            onPaid();
+        } catch (e: any) {
+            setStatus(e?.message || "Payment was successful but confirmation failed.");
+        }
     }
 
     return (
@@ -86,9 +101,11 @@ function CardForm({
 
 export default function PayBookingPage() {
     const { bookingId } = useParams();
+    const navigate = useNavigate();
     const { token } = useAuth();
 
     const [clientSecret, setClientSecret] = useState<string | null>(null);
+    const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
     const [err, setErr] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [paid, setPaid] = useState(false);
@@ -114,14 +131,23 @@ export default function PayBookingPage() {
                 setLoading(true);
                 setErr(null);
 
-                const r = await apiPost<{ client_secret: string; payment_intent_id: string }>(
-                    "/payments/create-intent",
-                    { booking_id: id },
-                    token
-                );
+                const bookingR = await apiGet<{ booking: any }>(`/bookings/${id}`, token);
+                const b = bookingR.booking ?? null;
+                setBooking(b);
+                setReceipt(b);
 
-                setClientSecret(r.client_secret);
-                await loadReceipt();
+                if (b?.pay_method === "money" && Number(b?.total_price_gbp ?? 0) > 0 && b?.status === "pending") {
+                    const r = await apiPost<{ client_secret: string; payment_intent_id: string }>(
+                        "/payments/create-intent",
+                        { booking_id: id },
+                        token
+                    );
+                    setClientSecret(r.client_secret);
+                    setPaymentIntentId(r.payment_intent_id);
+                } else {
+                    setClientSecret(null);
+                    setPaymentIntentId(null);
+                }
             } catch (e) {
                 setErr(e instanceof Error ? e.message : "Failed to create payment intent");
             } finally {
@@ -135,126 +161,167 @@ export default function PayBookingPage() {
     async function loadReceipt() {
         if (!token) return;
         try {
-            const r = await apiGet<{ bookings: any[] }>("/bookings/me", token);
-            const hit = (r.bookings ?? []).find((b) => b.id === id);
-            setBooking(hit ?? null);
-            setReceipt(hit ?? null);
+            const r = await apiGet<{ booking: any }>(`/bookings/${id}`, token);
+            setBooking(r.booking ?? null);
+            setReceipt(r.booking ?? null);
         } catch {
             setReceipt(null);
         }
     }
 
+    useEffect(() => {
+        if (!paid) return;
+        const timeoutId = setTimeout(() => {
+            navigate("/dashboard?tab=myBookings");
+        }, 6000);
+        return () => clearTimeout(timeoutId);
+    }, [paid, navigate]);
+
+    const statusLabel = booking?.status === "pending"
+        ? "Pending"
+        : booking?.status === "confirmed"
+            ? "Confirmed"
+            : booking?.status ?? "—";
+
+    const paymentLabel = booking?.pay_method === "points"
+        ? "Points"
+        : booking?.pay_method === "money"
+            ? "Card"
+            : "—";
+
     return (
         <div className="container">
             <div className="pageHeader">
-                <div className="heroKicker">PAYMENT</div>
-                <div className="heroTitle">Complete your booking</div>
+                <div className="heroKicker">CONFIRMATION</div>
+                <div className="heroTitle">Confirm the details</div>
                 <div className="heroSub muted">
-                    Enter card details to finish the reservation.
+                    Confirm your payment details and reservation summary.
                 </div>
             </div>
 
-            {loading && <div className="card formSection">Preparing Stripe payment…</div>}
+            {loading && <div className="card formSection">Preparing your receipt…</div>}
             {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
 
-            {!loading && !err && ready && clientSecret && !paid && token && (
+            {!loading && !err && booking && (
                 <>
-                    <div className="card formSection">
-                        <div className="h3">Booking summary</div>
-                        <div className="spotInfoGrid" style={{ marginTop: 10 }}>
-                            <div>
-                                <div className="tiny muted">Booking ID</div>
-                                <div className="spotInfoValue">{id}</div>
+                    <div className="card receiptCard">
+                        <div className="receiptHeader">
+                            <div className="heroKicker">PARKINGBUDDIES</div>
+                            <div className="h2">Booking receipt</div>
+                            <div className="tiny muted">Confirmation #{id}</div>
+                        </div>
+                        <div className="receiptBody">
+                            <div className="receiptRow">
+                                <span className="tiny muted">Status</span>
+                                <span className="spotInfoValue">{statusLabel}</span>
                             </div>
-                            <div>
-                                <div className="tiny muted">Spot</div>
-                                <div className="spotInfoValue">{booking?.spot_title ?? "—"}</div>
+                            <div className="receiptRow">
+                                <span className="tiny muted">Payment</span>
+                                <span className="spotInfoValue">{paymentLabel}</span>
                             </div>
-                            <div>
-                                <div className="tiny muted">Address</div>
-                                <div className="spotInfoValue">{booking?.spot_address ?? "—"}</div>
+                            <div className="receiptRow">
+                                <span className="tiny muted">Spot</span>
+                                <span className="spotInfoValue">{booking?.spot_title ?? "—"}</span>
                             </div>
-                            <div>
-                                <div className="tiny muted">When</div>
-                                <div className="spotInfoValue">
+                            <div className="receiptRow">
+                                <span className="tiny muted">Address</span>
+                                <span className="spotInfoValue">{booking?.spot_address ?? "—"}</span>
+                            </div>
+                            <div className="receiptRow">
+                                <span className="tiny muted">When</span>
+                                <span className="spotInfoValue">
                                     {booking?.start_time && booking?.end_time
                                         ? `${booking.start_time} → ${booking.end_time}`
                                         : "—"}
-                                </div>
+                                </span>
                             </div>
-                            <div>
-                                <div className="tiny muted">Total</div>
-                                <div className="spotInfoValue">
-                                    {booking?.total_price_gbp != null ? `£${Number(booking.total_price_gbp).toFixed(2)}` : "—"}
-                                </div>
-                            </div>
-                            <div>
-                                <div className="tiny muted">Payment method</div>
-                                <div className="spotInfoValue">Card</div>
+                            <div className="receiptRow">
+                                <span className="tiny muted">Total</span>
+                                <span className="spotInfoValue">
+                                    {booking?.pay_method === "points"
+                                        ? `${Number(booking?.total_points ?? 0)} pts`
+                                        : booking?.total_price_gbp != null
+                                            ? `£${Number(booking.total_price_gbp).toFixed(2)}`
+                                            : "—"}
+                                </span>
                             </div>
                         </div>
                     </div>
 
-                    <Elements stripe={stripePromise} options={{ clientSecret }}>
-                        <CardForm
-                            bookingId={id}
-                            clientSecret={clientSecret}
-                            token={token}
-                            onPaid={async () => {
-                                setPaid(true);
-                                await loadReceipt();
-                            }}
-                        />
-                    </Elements>
+                    {booking?.pay_method === "money" && booking?.status === "pending" && ready && clientSecret && paymentIntentId && token && !paid && (
+                        <Elements stripe={stripePromise} options={{ clientSecret }}>
+                            <CardForm
+                                bookingId={id}
+                                clientSecret={clientSecret}
+                                paymentIntentId={paymentIntentId}
+                                token={token}
+                                onPaid={async () => {
+                                    setPaid(true);
+                                    await loadReceipt();
+                                }}
+                            />
+                        </Elements>
+                    )}
+
+                    {booking?.pay_method === "points" && (
+                        <div className="card formSection">
+                            <div className="h3">Points payment</div>
+                            <div className="muted" style={{ marginTop: 6 }}>
+                                Points payments are processed immediately.
+                            </div>
+                            <div className="rowInline" style={{ marginTop: 10 }}>
+                                <Link to="/dashboard?tab=myBookings" className="btn btn-primary">Go to dashboard</Link>
+                                <Link to="/" className="btn">Back to home</Link>
+                            </div>
+                        </div>
+                    )}
                 </>
             )}
 
             {paid && (
-                <div className="card formSection">
-                    <div className="h3">Payment confirmed</div>
-                    <div className="muted" style={{ marginTop: 6 }}>
-                        Your payment was successful. Here’s your receipt:
+                <div className="card receiptCard" style={{ marginTop: 12 }}>
+                    <div className="receiptHeader">
+                        <div className="heroKicker">PAYMENT</div>
+                        <div className="h2">Payment confirmed</div>
+                        <div className="tiny muted">Receipt #{id}</div>
                     </div>
-
-                    <div className="spotInfoGrid" style={{ marginTop: 10 }}>
-                        <div>
-                            <div className="tiny muted">Booking ID</div>
-                            <div className="spotInfoValue">{id}</div>
+                    <div className="receiptBody">
+                        <div className="receiptRow">
+                            <span className="tiny muted">Status</span>
+                            <span className="spotInfoValue">Paid</span>
                         </div>
-                        <div>
-                            <div className="tiny muted">Status</div>
-                            <div className="spotInfoValue">Paid</div>
+                        <div className="receiptRow">
+                            <span className="tiny muted">Spot</span>
+                            <span className="spotInfoValue">{receipt?.spot_title ?? "—"}</span>
                         </div>
-                        <div>
-                            <div className="tiny muted">Spot</div>
-                            <div className="spotInfoValue">{receipt?.spot_title ?? "—"}</div>
+                        <div className="receiptRow">
+                            <span className="tiny muted">Address</span>
+                            <span className="spotInfoValue">{receipt?.spot_address ?? "—"}</span>
                         </div>
-                        <div>
-                            <div className="tiny muted">Address</div>
-                            <div className="spotInfoValue">{receipt?.spot_address ?? "—"}</div>
+                        <div className="receiptRow">
+                            <span className="tiny muted">When</span>
+                            <span className="spotInfoValue">
+                                {receipt?.start_time && receipt?.end_time
+                                    ? `${receipt.start_time} → ${receipt.end_time}`
+                                    : "—"}
+                            </span>
                         </div>
-                        <div>
-                            <div className="tiny muted">Start</div>
-                            <div className="spotInfoValue">{receipt?.start_time ?? "—"}</div>
-                        </div>
-                        <div>
-                            <div className="tiny muted">End</div>
-                            <div className="spotInfoValue">{receipt?.end_time ?? "—"}</div>
-                        </div>
-                        <div>
-                            <div className="tiny muted">Amount</div>
-                            <div className="spotInfoValue">
+                        <div className="receiptRow">
+                            <span className="tiny muted">Amount</span>
+                            <span className="spotInfoValue">
                                 {receipt?.total_price_gbp != null ? `£${Number(receipt.total_price_gbp).toFixed(2)}` : "—"}
-                            </div>
+                            </span>
                         </div>
-                        <div>
-                            <div className="tiny muted">Payment method</div>
-                            <div className="spotInfoValue">{receipt?.pay_method ?? "card"}</div>
+                        <div className="receiptRow">
+                            <span className="tiny muted">Payment method</span>
+                            <span className="spotInfoValue">{receipt?.pay_method ?? "card"}</span>
                         </div>
                     </div>
-
-                    <div className="rowInline" style={{ marginTop: 10 }}>
-                        <Link to="/dashboard" className="btn btn-primary">Go to dashboard</Link>
+                    <div className="receiptActions">
+                        <div className="tiny muted" style={{ marginBottom: 8 }}>
+                            Receipt shown. Redirecting to dashboard in a few seconds...
+                        </div>
+                        <Link to="/dashboard?tab=myBookings" className="btn btn-primary">Go to dashboard</Link>
                         <Link to="/" className="btn">Back to home</Link>
                     </div>
                 </div>

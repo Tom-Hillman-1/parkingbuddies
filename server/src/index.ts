@@ -8,12 +8,13 @@ import parkingSpotRoutes from "./routes/parkingSpots";
 import bookingRoutes from "./routes/bookings";
 import settingsRoutes from "./routes/settings";
 import dashboardRoutes from "./routes/dashboard";
-import paymentsRoutes from "./routes/payments";
+import paymentsRoutes, { stripeWebhookHandler } from "./routes/payments";
 import auctionsRoutes from "./routes/auctions";
 dotenv.config();
 
 const app = express();
 app.use(cors());
+app.post("/payments/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
 app.use(express.json({ limit: "5mb" }));
 
 app.use("/auth", authRoutes);

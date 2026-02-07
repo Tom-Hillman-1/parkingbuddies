@@ -4,9 +4,6 @@ import { requireAuth, AuthRequest } from "../middleware/auth";
 
 const router = Router();
 
-// reward for a money booking (given AFTER confirmation)
-const POINTS_EARN_PER_MONEY_BOOKING = 10;
-
 type PriceUnit = "hour" | "day" | "week";
 type Mode = "free" | "rent" | "auction";
 
@@ -177,7 +174,7 @@ function validateAvailability(spot: any, start: Date, end: Date): { ok: true } |
  * }
  */
 router.post("/", requireAuth, async (req: AuthRequest, res) => {
-    const { parking_spot_id, start_time, end_time, pay_method } = req.body ?? {};
+    const { parking_spot_id, start_time, end_time, pay_method, points_amount } = req.body ?? {};
 
     if (typeof parking_spot_id !== "string") {
         return res.status(400).json({ ok: false, error: "parking_spot_id is required" });
@@ -274,30 +271,13 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
             return res.status(400).json({ ok: false, error: "You cannot book your own parking spot" });
         }
 
-        // Auction: only winning/accepted bidders can book
-        let auctionBidAmount: number | null = null;
+        // Auction bookings are created by the owner-accept flow in /auctions/:spotId/accept.
         if ((spot.mode as Mode) === "auction") {
-            const bidR = await client.query(
-                `SELECT amount_gbp, status
-                 FROM auction_bids
-                 WHERE parking_spot_id = $1 AND bidder_user_id = $2
-                   AND status IN ('accepted','won')
-                 ORDER BY created_at DESC
-                 LIMIT 1`,
-                [parking_spot_id, req.userId]
-            );
-            if (!bidR.rowCount) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({
-                    ok: false,
-                    error: "Only the accepted or winning bidder can book this auction listing.",
-                });
-            }
-            auctionBidAmount = toMoney(bidR.rows[0].amount_gbp);
-            if (method === "points") {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: "Auction bookings must be paid with money" });
-            }
+            await client.query("ROLLBACK");
+            return res.status(400).json({
+                ok: false,
+                error: "Auction bookings are created when the owner accepts a bid.",
+            });
         }
 
         // Availability validation
@@ -330,7 +310,7 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         }
 
         // Determine totals
-        const unit: PriceUnit = ((spot.mode as Mode) === "auction" ? "hour" : (spot.price_unit ?? "hour")) as PriceUnit;
+        const unit: PriceUnit = (spot.price_unit ?? "hour") as PriceUnit;
         if (!["hour", "day", "week"].includes(unit)) {
             await client.query("ROLLBACK");
             return res.status(400).json({ ok: false, error: "Spot price_unit is invalid" });
@@ -354,14 +334,21 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
                 return res.status(400).json({ ok: false, error: "Invalid points cost for this spot" });
             }
 
-            total_points = Math.ceil(perUnitPoints * units);
+            const minPoints = Math.ceil(perUnitPoints * units);
+            const requested = Number(points_amount);
+            if (!Number.isFinite(requested) || requested <= 0) {
+                await client.query("ROLLBACK");
+                return res.status(400).json({ ok: false, error: `Points amount is required (min ${minPoints})` });
+            }
+            if (requested < minPoints) {
+                await client.query("ROLLBACK");
+                return res.status(400).json({ ok: false, error: `Points amount must be at least ${minPoints}` });
+            }
+            total_points = Math.ceil(requested);
             status = "confirmed"; // points booking confirms immediately (simple)
         } else {
             // money booking
-            const perUnitPrice =
-                (spot.mode as Mode) === "auction"
-                    ? toMoney(auctionBidAmount ?? 0)
-                    : toMoney(spot.price_gbp);
+            const perUnitPrice = toMoney(spot.price_gbp);
             const total = perUnitPrice * units;
 
             // free listings can have total 0 and still be "confirmed" (no payment needed)
@@ -624,89 +611,13 @@ router.patch("/:id/cancel", requireAuth, async (req: AuthRequest, res) => {
 
 /**
  * PATCH /bookings/:id/confirm
- * Owner confirms a pending booking
- * Rewards are granted here for money bookings.
+ * Deprecated: auction acceptance is handled by /auctions/:spotId/accept.
  */
 router.patch("/:id/confirm", requireAuth, async (req: AuthRequest, res) => {
-    const bookingId = req.params.id;
-
-    const client = await pool.connect();
-    try {
-        await client.query("BEGIN");
-
-        const bookingR = await client.query(
-            `SELECT b.*, ps.owner_user_id, ps.mode AS spot_mode
-             FROM bookings b
-                      JOIN parking_spots ps ON ps.id = b.parking_spot_id
-             WHERE b.id = $1`,
-            [bookingId]
-        );
-
-        if (!bookingR.rowCount) {
-            await client.query("ROLLBACK");
-            return res.status(404).json({ ok: false, error: "Booking not found" });
-        }
-
-        const booking = bookingR.rows[0];
-
-        if (booking.owner_user_id !== req.userId) {
-            await client.query("ROLLBACK");
-            return res.status(403).json({ ok: false, error: "Only the listing owner can confirm this booking" });
-        }
-
-        if (booking.spot_mode !== "auction") {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Owner confirmation is only required for auction bookings" });
-        }
-
-        if (booking.status !== "pending") {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Only pending bookings can be confirmed" });
-        }
-
-        const updatedR = await client.query(
-            `UPDATE bookings
-       SET status = 'confirmed', updated_at = now()
-       WHERE id = $1
-       RETURNING *`,
-            [bookingId]
-        );
-
-        // if money booking, mark payment as succeeded + reward points NOW
-        if (booking.pay_method === "money") {
-            await client.query(
-                `UPDATE payments
-                 SET status = 'succeeded', updated_at = now()
-                 WHERE booking_id = $1`,
-                [bookingId]
-            );
-
-            // only reward if it actually was a paid booking
-            const paid = Number(booking.total_price_gbp ?? 0) > 0;
-            if (paid) {
-                await client.query(
-                    `UPDATE users
-           SET points_balance = points_balance + $1, updated_at = now()
-           WHERE id = $2`,
-                    [POINTS_EARN_PER_MONEY_BOOKING, booking.driver_user_id]
-                );
-
-                await client.query(
-                    `INSERT INTO reward_transactions (user_id, type, amount, reason, related_booking_id, related_spot_id)
-           VALUES ($1,'earn',$2,'booking_purchase',$3,$4)`,
-                    [booking.driver_user_id, POINTS_EARN_PER_MONEY_BOOKING, bookingId, booking.parking_spot_id]
-                );
-            }
-        }
-
-        await client.query("COMMIT");
-        return res.json({ ok: true, booking: updatedR.rows[0] });
-    } catch (e) {
-        await client.query("ROLLBACK");
-        return res.status(500).json({ ok: false, error: String(e) });
-    } finally {
-        client.release();
-    }
+    return res.status(410).json({
+        ok: false,
+        error: "Deprecated endpoint. Use /auctions/:spotId/accept for auction confirmations.",
+    });
 });
 
 /**
@@ -737,82 +648,13 @@ router.get("/owner", requireAuth, async (req: AuthRequest, res) => {
 
 /**
  * PATCH /bookings/:id/mark-paid
- * Driver marks a money booking as paid.
- * Updates booking status + payment status + rewards.
+ * Deprecated: payment finalization is handled by Stripe verification routes/webhooks.
  */
 router.patch("/:id/mark-paid", requireAuth, async (req: AuthRequest, res) => {
-    const bookingId = req.params.id;
-
-    const client = await pool.connect();
-    try {
-        await client.query("BEGIN");
-
-        const bookingR = await client.query(
-            `SELECT b.*, ps.owner_user_id
-             FROM bookings b
-                      JOIN parking_spots ps ON ps.id = b.parking_spot_id
-             WHERE b.id = $1`,
-            [bookingId]
-        );
-
-        if (!bookingR.rowCount) {
-            await client.query("ROLLBACK");
-            return res.status(404).json({ ok: false, error: "Booking not found" });
-        }
-
-        const booking = bookingR.rows[0];
-
-        if (booking.driver_user_id !== req.userId) {
-            await client.query("ROLLBACK");
-            return res.status(403).json({ ok: false, error: "Only the driver can mark this booking as paid" });
-        }
-
-        if (booking.status !== "pending" || booking.pay_method !== "money") {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Booking is not payable" });
-        }
-
-        const updatedR = await client.query(
-            `UPDATE bookings
-       SET status = 'confirmed', updated_at = now()
-       WHERE id = $1
-       RETURNING *`,
-            [bookingId]
-        );
-
-        // Mark payment as succeeded
-        await client.query(
-            `UPDATE payments
-             SET status = 'succeeded', updated_at = now()
-             WHERE booking_id = $1`,
-            [bookingId]
-        );
-
-        // Reward points for paid booking
-        const paid = Number(booking.total_price_gbp ?? 0) > 0;
-        if (paid) {
-            await client.query(
-                `UPDATE users
-           SET points_balance = points_balance + $1, updated_at = now()
-           WHERE id = $2`,
-                [POINTS_EARN_PER_MONEY_BOOKING, booking.driver_user_id]
-            );
-
-            await client.query(
-                `INSERT INTO reward_transactions (user_id, type, amount, reason, related_booking_id, related_spot_id)
-           VALUES ($1,'earn',$2,'booking_purchase',$3,$4)`,
-                [booking.driver_user_id, POINTS_EARN_PER_MONEY_BOOKING, bookingId, booking.parking_spot_id]
-            );
-        }
-
-        await client.query("COMMIT");
-        return res.json({ ok: true, booking: updatedR.rows[0] });
-    } catch (e) {
-        await client.query("ROLLBACK");
-        return res.status(500).json({ ok: false, error: String(e) });
-    } finally {
-        client.release();
-    }
+    return res.status(410).json({
+        ok: false,
+        error: "Deprecated endpoint. Payment completion is handled by Stripe-confirmed flow.",
+    });
 });
 
 /**
@@ -836,9 +678,24 @@ router.get("/:id", requireAuth, async (req: AuthRequest, res) => {
                  ps.image_url AS spot_image,
                  ps.mode AS spot_mode,
                  ps.price_gbp AS spot_price_gbp,
-                 ps.price_unit AS spot_price_unit
+                 ps.price_unit AS spot_price_unit,
+                 pay.id AS payment_id,
+                 pay.provider AS payment_provider,
+                 pay.provider_ref AS payment_provider_ref,
+                 pay.status AS payment_status
              FROM bookings b
              JOIN parking_spots ps ON ps.id = b.parking_spot_id
+             LEFT JOIN LATERAL (
+                 SELECT
+                     p.id,
+                     p.provider,
+                     p.provider_ref,
+                     p.status
+                 FROM payments p
+                 WHERE p.booking_id = b.id
+                 ORDER BY p.created_at DESC, p.id DESC
+                 LIMIT 1
+             ) pay ON TRUE
              WHERE b.id = $1 AND b.driver_user_id = $2`,
             [bookingId, req.userId]
         );

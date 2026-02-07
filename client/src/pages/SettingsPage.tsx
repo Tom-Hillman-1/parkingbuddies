@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
-import { apiGet, apiPatch } from "../lib/api";
+import { apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
 type Me = {
@@ -8,6 +8,21 @@ type Me = {
     email: string;
     name: string;
     points_balance: number;
+    stripe_account_id?: string | null;
+    stripe_charges_enabled?: boolean;
+    stripe_payouts_enabled?: boolean;
+    stripe_details_submitted?: boolean;
+};
+
+type ConnectStatus = {
+    account_id: string | null;
+    charges_enabled: boolean;
+    payouts_enabled: boolean;
+    details_submitted: boolean;
+    onboarding_complete: boolean;
+    dashboard_enabled: boolean;
+    demo_bypass: boolean;
+    demo_available: boolean;
 };
 
 type SettingsPayload = {
@@ -32,6 +47,8 @@ export default function SettingsPage() {
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState<string | null>(null);
     const [err, setErr] = useState<string | null>(null);
+    const [connect, setConnect] = useState<ConnectStatus | null>(null);
+    const [connectBusy, setConnectBusy] = useState(false);
 
     useEffect(() => {
         if (!token) return;
@@ -62,6 +79,13 @@ export default function SettingsPage() {
                     setEmail(r1.user.email ?? "");
                     setHomeAddress("");
                 }
+
+                try {
+                    const connectR = await apiGet<{ connect: ConnectStatus }>("/payments/connect/status", token);
+                    setConnect(connectR.connect);
+                } catch {
+                    setConnect(null);
+                }
             } catch (e: any) {
                 setErr(e.message || "Failed to load settings");
             } finally {
@@ -72,6 +96,73 @@ export default function SettingsPage() {
 
     if (!token) {
         return <Navigate to="/" replace />;
+    }
+
+    const connectLabel = connect?.demo_bypass
+        ? "Demo mode active"
+        : !connect?.account_id
+            ? "Not connected"
+            : connect.onboarding_complete
+                ? "Ready to receive payouts"
+                : "Onboarding incomplete";
+    const connectBadgeClass = connect?.demo_bypass
+        ? "badge badge--cool"
+        : !connect?.account_id
+            ? "badge badge--rose"
+            : connect.onboarding_complete
+                ? "badge badge--green"
+                : "badge badge--warm";
+
+    async function refreshConnectStatus() {
+        if (!token) return;
+        try {
+            const r = await apiGet<{ connect: ConnectStatus }>("/payments/connect/status", token);
+            setConnect(r.connect);
+        } catch (e: any) {
+            setErr(e?.message || "Failed to load Stripe Connect status");
+        }
+    }
+
+    async function beginConnectOnboarding(mode: "stripe" | "demo" = "stripe") {
+        if (!token) return;
+        setConnectBusy(true);
+        setErr(null);
+        try {
+            const r = await apiPost<{ url?: string; connect: ConnectStatus }>(
+                "/payments/connect/onboard",
+                { mode },
+                token
+            );
+            setConnect(r.connect);
+            if (r.connect?.demo_bypass) {
+                setMsg("Demo payout mode is enabled. Stripe onboarding is skipped.");
+                return;
+            }
+            if (r.url) {
+                window.location.href = r.url;
+            } else {
+                setErr("Stripe onboarding link was missing.");
+            }
+        } catch (e: any) {
+            setErr(e?.message || "Unable to start Stripe onboarding");
+        } finally {
+            setConnectBusy(false);
+        }
+    }
+
+    async function openStripeDashboard() {
+        if (!token) return;
+        setConnectBusy(true);
+        setErr(null);
+        try {
+            const r = await apiPost<{ url: string; connect: ConnectStatus }>("/payments/connect/dashboard-link", {}, token);
+            setConnect(r.connect);
+            window.open(r.url, "_blank", "noopener,noreferrer");
+        } catch (e: any) {
+            setErr(e?.message || "Unable to open Stripe dashboard");
+        } finally {
+            setConnectBusy(false);
+        }
     }
 
     async function save() {
@@ -86,7 +177,7 @@ export default function SettingsPage() {
                 home_address: homeAddress.trim() || undefined,
             };
 
-            await apiPatch<{ user: any }>("/settings/profile", body, token);
+            await apiPatch<{ user: any }>("/settings/profile", body, token ?? undefined);
 
             setMsg("Saved ✅");
         } catch (e: any) {
@@ -107,7 +198,7 @@ export default function SettingsPage() {
 
             {loading && <div className="card formSection">Loading…</div>}
             {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
-            {msg && <div className="card formSection">{msg}</div>}
+            {msg && <div className="card formSection settingsSavedNotice">{msg}</div>}
 
             {!loading && (
                 <div className="settingsGrid">
@@ -265,6 +356,81 @@ export default function SettingsPage() {
                                     </div>
                                     <span className="badge badge--accent">Rewards</span>
                                 </div>
+                            </div>
+                        </div>
+
+                        <div className="card formSection">
+                            <div className="sectionHeader sectionHeader--payments">
+                                <div className="sectionHeaderTitle">
+                                    <span className="sectionDot" />
+                                    <div className="h3">Stripe payouts</div>
+                                </div>
+                                <span className={connectBadgeClass}>{connectLabel}</span>
+                            </div>
+                            <div className="tiny muted">
+                                {connect?.demo_bypass
+                                    ? "Demo bypass mode is active. Owner payouts are simulated and no Stripe onboarding is required."
+                                    : "Connect Stripe to receive booking money as an owner. In test mode, payouts are simulated."}
+                            </div>
+                            <div className="settingRow">
+                                <div className="settingRowTitle">
+                                    <div className="tiny muted">Connected account</div>
+                                    <div className="spotInfoValue">
+                                        {connect?.demo_bypass
+                                            ? "Demo simulation (no connected Stripe account)"
+                                            : connect?.account_id ?? "Not connected"}
+                                    </div>
+                                </div>
+                                <span className={connect?.charges_enabled ? "badge badge--green" : "badge badge--warm"}>
+                                    {connect?.charges_enabled ? "Charges enabled" : "Charges pending"}
+                                </span>
+                            </div>
+                            <div className="settingRow">
+                                <div className="settingRowTitle">
+                                    <div className="tiny muted">Payout capability</div>
+                                    <div className="spotInfoValue">
+                                        {connect?.payouts_enabled ? "Enabled" : "Pending"}
+                                    </div>
+                                </div>
+                                <span className={connect?.details_submitted ? "badge badge--cool" : "badge badge--warm"}>
+                                    {connect?.details_submitted ? "Details submitted" : "Details required"}
+                                </span>
+                            </div>
+                            <div className="rowInline">
+                                <button
+                                    className="btn btn-primary"
+                                    onClick={() => beginConnectOnboarding("stripe")}
+                                    disabled={connectBusy}
+                                >
+                                    {connectBusy
+                                        ? "Opening..."
+                                        : connect?.demo_bypass
+                                            ? "Connect Stripe instead"
+                                        : !connect?.account_id
+                                            ? "Connect Stripe"
+                                            : connect.onboarding_complete
+                                                ? "Update Stripe details"
+                                                : "Continue onboarding"}
+                                </button>
+                                {connect?.demo_available && !connect?.demo_bypass && !connect?.account_id && (
+                                    <button
+                                        className="btn"
+                                        onClick={() => beginConnectOnboarding("demo")}
+                                        disabled={connectBusy}
+                                    >
+                                        Use demo payouts
+                                    </button>
+                                )}
+                                <button className="btn" onClick={refreshConnectStatus} disabled={connectBusy}>
+                                    Refresh status
+                                </button>
+                                <button
+                                    className="btn"
+                                    onClick={openStripeDashboard}
+                                    disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}
+                                >
+                                    Open Stripe dashboard
+                                </button>
                             </div>
                         </div>
 

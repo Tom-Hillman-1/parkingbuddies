@@ -1,16 +1,35 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
-import { apiGet, apiPatch, apiPost } from "../lib/api";
-import { useAuth } from "../lib/auth";
-
+import type { ChangeEvent, FormEvent } from "react";
 import L from "leaflet";
-import { MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
-
-// Fix default marker icons in Vite builds
+import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import type { ParkingSpot } from "../types";
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
+
+type Mode = "free" | "rent" | "auction";
+type PriceUnit = "hour" | "day" | "week";
+type ParkingType = "private" | "public";
+type AvailabilityType = "24_7" | "same_everyday" | "custom_weekly";
+type GeocodeSuggestion = {
+    place_id: number;
+    display_name: string;
+    lat: string;
+    lon: string;
+};
+type AvailabilitySlot = {
+    id: string;
+    dow: number;
+    start: string;
+    end: string;
+};
+
+const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const DEFAULT_CENTER: [number, number] = [51.5074, -0.1278];
+const LONDON_VIEWBOX = "-0.5103,51.6919,0.3340,51.2868";
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -19,1103 +38,1243 @@ L.Icon.Default.mergeOptions({
     shadowUrl: markerShadow,
 });
 
-type Mode = "free" | "rent" | "auction";
-type PriceUnit = "hour" | "day" | "week";
-type AvailabilityType = "24_7" | "same_everyday" | "custom_weekly";
-type ParkingType = "private" | "public";
+const defaultIcon = new L.Icon.Default();
 
-type WeeklyRule = {
-    id: string;
-    dow: number; // 0..6
-    start: string; // "HH:MM"
-    end: string; // "HH:MM"
-};
-
-const DOW = [
-    { id: 0, label: "Sun" },
-    { id: 1, label: "Mon" },
-    { id: 2, label: "Tue" },
-    { id: 3, label: "Wed" },
-    { id: 4, label: "Thu" },
-    { id: 5, label: "Fri" },
-    { id: 6, label: "Sat" },
-];
-
-function uid() {
-    return Math.random().toString(16).slice(2) + Date.now().toString(16);
+function toLocalDateTimeInput(iso: string | null | undefined) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
 }
 
-function clamp(n: number, min: number, max: number) {
-    return Math.max(min, Math.min(max, n));
+function toIsoFromLocalInput(local: string) {
+    const d = new Date(local);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString();
 }
 
-function toNumber(x: any, fallback = 0) {
-    const n = Number(x);
-    return Number.isFinite(n) ? n : fallback;
+function isTime(value: string) {
+    return /^\d{2}:\d{2}$/.test(value);
 }
 
-function toDateTimeLocal(iso: string) {
-    try {
-        const d = new Date(iso);
-        if (Number.isNaN(d.getTime())) return "";
-        const pad = (n: number) => String(n).padStart(2, "0");
-        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
-            d.getMinutes()
-        )}`;
-    } catch {
-        return "";
-    }
+function minutes(value: string) {
+    const [h, m] = value.split(":").map(Number);
+    return h * 60 + m;
 }
 
-async function compressImageToDataUrl(file: File, maxW = 1200, quality = 0.75): Promise<string> {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const url = URL.createObjectURL(file);
-        const el = new Image();
-        el.onload = () => {
-            URL.revokeObjectURL(url);
-            resolve(el);
-        };
-        el.onerror = () => {
-            URL.revokeObjectURL(url);
-            reject(new Error("Failed to load image"));
-        };
-        el.src = url;
-    });
-
-    const scale = Math.min(1, maxW / img.width);
-    const w = Math.max(1, Math.round(img.width * scale));
-    const h = Math.max(1, Math.round(img.height * scale));
-
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Canvas not supported");
-    ctx.drawImage(img, 0, 0, w, h);
-
-    return canvas.toDataURL("image/jpeg", quality);
+function parseCoordinates(lat: string, lng: string) {
+    const latNum = Number(lat);
+    const lngNum = Number(lng);
+    if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) return null;
+    if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) return null;
+    return { lat: latNum, lng: lngNum };
 }
 
+function createAvailabilitySlot(partial?: Partial<Omit<AvailabilitySlot, "id">>): AvailabilitySlot {
+    return {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        dow: partial?.dow ?? 1,
+        start: partial?.start ?? "09:00",
+        end: partial?.end ?? "17:00",
+    };
+}
 
-
-function Recenter({ lat, lng, zoom }: { lat: number; lng: number; zoom?: number }) {
+function MapRecenter({ center }: { center: [number, number] }) {
     const map = useMap();
-    // Keep it subtle: only recenter when coords change meaningfully.
-    // Leaflet handles this well.
-    map.setView([lat, lng], zoom ?? map.getZoom(), { animate: false });
+    useEffect(() => {
+        const zoom = map.getZoom();
+        map.setView(center, zoom, { animate: true });
+    }, [center[0], center[1], map]);
     return null;
 }
 
-function MapClicker({ onPick }: { onPick: (lat: number, lng: number) => void }) {
+function MapPickerPin({
+    position,
+    onPick,
+}: {
+    position: [number, number] | null;
+    onPick: (lat: number, lng: number) => void;
+}) {
     useMapEvents({
-        click: (e) => onPick(e.latlng.lat, e.latlng.lng),
+        click(event) {
+            onPick(event.latlng.lat, event.latlng.lng);
+        },
     });
-    return null;
+
+    if (!position) return null;
+    return <Marker position={position} icon={defaultIcon} />;
 }
 
 export default function CreateListingPage() {
-    const { token, isLoading } = useAuth();
-    const nav = useNavigate();
+    const { token, user } = useAuth();
     const [searchParams] = useSearchParams();
+    const navigate = useNavigate();
+
     const editId = searchParams.get("edit");
     const isEdit = Boolean(editId);
 
-    // basics
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
-
-    // mode + pricing
     const [mode, setMode] = useState<Mode>("rent");
+    const [price, setPrice] = useState("");
     const [priceUnit, setPriceUnit] = useState<PriceUnit>("hour");
-    const [priceGbp, setPriceGbp] = useState<number>(5);
-    const [parkingType, setParkingType] = useState<ParkingType>("private");
-    const [capacityTotal, setCapacityTotal] = useState<number>(1);
-    const [capacityAvailable, setCapacityAvailable] = useState<number>(1);
-
-    // points
     const [allowPoints, setAllowPoints] = useState(false);
-    const [pointsCost, setPointsCost] = useState<number>(50);
-
-    // auction
-    const [auctionStartPrice, setAuctionStartPrice] = useState<number>(5);
-    const [auctionEnd, setAuctionEnd] = useState<string>(""); // datetime-local
-
-    // image
-    // image (single photo)
-    const [imageFile, setImageFile] = useState<File | null>(null);
-    const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
-    const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const [pointsCost, setPointsCost] = useState("");
+    const [addressText, setAddressText] = useState("");
+    const [addressSuggestions, setAddressSuggestions] = useState<GeocodeSuggestion[]>([]);
+    const [addressSearchBusy, setAddressSearchBusy] = useState(false);
+    const [addressDropdownOpen, setAddressDropdownOpen] = useState(false);
+    const [reverseLookupBusy, setReverseLookupBusy] = useState(false);
+    const [lat, setLat] = useState(String(DEFAULT_CENTER[0]));
+    const [lng, setLng] = useState(String(DEFAULT_CENTER[1]));
     const [imageUrl, setImageUrl] = useState("");
-    const [useImageUrl, setUseImageUrl] = useState(false);
-    // location
-    const [addressQuery, setAddressQuery] = useState("");
-    const [addressConfirmedText, setAddressConfirmedText] = useState<string>("");
-    const [addressCandidates, setAddressCandidates] = useState<any[]>([]);
-    const [selectedCandidateIdx, setSelectedCandidateIdx] = useState<number>(-1);
-    const [locLat, setLocLat] = useState<number>(51.5074);
-    const [locLng, setLocLng] = useState<number>(-0.1278);
-    const [locationConfirmed, setLocationConfirmed] = useState(false);
-    const [geoLoading, setGeoLoading] = useState(false);
-    const [pinMode, setPinMode] = useState(false);
+    const [selectedImageName, setSelectedImageName] = useState("");
+    const [parkingType, setParkingType] = useState<ParkingType>("private");
+    const [capacityTotal, setCapacityTotal] = useState("1");
+    const [capacityAvailable, setCapacityAvailable] = useState("1");
+    const [showSetupModal, setShowSetupModal] = useState(false);
+    const [setupTypeDraft, setSetupTypeDraft] = useState<ParkingType>("private");
+    const [setupSpacesDraft, setSetupSpacesDraft] = useState("1");
 
-    // availability
-    const [availabilityType, setAvailabilityType] = useState<AvailabilityType>("custom_weekly");
-    const [everydayStart, setEverydayStart] = useState("09:00");
-    const [everydayEnd, setEverydayEnd] = useState("17:00");
-    const [availabilityDateFrom, setAvailabilityDateFrom] = useState<string>("");
-    const [availabilityDateTo, setAvailabilityDateTo] = useState<string>("");
-    const [weeklyRules, setWeeklyRules] = useState<WeeklyRule[]>([
-        { id: uid(), dow: 1, start: "18:00", end: "22:00" },
-    ]);
+    const [availabilityType, setAvailabilityType] = useState<AvailabilityType>("24_7");
+    const [dateFrom, setDateFrom] = useState("");
+    const [dateTo, setDateTo] = useState("");
+    const [sameStart, setSameStart] = useState("09:00");
+    const [sameEnd, setSameEnd] = useState("17:00");
+    const [customWeeklySlots, setCustomWeeklySlots] = useState<AvailabilitySlot[]>([createAvailabilitySlot()]);
 
-    // status
-    const [msg, setMsg] = useState<string | null>(null);
-    const [submitting, setSubmitting] = useState(false);
-    const [loadingEdit, setLoadingEdit] = useState(false);
-    const [showPreview, setShowPreview] = useState(false);
+    const [auctionStartPrice, setAuctionStartPrice] = useState("");
+    const [auctionEndLocal, setAuctionEndLocal] = useState("");
 
-    const isFree = mode === "free";
-    const isAuction = mode === "auction";
+    const [loadingExisting, setLoadingExisting] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [pendingPayload, setPendingPayload] = useState<Record<string, any> | null>(null);
+    const [confirmingPublish, setConfirmingPublish] = useState(false);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [deleting, setDeleting] = useState(false);
 
-    useEffect(() => {
-        if (isFree) {
-            setAllowPoints(false);
-            setPointsCost(0);
-        }
-    }, [isFree]);
+    const [error, setError] = useState("");
+    const [success, setSuccess] = useState("");
+    const imageInputRef = useRef<HTMLInputElement | null>(null);
+    const addressLookupRef = useRef<HTMLDivElement | null>(null);
+    const addressSearchAbortRef = useRef<AbortController | null>(null);
+    const reverseLookupAbortRef = useRef<AbortController | null>(null);
+    const suppressSuggestRef = useRef(false);
 
-    const unitLabel = useMemo(() => {
-        if (priceUnit === "hour") return "per hour";
-        if (priceUnit === "day") return "per day";
-        return "per week";
-    }, [priceUnit]);
+    const parsedCoords = useMemo(() => parseCoordinates(lat, lng), [lat, lng]);
+    const mapCenter: [number, number] = parsedCoords ? [parsedCoords.lat, parsedCoords.lng] : DEFAULT_CENTER;
+    const markerPosition: [number, number] | null = parsedCoords ? [parsedCoords.lat, parsedCoords.lng] : null;
 
     useEffect(() => {
-        if (!isEdit || !editId || !token) return;
-        setLoadingEdit(true);
-        setMsg(null);
-        apiGet<{ parking_spot: any }>(`/parking-spots/${editId}`, token)
+        if (!showDeleteModal && !showSetupModal && !showConfirmModal) return;
+        const onEsc = (event: KeyboardEvent) => {
+            if (event.key !== "Escape") return;
+            if (showDeleteModal && !deleting) {
+                setShowDeleteModal(false);
+            } else if (showSetupModal) {
+                setShowSetupModal(false);
+            } else if (showConfirmModal && !confirmingPublish) {
+                setShowConfirmModal(false);
+                setPendingPayload(null);
+            }
+        };
+        window.addEventListener("keydown", onEsc);
+        return () => window.removeEventListener("keydown", onEsc);
+    }, [showDeleteModal, deleting, showSetupModal, showConfirmModal, confirmingPublish]);
+
+    useEffect(() => {
+        if (!isEdit || !token || !editId) return;
+        let active = true;
+        setLoadingExisting(true);
+        setError("");
+
+        apiGet<{ parking_spot: ParkingSpot }>(`/parking-spots/${editId}`, token)
             .then((res) => {
+                if (!active) return;
                 const s = res.parking_spot;
-                if (!s) return;
+                const av = (s.availability_json ?? null) as any;
 
                 setTitle(s.title ?? "");
                 setDescription(s.description ?? "");
-                setMode(s.mode ?? "rent");
-                setPriceUnit(s.price_unit ?? "hour");
-                setPriceGbp(toNumber(s.price_gbp, 0));
-                setParkingType(s.parking_type ?? "private");
-                setCapacityTotal(toNumber(s.capacity_total, 1));
-                setCapacityAvailable(toNumber(s.capacity_available, 1));
-
+                setMode((s.mode as Mode) ?? "rent");
+                setPrice(s.mode === "rent" ? String(s.price_gbp ?? "") : "");
+                setPriceUnit((s.price_unit as PriceUnit) ?? "hour");
                 setAllowPoints(Boolean(s.allow_points));
-                setPointsCost(toNumber(s.points_cost, 0));
-
-                setAuctionStartPrice(toNumber(s.auction_start_price_gbp, 5));
-                setAuctionEnd(s.auction_end ? toDateTimeLocal(s.auction_end) : "");
-
+                setPointsCost(String(s.points_cost ?? ""));
+                suppressSuggestRef.current = true;
+                setAddressText(s.address_text ?? "");
+                setLat(String(s.lat ?? ""));
+                setLng(String(s.lng ?? ""));
                 setImageUrl(s.image_url ?? "");
-                setImagePreviewUrl(s.image_url ?? null);
-                setUseImageUrl(Boolean(s.image_url));
+                setSelectedImageName(s.image_url ? "Current listing image" : "");
+                const nextParkingType = (s.parking_type as ParkingType) ?? "private";
+                const nextCapacity = String(s.capacity_total ?? 1);
+                setParkingType(nextParkingType);
+                setCapacityTotal(nextCapacity);
+                setCapacityAvailable(String(s.capacity_available ?? s.capacity_total ?? 1));
+                setSetupTypeDraft(nextParkingType);
+                setSetupSpacesDraft(nextCapacity);
 
-                setAddressQuery(s.address_text ?? "");
-                setAddressConfirmedText(s.address_text ?? "");
-                setLocLat(toNumber(s.lat, 51.5074));
-                setLocLng(toNumber(s.lng, -0.1278));
-                setLocationConfirmed(true);
-
-                const av = s.availability_json ?? s.availability ?? null;
-                if (av?.type === "24_7") {
-                    setAvailabilityType("24_7");
-                } else if (av?.type === "same_everyday") {
+                setDateFrom(typeof av?.date_from === "string" ? av.date_from : "");
+                setDateTo(typeof av?.date_to === "string" ? av.date_to : "");
+                if (av?.type === "same_everyday") {
                     setAvailabilityType("same_everyday");
-                    setEverydayStart(av.start ?? "09:00");
-                    setEverydayEnd(av.end ?? "17:00");
-                } else if (av?.type === "custom_weekly") {
+                    setSameStart(typeof av?.start === "string" ? av.start : "09:00");
+                    setSameEnd(typeof av?.end === "string" ? av.end : "17:00");
+                } else if (av?.type === "custom_weekly" && Array.isArray(av?.rules)) {
                     setAvailabilityType("custom_weekly");
-                    const rules = Array.isArray(av.rules) ? av.rules : [];
-                    setWeeklyRules(
-                        rules.length
-                            ? rules.map((r: any) => ({
-                                  id: uid(),
-                                  dow: Number(r.dow ?? 1),
-                                  start: r.start ?? "18:00",
-                                  end: r.end ?? "22:00",
-                              }))
-                            : [{ id: uid(), dow: 1, start: "18:00", end: "22:00" }]
-                    );
+                    const nextSlots = av.rules
+                        .map((r: any) => ({
+                            dow: Number(r?.dow),
+                            start: typeof r?.start === "string" ? r.start : "",
+                            end: typeof r?.end === "string" ? r.end : "",
+                        }))
+                        .filter((r: any) => Number.isInteger(r.dow) && r.dow >= 0 && r.dow <= 6 && isTime(r.start) && isTime(r.end))
+                        .map((r: any) => createAvailabilitySlot({ dow: r.dow, start: r.start, end: r.end }));
+                    setCustomWeeklySlots(nextSlots.length > 0 ? nextSlots : [createAvailabilitySlot()]);
+                } else {
+                    setAvailabilityType("24_7");
+                    setCustomWeeklySlots([createAvailabilitySlot()]);
                 }
-                if (av?.date_from) setAvailabilityDateFrom(av.date_from);
-                if (av?.date_to) setAvailabilityDateTo(av.date_to);
+
+                setAuctionStartPrice(s.auction_start_price_gbp == null ? "" : String(s.auction_start_price_gbp));
+                setAuctionEndLocal(toLocalDateTimeInput(s.auction_end));
             })
-            .catch((err) => {
-                setMsg(err instanceof Error ? err.message : "Failed to load listing.");
+            .catch((e: any) => {
+                if (!active) return;
+                setError(e?.message || "Could not load listing for editing.");
             })
-            .finally(() => setLoadingEdit(false));
+            .finally(() => {
+                if (active) setLoadingExisting(false);
+            });
+
+        return () => {
+            active = false;
+        };
     }, [isEdit, editId, token]);
 
-    if (isLoading) {
+    useEffect(() => {
+        if (mode === "free") {
+            setAllowPoints(false);
+            setPrice("0");
+        }
+        if (mode === "auction") {
+            setPrice("0");
+        }
+    }, [mode]);
+
+    useEffect(() => {
+        const query = addressText.trim();
+        if (suppressSuggestRef.current) {
+            suppressSuggestRef.current = false;
+            return;
+        }
+        if (query.length < 3) {
+            setAddressSuggestions([]);
+            setAddressDropdownOpen(false);
+            setAddressSearchBusy(false);
+            addressSearchAbortRef.current?.abort();
+            return;
+        }
+
+        const timeoutId = window.setTimeout(async () => {
+            addressSearchAbortRef.current?.abort();
+            const controller = new AbortController();
+            addressSearchAbortRef.current = controller;
+            setAddressSearchBusy(true);
+
+            try {
+                const params = new URLSearchParams({
+                    format: "jsonv2",
+                    limit: "8",
+                    addressdetails: "1",
+                    countrycodes: "gb",
+                    viewbox: LONDON_VIEWBOX,
+                    q: query,
+                });
+                const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+                    signal: controller.signal,
+                    headers: { "Accept-Language": "en-GB,en;q=0.9" },
+                });
+                if (!response.ok) throw new Error(`Address search failed (${response.status})`);
+                const raw = (await response.json()) as GeocodeSuggestion[];
+                const next = Array.isArray(raw)
+                    ? raw
+                          .filter((item, index, arr) => arr.findIndex((x) => x.display_name === item.display_name) === index)
+                          .slice(0, 4)
+                    : [];
+                setAddressSuggestions(next);
+                setAddressDropdownOpen(next.length > 0);
+            } catch (e: any) {
+                if (e?.name !== "AbortError") {
+                    setAddressSuggestions([]);
+                    setAddressDropdownOpen(false);
+                }
+            } finally {
+                if (addressSearchAbortRef.current === controller) {
+                    setAddressSearchBusy(false);
+                }
+            }
+        }, 280);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [addressText]);
+
+    useEffect(() => {
+        const onPointerDown = (event: MouseEvent) => {
+            if (!addressLookupRef.current) return;
+            if (!addressLookupRef.current.contains(event.target as Node)) {
+                setAddressDropdownOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", onPointerDown);
+        return () => document.removeEventListener("mousedown", onPointerDown);
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            addressSearchAbortRef.current?.abort();
+            reverseLookupAbortRef.current?.abort();
+        };
+    }, []);
+
+    function openSetupModal(nextMode: Mode) {
+        setMode(nextMode);
+        setSetupTypeDraft(parkingType);
+        setSetupSpacesDraft(capacityTotal || "1");
+        setShowSetupModal(true);
+    }
+
+    function saveSetupModal() {
+        const spaces = Math.floor(Number(setupSpacesDraft || 1));
+        if (!Number.isInteger(spaces) || spaces <= 0) {
+            setError("Number of spaces must be at least 1.");
+            return;
+        }
+        setError("");
+        setParkingType(setupTypeDraft);
+        setCapacityTotal(String(spaces));
+        setCapacityAvailable(String(spaces));
+        setShowSetupModal(false);
+    }
+
+    function updateCustomSlot(slotId: string, patch: Partial<Omit<AvailabilitySlot, "id">>) {
+        setCustomWeeklySlots((prev) => prev.map((slot) => (slot.id === slotId ? { ...slot, ...patch } : slot)));
+    }
+
+    function addCustomSlot() {
+        const last = customWeeklySlots[customWeeklySlots.length - 1];
+        setCustomWeeklySlots((prev) => [
+            ...prev,
+            createAvailabilitySlot({ dow: last?.dow ?? 1, start: last?.start ?? "09:00", end: last?.end ?? "17:00" }),
+        ]);
+    }
+
+    function removeCustomSlot(slotId: string) {
+        setCustomWeeklySlots((prev) => {
+            const next = prev.filter((slot) => slot.id !== slotId);
+            return next.length > 0 ? next : [createAvailabilitySlot()];
+        });
+    }
+
+    function setupSummaryLabel() {
+        const spotCount = Math.max(1, Math.floor(Number(capacityTotal || 1)));
+        return `${parkingType}, ${spotCount} spot${spotCount === 1 ? "" : "s"}!`;
+    }
+
+    function availabilitySummaryLabel() {
+        if (availabilityType === "24_7") return "24/7";
+        if (availabilityType === "same_everyday") return `Every day ${sameStart}-${sameEnd}`;
+        return customWeeklySlots
+            .map((slot) => `${DAY_LABELS[slot.dow].slice(0, 3)} ${slot.start}-${slot.end}`)
+            .join(", ");
+    }
+
+    function pricingSummaryLabel() {
+        if (mode === "free") return "Free";
+        if (mode === "auction") {
+            const startingBid = Number(auctionStartPrice || 0);
+            return `Auction, start £${Number.isFinite(startingBid) ? startingBid.toFixed(2) : "0.00"}`;
+        }
+        const amount = Number(price || 0);
+        return `£${Number.isFinite(amount) ? amount.toFixed(2) : "0.00"} per ${priceUnit}`;
+    }
+
+    function applyPickedLocation(nextLat: number, nextLng: number, nextAddress?: string) {
+        setLat(nextLat.toFixed(6));
+        setLng(nextLng.toFixed(6));
+        if (nextAddress) {
+            suppressSuggestRef.current = true;
+            setAddressText(nextAddress);
+        }
+        setAddressSuggestions([]);
+        setAddressDropdownOpen(false);
+    }
+
+    async function reverseLookupAddress(nextLat: number, nextLng: number) {
+        reverseLookupAbortRef.current?.abort();
+        const controller = new AbortController();
+        reverseLookupAbortRef.current = controller;
+        setReverseLookupBusy(true);
+        try {
+            const params = new URLSearchParams({
+                format: "jsonv2",
+                lat: String(nextLat),
+                lon: String(nextLng),
+                zoom: "18",
+                addressdetails: "1",
+            });
+            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`, {
+                signal: controller.signal,
+                headers: { "Accept-Language": "en-GB,en;q=0.9" },
+            });
+            if (!response.ok) throw new Error(`Reverse lookup failed (${response.status})`);
+            const data = (await response.json()) as { display_name?: string };
+            if (data?.display_name) {
+                suppressSuggestRef.current = true;
+                setAddressText(data.display_name);
+                setAddressSuggestions([]);
+                setAddressDropdownOpen(false);
+            }
+        } catch (e: any) {
+            if (e?.name !== "AbortError") {
+                // Keep coordinates even if reverse lookup fails
+            }
+        } finally {
+            if (reverseLookupAbortRef.current === controller) {
+                setReverseLookupBusy(false);
+            }
+        }
+    }
+
+    function onMapPick(nextLat: number, nextLng: number) {
+        applyPickedLocation(nextLat, nextLng);
+        void reverseLookupAddress(nextLat, nextLng);
+    }
+
+    function onSelectAddressSuggestion(suggestion: GeocodeSuggestion) {
+        const nextLat = Number(suggestion.lat);
+        const nextLng = Number(suggestion.lon);
+        if (!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) return;
+        applyPickedLocation(nextLat, nextLng, suggestion.display_name);
+    }
+
+    function onImageFileChange(event: ChangeEvent<HTMLInputElement>) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        if (file.size > 4 * 1024 * 1024) {
+            setError("Image is too large. Please use a file under 4MB.");
+            event.target.value = "";
+            return;
+        }
+        setError("");
+        setSelectedImageName(file.name);
+        const reader = new FileReader();
+        reader.onload = () => setImageUrl(typeof reader.result === "string" ? reader.result : "");
+        reader.onerror = () => setError("Could not read image file.");
+        reader.readAsDataURL(file);
+    }
+
+    function clearImage() {
+        setImageUrl("");
+        setSelectedImageName("");
+        if (imageInputRef.current) imageInputRef.current.value = "";
+    }
+
+    function buildAvailabilityPayload() {
+        const dateFields = dateFrom || dateTo ? { date_from: dateFrom || undefined, date_to: dateTo || undefined } : {};
+
+        if (availabilityType === "24_7") {
+            return { type: "24_7", ...dateFields };
+        }
+
+        if (availabilityType === "same_everyday") {
+            if (!isTime(sameStart) || !isTime(sameEnd) || minutes(sameStart) >= minutes(sameEnd)) {
+                throw new Error("Same-everyday availability needs valid start and end times.");
+            }
+            return { type: "same_everyday", start: sameStart, end: sameEnd, ...dateFields };
+        }
+
+        const selectedDays = customWeeklySlots.map((slot) => ({
+            dow: Number(slot.dow),
+            start: slot.start,
+            end: slot.end,
+        }));
+        if (selectedDays.length === 0) {
+            throw new Error("Add at least one custom day/time slot.");
+        }
+        for (const slot of selectedDays) {
+            if (!Number.isInteger(slot.dow) || slot.dow < 0 || slot.dow > 6) {
+                throw new Error("Each custom availability row needs a valid day.");
+            }
+            if (!isTime(slot.start) || !isTime(slot.end) || minutes(slot.start) >= minutes(slot.end)) {
+                throw new Error("Each custom availability row needs valid start and end times.");
+            }
+        }
+        return { type: "custom_weekly", rules: selectedDays, ...dateFields };
+    }
+
+    function buildSubmitPayload() {
+        const coords = parseCoordinates(lat, lng);
+        const priceNum = Number(price || 0);
+        const pointsNum = Number(pointsCost || 0);
+        const capacityTotalNum = Math.floor(Number(capacityTotal || 1));
+        const capacityAvailableNum = Math.floor(Number(capacityAvailable || 1));
+
+        if (!title.trim() || title.trim().length < 3) {
+            setError("Title must be at least 3 characters.");
+            return null;
+        }
+        if (!description.trim() || description.trim().length < 5) {
+            setError("Description must be at least 5 characters.");
+            return null;
+        }
+        if (!addressText.trim() || addressText.trim().length < 5) {
+            setError("Address must be at least 5 characters.");
+            return null;
+        }
+        if (!coords) {
+            setError("Pick a valid location using address search or by clicking on the map.");
+            return null;
+        }
+        if (mode === "rent" && (!Number.isFinite(priceNum) || priceNum <= 0)) {
+            setError("Rent listings need a price above 0.");
+            return null;
+        }
+        if (allowPoints && (!Number.isFinite(pointsNum) || pointsNum <= 0)) {
+            setError("Points cost must be above 0 when enabled.");
+            return null;
+        }
+        if (!Number.isInteger(capacityTotalNum) || capacityTotalNum <= 0) {
+            setError("Capacity total must be at least 1.");
+            return null;
+        }
+        if (!Number.isInteger(capacityAvailableNum) || capacityAvailableNum < 0) {
+            setError("Capacity available must be 0 or higher.");
+            return null;
+        }
+        if (capacityAvailableNum > capacityTotalNum) {
+            setError("Capacity available cannot exceed total.");
+            return null;
+        }
+        if (dateFrom && dateTo && dateFrom > dateTo) {
+            setError("Availability start date must be before end date.");
+            return null;
+        }
+
+        let availability;
+        try {
+            availability = buildAvailabilityPayload();
+        } catch (e: any) {
+            setError(e?.message || "Availability is invalid.");
+            return null;
+        }
+
+        const payload: Record<string, any> = {
+            title: title.trim(),
+            description: description.trim(),
+            mode,
+            price_gbp: mode === "rent" ? priceNum : 0,
+            price_unit: priceUnit,
+            allow_points: mode === "free" ? false : allowPoints,
+            points_cost: mode === "free" ? 0 : allowPoints ? pointsNum : 0,
+            address_text: addressText.trim(),
+            lat: coords.lat,
+            lng: coords.lng,
+            image_url: imageUrl.trim() || null,
+            availability,
+            parking_type: parkingType,
+            capacity_total: capacityTotalNum,
+            capacity_available: capacityAvailableNum,
+        };
+
+        if (mode === "auction") {
+            const auctionStartNum = Number(auctionStartPrice || 0);
+            const auctionEndIso = toIsoFromLocalInput(auctionEndLocal);
+            if (!Number.isFinite(auctionStartNum) || auctionStartNum <= 0) {
+                setError("Auction start price must be above 0.");
+                return null;
+            }
+            if (!auctionEndIso) {
+                setError("Auction end date/time is required.");
+                return null;
+            }
+            if (!dateFrom || !dateTo) {
+                setError("Auction listings need availability start and end dates.");
+                return null;
+            }
+            payload.auction_start_price_gbp = auctionStartNum;
+            payload.auction_end = auctionEndIso;
+        }
+
+        return payload;
+    }
+
+    async function onSubmit(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        if (!token) {
+            setError("Please sign in to continue.");
+            return;
+        }
+
+        setError("");
+        setSuccess("");
+        const payload = buildSubmitPayload();
+        if (!payload) return;
+
+        if (isEdit && editId) {
+            setSaving(true);
+            try {
+                await apiPatch<{ parking_spot: ParkingSpot }>(`/parking-spots/${editId}`, payload, token);
+                setSuccess("Listing updated.");
+            } catch (e: any) {
+                setError(e?.message || "Failed to save listing.");
+            } finally {
+                setSaving(false);
+            }
+            return;
+        }
+
+        setPendingPayload(payload);
+        setShowConfirmModal(true);
+    }
+
+    async function onConfirmPublish() {
+        if (!token || !pendingPayload || isEdit) return;
+        setConfirmingPublish(true);
+        setError("");
+        try {
+            const res = await apiPost<{ parking_spot: ParkingSpot }>("/parking-spots", pendingPayload, token);
+            setShowConfirmModal(false);
+            setPendingPayload(null);
+            navigate(`/spots/${res.parking_spot.id}`, { replace: true });
+        } catch (e: any) {
+            setError(e?.message || "Failed to publish listing.");
+        } finally {
+            setConfirmingPublish(false);
+        }
+    }
+
+    async function onDeleteListing() {
+        if (!token || !editId) return;
+        setDeleting(true);
+        setError("");
+        try {
+            await apiDelete<{ deleted: boolean }>(`/parking-spots/${editId}`, token);
+            navigate("/dashboard", { replace: true });
+        } catch (e: any) {
+            setError(e?.message || "Failed to delete listing.");
+            setDeleting(false);
+            setShowDeleteModal(false);
+        }
+    }
+
+    if (!token) {
         return (
             <div className="container">
-                <div className="card" style={{ padding: 14 }}>
-                    Loading…
+                <div className="formNarrow">
+                    <div className="pageHeader">
+                        <div className="heroKicker">LISTINGS</div>
+                        <div className="heroTitle">Sign in to create a listing</div>
+                        <div className="heroSub muted">You need an account before publishing listings.</div>
+                    </div>
+                    <div className="card formSection">
+                        <div className="rowInline">
+                            <Link to="/login" className="btn btn-primary">
+                                Log in
+                            </Link>
+                            <Link to="/signup" className="btn">
+                                Sign up
+                            </Link>
+                        </div>
+                    </div>
                 </div>
             </div>
         );
     }
-    if (!token) return <Navigate to="/" replace />;
 
-    function setError(text: string) {
-        setMsg(text);
-    }
-
-    function setSuccess(text: string) {
-        setMsg(`✅ ${text}`);
-    }
-
-    async function searchAddress() {
-        setMsg(null);
-
-        const q = addressQuery.trim();
-        if (q.length < 5) return setError("Type a more specific address first.");
-
-        setGeoLoading(true);
-        try {
-            const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&q=${encodeURIComponent(
-                q
-            )}`;
-
-            const res = await fetch(url, { headers: { Accept: "application/json" } });
-            const data = await res.json();
-
-            if (!Array.isArray(data) || data.length === 0) {
-                setAddressCandidates([]);
-                setSelectedCandidateIdx(-1);
-                setLocationConfirmed(false);
-                setAddressConfirmedText("");
-                return setError("No results found. Add a city or postcode.");
-            }
-
-            setAddressCandidates(data);
-            setSelectedCandidateIdx(0);
-            setLocationConfirmed(false);
-
-            const best = data[0];
-            const lat = toNumber(best.lat, locLat);
-            const lng = toNumber(best.lon, locLng);
-            setLocLat(lat);
-            setLocLng(lng);
-            setAddressConfirmedText(best.display_name ?? q);
-        } catch {
-            setError("Couldn’t reach the address search. Try again.");
-        } finally {
-            setGeoLoading(false);
-        }
-    }
-
-    function selectCandidate(i: number) {
-        const c = addressCandidates[i];
-        if (!c) return;
-
-        setSelectedCandidateIdx(i);
-        const lat = toNumber(c.lat, locLat);
-        const lng = toNumber(c.lon, locLng);
-        setLocLat(lat);
-        setLocLng(lng);
-
-        setAddressConfirmedText(c.display_name ?? addressQuery.trim());
-        setLocationConfirmed(false);
-    }
-
-    function confirmLocation() {
-        if (!addressConfirmedText.trim()) return setError("Search and select an address first.");
-        setLocationConfirmed(true);
-        setMsg(null);
-    }
-
-    function addRule() {
-        setWeeklyRules((prev) => [...prev, { id: uid(), dow: 1, start: "18:00", end: "22:00" }]);
-    }
-
-    function removeRule(id: string) {
-        setWeeklyRules((prev) => prev.filter((r) => r.id !== id));
-    }
-
-    function updateRule(id: string, patch: Partial<WeeklyRule>) {
-        setWeeklyRules((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-    }
-
-    function validateAvailability(): string | null {
-        if (availabilityDateFrom && availabilityDateTo && availabilityDateFrom > availabilityDateTo) {
-            return "Availability start date must be before end date.";
-        }
-        if (availabilityType === "24_7") return null;
-
-        if (availabilityType === "same_everyday") {
-            if (!everydayStart || !everydayEnd) return "Set start and end time.";
-            if (everydayStart >= everydayEnd) return "Start must be before end.";
-            return null;
-        }
-
-        if (weeklyRules.length === 0) return "Add at least one day/time rule.";
-        for (const r of weeklyRules) {
-            if (!r.start || !r.end) return "Each rule needs start and end time.";
-            if (r.start >= r.end) return "Rule start must be before end.";
-            if (r.dow < 0 || r.dow > 6) return "Invalid day of week.";
-        }
-        return null;
-    }
-
-    async function onSubmit(e: React.FormEvent) {
-        e.preventDefault();
-        setMsg(null);
-
-        const t = title.trim();
-        const d = description.trim();
-
-        if (t.length < 3) return setError("Title must be at least 3 characters.");
-        if (d.length < 5) return setError("Description must be at least 5 characters.");
-
-        if (!addressConfirmedText.trim()) return setError("Search and select an address.");
-        if (!locationConfirmed) return setError("Confirm the address before creating the listing.");
-
-        const avErr = validateAvailability();
-        if (avErr) return setError(avErr);
-
-        // pricing (no state mutation here)
-        const safePrice = toNumber(priceGbp, 0);
-        const priceToSend = isFree || isAuction ? 0 : safePrice;
-
-        if (!isFree && !isAuction) {
-            if (!Number.isFinite(priceToSend) || priceToSend <= 0) return setError("Rent price must be greater than 0.");
-        }
-        if (parkingType === "public" && capacityTotal <= 0) {
-            return setError("Capacity must be greater than 0 for public parking.");
-        }
-        if (capacityAvailable > capacityTotal) {
-            return setError("Available spaces cannot exceed total capacity.");
-        }
-
-        const pointsToSend = allowPoints ? toNumber(pointsCost, 0) : 0;
-        if (allowPoints && pointsToSend <= 0) return setError("Points cost must be greater than 0.");
-
-        let auctionEndIso: string | null = null;
-        if (isAuction) {
-            const startP = toNumber(auctionStartPrice, 0);
-            if (startP <= 0) return setError("Auction start price must be greater than 0.");
-            if (!auctionEnd) return setError("Auction end date/time is required.");
-
-            const dt = new Date(auctionEnd);
-            if (Number.isNaN(dt.getTime())) return setError("Auction end date/time is invalid.");
-            auctionEndIso = dt.toISOString();
-        }
-
-        const availabilityPayload =
-            availabilityType === "24_7"
-                ? { type: "24_7" }
-                : availabilityType === "same_everyday"
-                    ? { type: "same_everyday", start: everydayStart, end: everydayEnd }
-                    : {
-                        type: "custom_weekly",
-                        rules: weeklyRules.map((r) => ({ dow: r.dow, start: r.start, end: r.end })),
-                    };
-        if (availabilityDateFrom) (availabilityPayload as any).date_from = availabilityDateFrom;
-        if (availabilityDateTo) (availabilityPayload as any).date_to = availabilityDateTo;
-
-        if (isAuction && (!availabilityDateFrom || !availabilityDateTo)) {
-            return setError("Auction listings must include an availability date range.");
-        }
-
-        const payload = {
-                title: t,
-                description: d,
-                mode,
-
-                price_gbp: priceToSend,
-                price_unit: priceUnit,
-
-                allow_points: Boolean(allowPoints),
-                points_cost: pointsToSend,
-
-                address_text: addressConfirmedText,
-                lat: Number(locLat),
-                lng: Number(locLng),
-
-                image_url: imageUrl.trim() || null,
-
-                parking_type: parkingType,
-                capacity_total: parkingType === "public" ? capacityTotal : 1,
-                capacity_available: parkingType === "public" ? capacityAvailable : 1,
-
-                // keep BOTH for compatibility with whatever you currently store/read
-                availability: availabilityPayload,
-                availability_json: availabilityPayload,
-
-                auction_start_price_gbp: isAuction ? Number(auctionStartPrice) : null,
-                auction_end: isAuction ? auctionEndIso : null,
-            };
-
-        if (!showPreview) {
-            setShowPreview(true);
-            return;
-        }
-
-        setSubmitting(true);
-        try {
-            if (isEdit && editId) {
-                await apiPatch(`/parking-spots/${editId}`, payload, token);
-                setSuccess("Listing updated.");
-                setTimeout(() => nav(`/spots/${editId}`), 450);
-            } else {
-                await apiPost("/parking-spots", payload, token);
-                setSuccess("Listing created.");
-                setTimeout(() => nav("/", { state: { refresh: Date.now() } }), 450);
-            }
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to create listing.");
-        } finally {
-            setSubmitting(false);
-        }
-    }
-
-    {
-        const locationStatus = locationConfirmed
-            ? "Confirmed"
-            : addressConfirmedText
-                ? "Not confirmed"
-                : "Not set";
-
-        return (
-            <div className="container">
-                <div className="pageHeader formNarrow">
-                    <div className="heroKicker">LIST YOUR SPACE</div>
-                    <div className="heroTitle">{isEdit ? "Edit listing" : "Create a listing"}</div>
-                    <div className="heroSub muted">
-                        {isEdit
-                            ? "Update the details of your listing."
-                            : "Share your parking spot with the community and start accepting bookings."}
-                    </div>
+    return (
+        <div className="container">
+            <div className="formNarrow">
+                <div className="pageHeader">
+                    <div className="heroKicker">{isEdit ? "EDIT LISTING" : "CREATE LISTING"}</div>
+                    <div className="heroTitle">{isEdit ? "Update your listing" : "Publish a new listing"}</div>
+                    <div className="heroSub muted">Signed in as {user?.name ?? "member"}.</div>
                 </div>
 
-                <form onSubmit={onSubmit} className="formGrid formNarrow">
-                    {/* Basics */}
-                    <section className="card formSection">
-                        <div className="sectionHeader">
-                            <div className="h3">Information</div>
-                            <span className="badge">{mode}</span>
-                        </div>
-                        <div className="sectionSub muted">
-                            A clear title and short description help drivers choose your space.
-                        </div>
-
-                        <div className="row">
+                {loadingExisting ? (
+                    <div className="card formSection">
+                        <div className="muted">Loading listing details...</div>
+                    </div>
+                ) : (
+                    <form className="formGrid createListingForm" onSubmit={onSubmit}>
+                        <div className="card formSection formSection--intro">
+                            <div className="sectionHeader">
+                                <div className="h3">1. Name and description</div>
+                                {isEdit && <span className="badge badge--warm">Editing</span>}
+                            </div>
                             <label>
-                                <span>Title</span>
+                                <span>Listing name</span>
                                 <input
                                     className="input"
                                     value={title}
                                     onChange={(e) => setTitle(e.target.value)}
-                                    placeholder="e.g. Private driveway near Angel station"
+                                    placeholder="Example: Secure driveway near station"
                                 />
                             </label>
-
                             <label>
-                                <span>Mode</span>
-                                <select className="input" value={mode}
-                                        onChange={(e) => setMode(e.target.value as Mode)}>
-                                    <option value="rent">rent</option>
-                                    <option value="free">free</option>
-                                    <option value="auction">auction</option>
-                                </select>
+                                <span>Description</span>
+                                <textarea
+                                    className="input"
+                                    rows={4}
+                                    value={description}
+                                    onChange={(e) => setDescription(e.target.value)}
+                                    placeholder="Describe access, entry notes, size limits, and anything drivers should know."
+                                />
                             </label>
                         </div>
 
-                        <label>
-                            <span>Description</span>
-                            <textarea
-                                className="input"
-                                value={description}
-                                onChange={(e) => setDescription(e.target.value)}
-                                rows={4}
-                                placeholder="Gate code, size limits, covered spot, anything useful."
-                            />
-                        </label>
-                    </section>
-
-                    {/* Pricing */}
-                    <section className="card formSection">
-                        <div className="sectionHeader">
-                            <div className="h3">Pricing</div>
-                            {isFree && <span className="badge">Free</span>}
-                            {isAuction && <span className="badge">Auction</span>}
-                        </div>
-                        <div className="sectionSub muted">
-                            {isAuction ? "Set your starting price and end time." : "Choose a price and time unit."}
-                        </div>
-                        {!isAuction ? (
-                            <div className="row">
-                                <label>
-                                    <span>Price (£)</span>
-                                    <input
-                                        className="input"
-                                        type="number"
-                                        min={0}
-                                        step="0.5"
-                                        value={isFree ? 0 : priceGbp}
-                                        onChange={(e) => setPriceGbp(toNumber(e.target.value, 0))}
-                                        disabled={isFree}
-                                    />
-                                </label>
-
-                                <label>
-                                    <span>Per</span>
-                                    <select
-                                        className="input"
-                                        value={priceUnit}
-                                        onChange={(e) => setPriceUnit(e.target.value as PriceUnit)}
-                                        disabled={isFree}
-                                    >
-                                        <option value="hour">hour</option>
-                                        <option value="day">day</option>
-                                        <option value="week">week</option>
-                                    </select>
-                                </label>
-                            </div>
-                        ) : (
-                            <div className="row">
-                                <label>
-                                    <span>Auction start price (£)</span>
-                                    <input
-                                        className="input"
-                                        type="number"
-                                        min={1}
-                                        step="0.5"
-                                        value={auctionStartPrice}
-                                        onChange={(e) => setAuctionStartPrice(toNumber(e.target.value, 1))}
-                                    />
-                                </label>
-
-                                <label>
-                                    <span>Auction end</span>
-                                    <input
-                                        className="input"
-                                        type="datetime-local"
-                                        value={auctionEnd}
-                                        onChange={(e) => setAuctionEnd(e.target.value)}
-                                    />
-                                </label>
-                            </div>
-                        )}
-                    </section>
-
-                    {/* Parking type */}
-                    <section className="card formSection">
-                        <div className="sectionHeader">
-                            <div className="h3">Parking type</div>
-                            <span className="badge">{parkingType}</span>
-                        </div>
-                        <div className="sectionSub muted">
-                            Use Public for large car parks with multiple bays.
-                        </div>
-
-                        <div className="row">
-                            <label>
-                                <span>Type</span>
-                                <select
-                                    className="input"
-                                    value={parkingType}
-                                    onChange={(e) => setParkingType(e.target.value as ParkingType)}
+                        <div className="card formSection formSection--type">
+                            <div className="h3">2. Listing type</div>
+                            <div className="listingTypeGrid">
+                                <button
+                                    type="button"
+                                    className={`listingTypeCard listingTypeCard--rent${mode === "rent" ? " is-active" : ""}`}
+                                    onClick={() => openSetupModal("rent")}
                                 >
-                                    <option value="private">Private space</option>
-                                    <option value="public">Public parking</option>
-                                </select>
-                            </label>
-
-                            <label>
-                                <span>Total spaces</span>
-                                <input
-                                    className="input"
-                                    type="number"
-                                    min={1}
-                                    step="1"
-                                    value={capacityTotal}
-                                    onChange={(e) => {
-                                        const v = toNumber(e.target.value, 1);
-                                        setCapacityTotal(v);
-                                        if (capacityAvailable > v) setCapacityAvailable(v);
-                                    }}
-                                    disabled={parkingType !== "public"}
-                                />
-                            </label>
-                        </div>
-
-                        <label>
-                            <span>Available spaces</span>
-                            <input
-                                className="input"
-                                type="number"
-                                min={0}
-                                step="1"
-                                value={capacityAvailable}
-                                onChange={(e) => setCapacityAvailable(toNumber(e.target.value, 0))}
-                                disabled={parkingType !== "public"}
-                            />
-                        </label>
-                    </section>
-
-                    {/* Availability */}
-                    <section className="card formSection">
-                        <div className="h3">Availability</div>
-                        <div className="sectionSub muted">
-                            Pick when drivers can book your space.
-                        </div>
-
-                        <div className="row">
-                            <label>
-                                <span>Available from (optional)</span>
-                                <input
-                                    className="input"
-                                    type="date"
-                                    value={availabilityDateFrom}
-                                    onChange={(e) => setAvailabilityDateFrom(e.target.value)}
-                                />
-                            </label>
-                            <label>
-                                <span>Available until (optional)</span>
-                                <input
-                                    className="input"
-                                    type="date"
-                                    value={availabilityDateTo}
-                                    onChange={(e) => setAvailabilityDateTo(e.target.value)}
-                                />
-                            </label>
-                        </div>
-
-                        <div className="chips">
-                            <label className="chip" style={{cursor: "pointer"}}>
-                                <input
-                                    type="radio"
-                                    name="av"
-                                    checked={availabilityType === "custom_weekly"}
-                                    onChange={() => setAvailabilityType("custom_weekly")}
-                                />
-                                Custom
-                            </label>
-                            <label className="chip" style={{cursor: "pointer"}}>
-                                <input
-                                    type="radio"
-                                    name="av"
-                                    checked={availabilityType === "same_everyday"}
-                                    onChange={() => setAvailabilityType("same_everyday")}
-                                />
-                                Same time daily
-                            </label>
-                            <label className="chip" style={{cursor: "pointer"}}>
-                                <input
-                                    type="radio"
-                                    name="av"
-                                    checked={availabilityType === "24_7"}
-                                    onChange={() => setAvailabilityType("24_7")}
-                                />
-                                24/7
-                            </label>
-                        </div>
-
-                        {availabilityType === "same_everyday" && (
-                            <div className="row" style={{marginTop: 10}}>
-                                <label>
-                                    <span>Start</span>
-                                    <input className="input" type="time" value={everydayStart}
-                                           onChange={(e) => setEverydayStart(e.target.value)}/>
-                                </label>
-                                <label>
-                                    <span>End</span>
-                                    <input className="input" type="time" value={everydayEnd}
-                                           onChange={(e) => setEverydayEnd(e.target.value)}/>
-                                </label>
-                            </div>
-                        )}
-
-                        {availabilityType === "custom_weekly" && (
-                            <div className="stack">
-                                {weeklyRules.map((r) => (
-                                    <div key={r.id} className="card"
-                                         style={{padding: 12, background: "rgba(255,255,255,0.02)"}}>
-                                        <div style={{
-                                            display: "grid",
-                                            gridTemplateColumns: "1fr 1fr 1fr auto",
-                                            gap: 10,
-                                            alignItems: "end"
-                                        }}>
-                                            <label>
-                                                <span>Day</span>
-                                                <select className="input" value={r.dow}
-                                                        onChange={(e) => updateRule(r.id, {dow: Number(e.target.value)})}>
-                                                    {DOW.map((d) => (
-                                                        <option key={d.id} value={d.id}>
-                                                            {d.label}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </label>
-
-                                            <label>
-                                                <span>Start</span>
-                                                <input className="input" type="time" value={r.start}
-                                                       onChange={(e) => updateRule(r.id, {start: e.target.value})}/>
-                                            </label>
-
-                                            <label>
-                                                <span>End</span>
-                                                <input className="input" type="time" value={r.end}
-                                                       onChange={(e) => updateRule(r.id, {end: e.target.value})}/>
-                                            </label>
-
-                                            <button className="btn" type="button" onClick={() => removeRule(r.id)}>
-                                                Remove
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-
-                                <button className="btn btn-primary" type="button" onClick={addRule}
-                                        style={{width: "fit-content"}}>
-                                    + Add day/time
-                                </button>
-                            </div>
-                        )}
-                    </section>
-
-                    {/* Points */}
-                    <section className="card formSection">
-                        <div className="sectionHeader">
-                            <div className="h3">Points</div>
-                            <label className="chip" style={{cursor: "pointer"}}>
-                                <input type="checkbox" checked={allowPoints}
-                                       onChange={(e) => setAllowPoints(e.target.checked)}
-                                       disabled={isFree}/>
-                                Allow points
-                            </label>
-                        </div>
-                        <div className="sectionSub muted">
-                            Reward points let drivers book using community credits.
-                        </div>
-
-                        <div className="row" style={{opacity: allowPoints ? 1 : 0.6}}>
-                            <label>
-                                <span>Points cost (per {priceUnit})</span>
-                                <input
-                                    className="input"
-                                    type="number"
-                                    min={0}
-                                    step="1"
-                                    value={allowPoints ? pointsCost : 0}
-                                    disabled={!allowPoints}
-                                    onChange={(e) => setPointsCost(toNumber(e.target.value, 0))}
-                                />
-                            </label>
-
-                            <div className="muted tiny">
-                                {isFree ? "Points are disabled for free listings." : "If enabled, users can pay with points instead of money."}
-                            </div>
-                        </div>
-                    </section>
-
-                    {/* Location */}
-                    <section className="card formSection">
-                        <div className="sectionHeader">
-                            <div className="h3">Location</div>
-                            <span className="badge">{locationStatus}</span>
-                        </div>
-                        <div className="sectionSub muted">
-                            Search for your address or place a pin manually on the map.
-                        </div>
-
-                        <div className="row">
-                            <label>
-                                <span>Address</span>
-                                <input
-                                    className="input"
-                                    value={addressQuery}
-                                    onChange={(e) => setAddressQuery(e.target.value)}
-                                    placeholder="e.g. 290 Upper Street, London"
-                                />
-                            </label>
-
-                            <div style={{display: "grid", gap: 8, alignSelf: "end"}}>
-                                <button className="btn btn-primary btn-full" type="button" onClick={searchAddress}
-                                        disabled={geoLoading}>
-                                    {geoLoading ? "Searching…" : "Search address"}
+                                    <div className="listingTypeTitle">Rent</div>
+                                    <div className="listingTypeCopy">Paid listing with fixed price.</div>
                                 </button>
                                 <button
-                                    className="btn"
                                     type="button"
-                                    onClick={() => setPinMode((p) => !p)}
+                                    className={`listingTypeCard listingTypeCard--auction${mode === "auction" ? " is-active" : ""}`}
+                                    onClick={() => openSetupModal("auction")}
                                 >
-                                    {pinMode ? "Cancel pin" : "Place pin manually"}
+                                    <div className="listingTypeTitle">Auction</div>
+                                    <div className="listingTypeCopy">Highest bid wins before the end time.</div>
                                 </button>
-
-                            </div>
-                        </div>
-
-                        {addressCandidates.length > 0 && (
-                            <div className="stack">
-                                <div className="muted tiny">Choose the best match:</div>
-                                {addressCandidates.map((c, i) => (
-                                    <button
-                                        type="button"
-                                        key={String(c.place_id ?? i)}
-                                        className={`btn ${i === selectedCandidateIdx ? "btn-primary" : ""}`}
-                                        style={{justifyContent: "flex-start", textAlign: "left"}}
-                                        onClick={() => selectCandidate(i)}
-                                    >
-                                        {c.display_name}
-                                    </button>
-                                ))}
-
-                                <div className="rowInline">
-                                    <button
-                                        type="button"
-                                        className={`btn ${locationConfirmed ? "btn-primary" : "btn-primary"}`}
-                                        onClick={confirmLocation}
-                                        disabled={locationConfirmed}
-                                        style={{
-                                            opacity: locationConfirmed ? 0.85 : 1,
-                                            cursor: locationConfirmed ? "default" : "pointer",
-                                        }}
-                                    >
-                                        {locationConfirmed ? "✅ Confirmed" : "Confirm this address"}
-                                    </button>
-                                    <div className="tiny muted">
-                                        Address confirmed
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        <div className={`mapWrap ${pinMode ? "mapWrap--pin" : ""}`} style={{height: 320}}>
-                            <MapContainer center={[locLat, locLng]} zoom={16} className="leafletMap">
-                                <Recenter lat={locLat} lng={locLng} zoom={16}/>
-                                {pinMode && (
-                                    <MapClicker
-                                        onPick={(lat, lng) => {
-                                            setLocLat(clamp(Number(lat), -90, 90));
-                                            setLocLng(clamp(Number(lng), -180, 180));
-                                            setAddressConfirmedText(`Pinned location (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
-                                            setLocationConfirmed(true);
-                                            setPinMode(false);
-                                            setMsg("Pin set. You can continue.");
-                                        }}
-                                    />
-                                )}
-                                <TileLayer attribution='&copy; OpenStreetMap contributors'
-                                           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>
-                                <Marker
-                                    position={[locLat, locLng]}
-                                    draggable={true}
-                                    eventHandlers={{
-                                        dragend: (e) => {
-                                            const m = e.target as any;
-                                            const p = m.getLatLng();
-                                            setLocLat(clamp(Number(p.lat), -90, 90));
-                                            setLocLng(clamp(Number(p.lng), -180, 180));
-                                            setLocationConfirmed(true);
-                                            setMsg(null);
-                                        },
-                                    }}
+                                <button
+                                    type="button"
+                                    className={`listingTypeCard listingTypeCard--free${mode === "free" ? " is-active" : ""}`}
+                                    onClick={() => openSetupModal("free")}
                                 >
-                                    <Popup>
-                                        <div style={{maxWidth: 240}}>
-                                            <strong>Pin location</strong>
-                                            <div className="tiny muted" style={{marginTop: 6}}>
-                                                Drag the pin to the exact spot.
-                                            </div>
-                                            <div className="tiny muted" style={{marginTop: 6}}>
-                                                {locLat.toFixed(5)}, {locLng.toFixed(5)}
-                                            </div>
-                                        </div>
-                                    </Popup>
-                                </Marker>
-                            </MapContainer>
-                        </div>
-
-                        <div className="tiny muted">
-                            Pin: <strong>{locLat.toFixed(5)}, {locLng.toFixed(5)}</strong>
-                        </div>
-                    </section>
-
-                    {/* Photo */}
-                    <section className="card formSection">
-                        <div className="sectionHeader">
-                            <div className="h3">Photo</div>
-                            <div className="muted tiny">Optional</div>
-                        </div>
-                        <div className="sectionSub muted">
-                            One clear photo is enough for the listing preview.
-                        </div>
-
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="image/*"
-                            style={{ display: "none" }}
-                            onChange={(e) => {
-                                setMsg(null);
-                                const f = e.target.files?.[0];
-                                if (!f) return;
-
-                                // keep it reasonable (base64 was the 413 culprit)
-                                if (f.size > 5 * 1024 * 1024) {
-                                    setError("Image too large. Choose a file under 5MB.");
-                                    e.currentTarget.value = "";
-                                    return;
-                                }
-
-                                setImageFile(f);
-
-                                // demo-friendly: compress to keep payload below server limits
-                                compressImageToDataUrl(f, 1200, 0.75)
-                                    .then((dataUrl) => {
-                                        setImageUrl(dataUrl);
-                                        setImagePreviewUrl(dataUrl);
-                                    })
-                                    .catch(() => {
-                                        setError("Failed to process image file.");
-                                    });
-                            }}
-                        />
-                        <div className="rowInline">
-                            <button type="button" className="btn btn-primary" onClick={() => fileInputRef.current?.click()}>
-                                Choose image…
-                            </button>
-
-                            {imageFile && (
+                                    <div className="listingTypeTitle">Free</div>
+                                    <div className="listingTypeCopy">No payment required.</div>
+                                </button>
+                            </div>
+                            <div className="setupSummaryCard">
+                                <div className="setupSummaryText">
+                                    Setup: <strong>{setupSummaryLabel()}</strong>
+                                </div>
                                 <button
                                     type="button"
                                     className="btn"
                                     onClick={() => {
-                                        setImageFile(null);
-                                        setImagePreviewUrl((prev) => {
-                                            if (prev) URL.revokeObjectURL(prev);
-                                            return null;
-                                        });
-                                        if (fileInputRef.current) fileInputRef.current.value = "";
+                                        setSetupTypeDraft(parkingType);
+                                        setSetupSpacesDraft(capacityTotal || "1");
+                                        setShowSetupModal(true);
                                     }}
                                 >
-                                    Remove
+                                    Edit setup
                                 </button>
-                            )}
-
-                            <div className="tiny muted">{imageFile?.name ?? "No image selected"}</div>
+                            </div>
                         </div>
 
-                        <label className="rowInline" style={{ alignItems: "center" }}>
-                            <input
-                                type="checkbox"
-                                checked={useImageUrl}
-                                onChange={(e) => setUseImageUrl(e.target.checked)}
-                            />
-                            <span className="muted tiny">Use image URL instead</span>
-                        </label>
-
-                        {useImageUrl && (
-                            <label>
-                                <span>Image URL</span>
-                                <input
-                                    className="input"
-                                    value={imageUrl}
-                                    onChange={(e) => setImageUrl(e.target.value)}
-                                    placeholder="https://…"
-                                />
-                            </label>
-                        )}
-
-                        {imagePreviewUrl && (
-                            <div>
-                                <img
-                                    src={imagePreviewUrl}
-                                    alt="Listing preview"
-                                    style={{
-                                        width: "100%",
-                                        maxHeight: 320,
-                                        objectFit: "cover",
-                                        borderRadius: 12,
-                                        border: "1px solid rgba(255,255,255,0.10)",
-                                    }}
-                                />
+                        <div className="card formSection formSection--availability">
+                            <div className="h3">3. Availability</div>
+                            <div className="availabilityTypeGrid" role="tablist" aria-label="Availability options">
+                                <button
+                                    type="button"
+                                    className={`availabilityTypeBtn${availabilityType === "24_7" ? " is-active" : ""}`}
+                                    onClick={() => setAvailabilityType("24_7")}
+                                >
+                                    24/7
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`availabilityTypeBtn${availabilityType === "same_everyday" ? " is-active" : ""}`}
+                                    onClick={() => setAvailabilityType("same_everyday")}
+                                >
+                                    Same everyday
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`availabilityTypeBtn${availabilityType === "custom_weekly" ? " is-active" : ""}`}
+                                    onClick={() => setAvailabilityType("custom_weekly")}
+                                >
+                                    Custom daily
+                                </button>
                             </div>
-                        )}
-                    </section>
-
-                    {/* Submit */}
-                    <section className="rowInline">
-                        <button className="btn btn-primary" type="submit" disabled={submitting || loadingEdit}>
-                            {submitting ? (isEdit ? "Saving…" : "Creating…") : isEdit ? "Save changes" : "Create listing"}
-                        </button>
-
-                        <button className="btn" type="button" onClick={() => nav("/")}>
-                            Cancel
-                        </button>
-
-                        {msg && (
-                            <div className="tiny" style={{ color: msg.startsWith("✅") ? "var(--accent)" : "crimson" }}>
-                                {msg}
+                            <div className="row">
+                                <label>
+                                    <span>Start date (optional)</span>
+                                    <input
+                                        className="input"
+                                        type="date"
+                                        value={dateFrom}
+                                        onChange={(e) => setDateFrom(e.target.value)}
+                                    />
+                                </label>
+                                <label>
+                                    <span>End date (optional)</span>
+                                    <input
+                                        className="input"
+                                        type="date"
+                                        value={dateTo}
+                                        onChange={(e) => setDateTo(e.target.value)}
+                                    />
+                                </label>
                             </div>
-                        )}
-                    </section>
-                </form>
 
-                {showPreview && (
-                    <div className="modalOverlay" role="dialog" aria-modal="true">
-                        <div className="modalCard receiptCard">
-                            <div className="receiptHeader">
-                                <div className="h2">Listing preview</div>
-                                <div className="muted tiny">Please confirm your details</div>
+                            {availabilityType === "same_everyday" && (
+                                <div className="row">
+                                    <label>
+                                        <span>Start time</span>
+                                        <input
+                                            className="input"
+                                            type="time"
+                                            value={sameStart}
+                                            onChange={(e) => setSameStart(e.target.value)}
+                                        />
+                                    </label>
+                                    <label>
+                                        <span>End time</span>
+                                        <input
+                                            className="input"
+                                            type="time"
+                                            value={sameEnd}
+                                            onChange={(e) => setSameEnd(e.target.value)}
+                                        />
+                                    </label>
+                                </div>
+                            )}
+
+                            {availabilityType === "custom_weekly" && (
+                                <div className="stack">
+                                    {customWeeklySlots.map((slot) => (
+                                        <div className="customSlotRow" key={slot.id}>
+                                            <label>
+                                                <span>Day</span>
+                                                <select
+                                                    value={slot.dow}
+                                                    onChange={(e) =>
+                                                        updateCustomSlot(slot.id, { dow: Number(e.target.value) })
+                                                    }
+                                                >
+                                                    {DAY_LABELS.map((dayLabel, dayIndex) => (
+                                                        <option key={`${slot.id}-${dayLabel}`} value={dayIndex}>
+                                                            {dayLabel}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </label>
+                                            <label>
+                                                <span>Start</span>
+                                                <input
+                                                    className="input"
+                                                    type="time"
+                                                    value={slot.start}
+                                                    onChange={(e) =>
+                                                        updateCustomSlot(slot.id, { start: e.target.value })
+                                                    }
+                                                />
+                                            </label>
+                                            <label>
+                                                <span>End</span>
+                                                <input
+                                                    className="input"
+                                                    type="time"
+                                                    value={slot.end}
+                                                    onChange={(e) =>
+                                                        updateCustomSlot(slot.id, { end: e.target.value })
+                                                    }
+                                                />
+                                            </label>
+                                            <button
+                                                type="button"
+                                                className="btn btn-danger"
+                                                onClick={() => removeCustomSlot(slot.id)}
+                                                disabled={customWeeklySlots.length === 1}
+                                            >
+                                                Remove
+                                            </button>
+                                        </div>
+                                    ))}
+                                    <div className="rowInline">
+                                        <button type="button" className="btn" onClick={addCustomSlot}>
+                                            + More dates and time
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="card formSection formSection--setupPricing">
+                            <div className="h3">4. Pricing</div>
+                            <div className="stack">
+                                {mode === "rent" && (
+                                    <div className="row">
+                                        <label>
+                                            <span>Price unit</span>
+                                            <select
+                                                value={priceUnit}
+                                                onChange={(e) => setPriceUnit(e.target.value as PriceUnit)}
+                                            >
+                                                <option value="hour">Hour</option>
+                                                <option value="day">Day</option>
+                                                <option value="week">Week</option>
+                                            </select>
+                                        </label>
+                                        <label>
+                                            <span>Price (GBP)</span>
+                                            <input
+                                                className="input"
+                                                type="number"
+                                                min="0"
+                                                step="0.5"
+                                                value={price}
+                                                onChange={(e) => setPrice(e.target.value)}
+                                            />
+                                        </label>
+                                    </div>
+                                )}
+
+                                {mode === "auction" && (
+                                    <div className="row">
+                                        <label>
+                                            <span>Starting bid (GBP)</span>
+                                            <input
+                                                className="input"
+                                                type="number"
+                                                min="0"
+                                                step="0.5"
+                                                value={auctionStartPrice}
+                                                onChange={(e) => setAuctionStartPrice(e.target.value)}
+                                            />
+                                        </label>
+                                        <label>
+                                            <span>Auction end date/time</span>
+                                            <input
+                                                className="input"
+                                                type="datetime-local"
+                                                value={auctionEndLocal}
+                                                onChange={(e) => setAuctionEndLocal(e.target.value)}
+                                            />
+                                        </label>
+                                    </div>
+                                )}
+
+                                {mode === "free" && (
+                                    <div className="modeInfoNote">Free listings do not require a money price.</div>
+                                )}
+
+                                <div className="pointsQuickCard">
+                                    <label className="chip" style={{ justifyContent: "flex-start" }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={allowPoints}
+                                            disabled={mode === "free"}
+                                            onChange={(e) => setAllowPoints(e.target.checked)}
+                                        />
+                                        <span>Allow points payment</span>
+                                    </label>
+                                    {mode === "free" && (
+                                        <span className="pointsDisabledNote">Points payment is disabled for free listings.</span>
+                                    )}
+                                    {allowPoints && mode !== "free" && (
+                                        <label>
+                                            <span>Points cost</span>
+                                            <input
+                                                className="input"
+                                                type="number"
+                                                min="0"
+                                                step="1"
+                                                value={pointsCost}
+                                                onChange={(e) => setPointsCost(e.target.value)}
+                                            />
+                                        </label>
+                                    )}
+                                </div>
                             </div>
-                            <div className="receiptBody">
-                                <div className="receiptRow">
-                                    <span className="muted">Title</span>
-                                    <strong>{title || "Untitled"}</strong>
-                                </div>
-                                <div className="receiptRow">
-                                    <span className="muted">Mode</span>
-                                    <strong>{mode}</strong>
-                                </div>
-                                <div className="receiptRow">
-                                    <span className="muted">Price</span>
-                                    <strong>{isFree ? "Free" : isAuction ? "Auction" : `£${toNumber(priceGbp, 0).toFixed(2)} ${unitLabel}`}</strong>
-                                </div>
-                                <div className="receiptRow">
-                                    <span className="muted">Address</span>
-                                    <strong>{addressConfirmedText || "Pinned location"}</strong>
-                                </div>
-                                <div className="receiptRow">
-                                    <span className="muted">Availability</span>
-                                    <strong>{availabilityType === "24_7" ? "24/7" : availabilityType === "same_everyday" ? `Daily ${everydayStart}–${everydayEnd}` : "Custom weekly"}</strong>
-                                </div>
-                                {parkingType === "public" && (
-                                    <div className="receiptRow">
-                                        <span className="muted">Spaces</span>
-                                        <strong>{capacityAvailable}/{capacityTotal} available</strong>
+                        </div>
+
+                        <div className="card formSection formSection--location">
+                            <div className="sectionHeader">
+                                <div className="h3">5. Location</div>
+                            </div>
+                            <div className="addressLookupWrap" ref={addressLookupRef}>
+                                <label>
+                                    <span>Address</span>
+                                    <input
+                                        className="input"
+                                        value={addressText}
+                                        onChange={(e) => setAddressText(e.target.value)}
+                                        onFocus={() => setAddressDropdownOpen(addressSuggestions.length > 0)}
+                                        placeholder="Start typing an address (e.g. 295 Upper Street)"
+                                        autoComplete="off"
+                                    />
+                                </label>
+                                {addressSearchBusy && <div className="addressLookupStatus muted">Searching address options...</div>}
+                                {addressDropdownOpen && addressSuggestions.length > 0 && (
+                                    <div className="addressSuggestList" role="listbox" aria-label="Address suggestions">
+                                        {addressSuggestions.map((suggestion) => (
+                                            <button
+                                                key={`${suggestion.place_id}-${suggestion.lat}-${suggestion.lon}`}
+                                                type="button"
+                                                className="addressSuggestItem"
+                                                onClick={() => onSelectAddressSuggestion(suggestion)}
+                                            >
+                                                {suggestion.display_name}
+                                            </button>
+                                        ))}
                                     </div>
                                 )}
                             </div>
-                            <div className="receiptActions">
-                                <button className="btn" type="button" onClick={() => setShowPreview(false)}>
-                                    Edit
+                            <div className="locationHelp muted">
+                                Click anywhere on the map to place your pin and auto-fill the nearest real address.
+                            </div>
+                            {reverseLookupBusy && <div className="addressLookupStatus muted">Finding the closest address...</div>}
+                            <div className="mapWrap mapWrap--pin createListingMap">
+                                <div className="leafletShell">
+                                    <MapContainer center={mapCenter} zoom={13} className="leafletMap">
+                                        <MapRecenter center={mapCenter} />
+                                        <TileLayer
+                                            attribution='&copy; OpenStreetMap contributors'
+                                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                        />
+                                        <MapPickerPin position={markerPosition} onPick={onMapPick} />
+                                    </MapContainer>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="card formSection formSection--media">
+                            <div className="sectionHeader">
+                                <div className="h3">6. Listing image</div>
+                                <span className="badge">Optional</span>
+                            </div>
+                            <div className="muted">
+                                Upload one clear photo so drivers can quickly identify the parking space.
+                            </div>
+                            <input
+                                ref={imageInputRef}
+                                className="srOnlyInput"
+                                type="file"
+                                accept="image/*"
+                                onChange={onImageFileChange}
+                            />
+                            <div className="uploadRow">
+                                <button type="button" className="btn btn-primary" onClick={() => imageInputRef.current?.click()}>
+                                    {imageUrl ? "Change image" : "Choose image"}
                                 </button>
-                                <button
-                                    className="btn btn-primary"
-                                    type="button"
-                                    onClick={(e) => onSubmit(e as any)}
-                                    disabled={submitting}
-                                >
-                                    Confirm & submit
+                                <span className="uploadFileName">{selectedImageName || "No file selected"}</span>
+                                {imageUrl && (
+                                    <button type="button" className="btn" onClick={clearImage}>
+                                        Remove image
+                                    </button>
+                                )}
+                            </div>
+                            <div className="uploadHint muted">Supported formats: PNG, JPG, WEBP. Max size: 4MB.</div>
+                            <div className="listingImagePreviewWrap">
+                                {imageUrl ? (
+                                    <img src={imageUrl} alt="Listing preview" className="listingImagePreview" />
+                                ) : (
+                                    <div className="listingImageEmpty">Image preview will appear here.</div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="card formSection">
+                            {error && <div className="spotAlert">{error}</div>}
+                            {success && <div className="badge badge--green">{success}</div>}
+                            <div className="rowInline">
+                                <button className="btn btn-primary" type="submit" disabled={saving || deleting}>
+                                    {saving ? "Saving..." : isEdit ? "Save changes" : "Publish listing"}
+                                </button>
+                                <Link className="btn" to={isEdit && editId ? `/spots/${editId}` : "/dashboard"}>
+                                    Cancel
+                                </Link>
+                                {isEdit && (
+                                    <button
+                                        type="button"
+                                        className="btn btn-danger"
+                                        disabled={saving || deleting}
+                                        onClick={() => setShowDeleteModal(true)}
+                                    >
+                                        Delete listing
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </form>
+                )}
+            </div>
+
+            {showSetupModal && (
+                <div
+                    className="modalOverlay"
+                    role="dialog"
+                    aria-modal="true"
+                    onClick={(e) => {
+                        if (e.target === e.currentTarget) setShowSetupModal(false);
+                    }}
+                >
+                    <div className="modalCard">
+                        <div className="receiptCard">
+                            <div className="receiptHeader">
+                                <div className="h2">Setup details</div>
+                                <div className="muted">Choose if this listing is private or public, and how many spaces it has.</div>
+                            </div>
+                            <div className="receiptBody">
+                                <div className="availabilityTypeGrid" role="tablist" aria-label="Parking type options">
+                                    <button
+                                        type="button"
+                                        className={`availabilityTypeBtn${setupTypeDraft === "private" ? " is-active" : ""}`}
+                                        onClick={() => setSetupTypeDraft("private")}
+                                    >
+                                        Private
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`availabilityTypeBtn${setupTypeDraft === "public" ? " is-active" : ""}`}
+                                        onClick={() => setSetupTypeDraft("public")}
+                                    >
+                                        Public
+                                    </button>
+                                </div>
+                                <label>
+                                    <span>How many spaces?</span>
+                                    <input
+                                        className="input"
+                                        type="number"
+                                        min="1"
+                                        value={setupSpacesDraft}
+                                        onChange={(e) => setSetupSpacesDraft(e.target.value)}
+                                    />
+                                </label>
+                            </div>
+                            <div className="receiptActions">
+                                <button type="button" className="btn" onClick={() => setShowSetupModal(false)}>
+                                    Cancel
+                                </button>
+                                <button type="button" className="btn btn-primary" onClick={saveSetupModal}>
+                                    Save setup
                                 </button>
                             </div>
                         </div>
                     </div>
-                )}
-            </div>
-        );
-    }}
+                </div>
+            )}
+
+            {showConfirmModal && !isEdit && (
+                <div
+                    className="modalOverlay"
+                    role="dialog"
+                    aria-modal="true"
+                    onClick={(e) => {
+                        if (e.target === e.currentTarget && !confirmingPublish) {
+                            setShowConfirmModal(false);
+                            setPendingPayload(null);
+                        }
+                    }}
+                >
+                    <div className="modalCard">
+                        <div className="receiptCard">
+                            <div className="receiptHeader">
+                                <div className="h2">Confirm listing</div>
+                                <div className="muted">Review the details below, then confirm to publish.</div>
+                            </div>
+                            <div className="receiptBody">
+                                <div className="receiptRow">
+                                    <span>Title</span>
+                                    <strong>{title || "-"}</strong>
+                                </div>
+                                <div className="receiptRow">
+                                    <span>Type</span>
+                                    <strong>{mode}</strong>
+                                </div>
+                                <div className="receiptRow">
+                                    <span>Setup</span>
+                                    <strong>{setupSummaryLabel()}</strong>
+                                </div>
+                                <div className="receiptRow">
+                                    <span>Availability</span>
+                                    <strong>{availabilitySummaryLabel() || "-"}</strong>
+                                </div>
+                                <div className="receiptRow">
+                                    <span>Pricing</span>
+                                    <strong>{pricingSummaryLabel()}</strong>
+                                </div>
+                                <div className="receiptRow">
+                                    <span>Address</span>
+                                    <strong>{addressText || "-"}</strong>
+                                </div>
+                            </div>
+                            <div className="receiptActions">
+                                <button
+                                    type="button"
+                                    className="btn"
+                                    disabled={confirmingPublish}
+                                    onClick={() => {
+                                        setShowConfirmModal(false);
+                                        setPendingPayload(null);
+                                    }}
+                                >
+                                    Go back
+                                </button>
+                                <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    disabled={confirmingPublish}
+                                    onClick={onConfirmPublish}
+                                >
+                                    {confirmingPublish ? "Publishing..." : "Confirm and publish"}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showDeleteModal && (
+                <div
+                    className="modalOverlay"
+                    role="dialog"
+                    aria-modal="true"
+                    onClick={(e) => {
+                        if (e.target === e.currentTarget && !deleting) setShowDeleteModal(false);
+                    }}
+                >
+                    <div className="modalCard">
+                        <div className="receiptCard">
+                            <div className="receiptHeader">
+                                <div className="h2">Delete this listing?</div>
+                                <div className="muted">This action is permanent and removes the listing for all users.</div>
+                            </div>
+                            <div className="receiptBody">
+                                <div className="receiptRow">
+                                    <span>Title</span>
+                                    <strong>{title || "Untitled listing"}</strong>
+                                </div>
+                                <div className="receiptRow">
+                                    <span>Address</span>
+                                    <strong>{addressText || "-"}</strong>
+                                </div>
+                            </div>
+                            <div className="receiptActions">
+                                <button type="button" className="btn" disabled={deleting} onClick={() => setShowDeleteModal(false)}>
+                                    Keep listing
+                                </button>
+                                <button type="button" className="btn btn-danger" disabled={deleting} onClick={onDeleteListing}>
+                                    {deleting ? "Deleting..." : "Delete permanently"}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}

@@ -47,6 +47,10 @@ export type User = {
     email: string;
     name: string;
     points_balance: number;
+    stripe_account_id?: string | null;
+    stripe_charges_enabled?: boolean;
+    stripe_payouts_enabled?: boolean;
+    stripe_details_submitted?: boolean;
     created_at: string;
 };
 

@@ -69,3 +69,21 @@ export async function apiPatch<T>(
 
     return data as ApiOk<T>;
 }
+
+export async function apiDelete<T>(
+    path: string,
+    token?: string
+): Promise<ApiOk<T>> {
+    const res = await fetch(`${API_BASE}${path}`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    const data = await parseJson(res);
+
+    if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `Request failed (${res.status})`);
+    }
+
+    return data as ApiOk<T>;
+}

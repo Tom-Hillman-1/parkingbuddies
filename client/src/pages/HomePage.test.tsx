@@ -84,4 +84,26 @@ describe("HomePage", () => {
 
         vi.useRealTimers();
     });
+
+    it("shows only the top 4 search results", async () => {
+        (apiGet as MockedFunction<typeof apiGet>).mockResolvedValue({
+            ok: true,
+            parking_spots: [
+                { ...baseSpot, id: "spot-1", title: "Spot 1", address_text: "1 Test St" },
+                { ...baseSpot, id: "spot-2", title: "Spot 2", address_text: "2 Test St" },
+                { ...baseSpot, id: "spot-3", title: "Spot 3", address_text: "3 Test St" },
+                { ...baseSpot, id: "spot-4", title: "Spot 4", address_text: "4 Test St" },
+                { ...baseSpot, id: "spot-5", title: "Spot 5", address_text: "5 Test St" },
+            ],
+        });
+
+        renderHome();
+
+        expect(await screen.findByText("Spot 1")).toBeInTheDocument();
+        expect(screen.getByText("Spot 2")).toBeInTheDocument();
+        expect(screen.getByText("Spot 3")).toBeInTheDocument();
+        expect(screen.getByText("Spot 4")).toBeInTheDocument();
+        expect(screen.queryByText("Spot 5")).not.toBeInTheDocument();
+        expect(screen.getByText(/Showing 4 of 5 spots/)).toBeInTheDocument();
+    });
 });

@@ -27,11 +27,26 @@ const selectedIcon = new L.Icon({
     shadowSize: [41, 41],
 });
 
+const hoverIcon = new L.Icon({
+    iconRetinaUrl: markerIcon2x,
+    iconUrl: markerIcon,
+    shadowUrl: markerShadow,
+    iconSize: [26, 40],
+    iconAnchor: [13, 40],
+    popupAnchor: [0, -36],
+    shadowSize: [38, 38],
+});
+
 function moneyLabel(x: any, mode?: string) {
     if (mode === "auction") return "Auction";
     const n = Number(x ?? 0);
     if (!Number.isFinite(n) || n <= 0) return "Free";
     return `£${n.toFixed(2)}`;
+}
+
+function modeLabel(mode?: string) {
+    if (!mode) return "Unknown";
+    return mode.charAt(0).toUpperCase() + mode.slice(1);
 }
 
 
@@ -53,12 +68,16 @@ export default function SpotsMap({
                                      spots,
                                      center = { lat: 51.5074, lng: -0.1278 },
                                      selectedId,
+                                     hoveredId,
                                      onSelect,
+                                     onHover,
                                  }: {
     spots: ParkingSpot[];
     center?: { lat: number; lng: number };
     selectedId?: string | null;
+    hoveredId?: string | null;
     onSelect?: (id: string) => void;
+    onHover?: (id: string | null) => void;
 }) {
     return (
         <div className="leafletShell">
@@ -72,8 +91,9 @@ export default function SpotsMap({
 
                 {spots.map((s) => {
                     const isSelected = selectedId === s.id;
+                    const isHovered = hoveredId === s.id;
                     // IMPORTANT: never pass icon={undefined}
-                    const iconProps = isSelected ? { icon: selectedIcon } : { icon: defaultIcon };
+                    const iconProps = isSelected ? { icon: selectedIcon } : isHovered ? { icon: hoverIcon } : { icon: defaultIcon };
 
                     return (
                         <Marker
@@ -82,6 +102,14 @@ export default function SpotsMap({
                             {...iconProps}
                             eventHandlers={{
                                 click: () => onSelect?.(s.id),
+                                mouseover: (e) => {
+                                    onHover?.(s.id);
+                                    e.target.openPopup();
+                                },
+                                mouseout: (e) => {
+                                    onHover?.(null);
+                                    e.target.closePopup();
+                                },
                             }}
                         >
                             <Popup>
@@ -89,7 +117,7 @@ export default function SpotsMap({
                                     <div style={{ fontWeight: 800 }}>{s.title}</div>
                                     <div style={{ fontSize: 12, opacity: 0.8 }}>{s.address_text}</div>
                                     <div style={{ marginTop: 6 }}>
-                                        {moneyLabel((s as any).price_gbp, s.mode)} • {s.mode}
+                                        {moneyLabel((s as any).price_gbp, s.mode)} • {modeLabel(s.mode)}
                                     </div>
                                     <div style={{ marginTop: 10 }}>
                                         <Link to={`/spots/${s.id}`}>View details</Link>

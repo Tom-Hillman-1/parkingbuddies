@@ -22,6 +22,10 @@ type BookingDetail = {
     spot_mode?: string;
     spot_price_gbp?: any;
     spot_price_unit?: string;
+    payment_id?: string | null;
+    payment_provider?: string | null;
+    payment_provider_ref?: string | null;
+    payment_status?: string | null;
 };
 
 function toMoney(x: any) {
@@ -71,18 +75,23 @@ export default function BookingDetailsPage() {
         booking.pay_method === "points"
             ? `${booking.total_points ?? 0} pts`
             : `£${toMoney(booking.total_price_gbp).toFixed(2)}`;
+    const transactionId = booking.payment_provider_ref || booking.payment_id || null;
+    const needsPaymentConfirmation =
+        booking.pay_method === "money" &&
+        Number(booking.total_price_gbp ?? 0) > 0 &&
+        booking.status === "pending";
 
     return (
         <div className="container">
             <div className="pageHeader">
                 <div className="heroKicker">BOOKING</div>
-                <div className="heroTitle">Your reservation</div>
-                <div className="heroSub muted">Booking summary and time window.</div>
+                <div className="heroTitle">Booking receipt</div>
+                <div className="heroSub muted">Review booking details and payment status.</div>
             </div>
 
             <div className="spotDetails">
                 <aside className="spotMedia">
-                    <Link to="/dashboard" className="muted tiny" style={{ textDecoration: "none" }}>
+                    <Link to="/dashboard?tab=myBookings" className="muted tiny" style={{ textDecoration: "none" }}>
                         ← Back to dashboard
                     </Link>
                     <div className="card spotMediaCard">
@@ -132,7 +141,9 @@ export default function BookingDetailsPage() {
                     <div className="card receiptCard">
                         <div className="receiptHeader">
                             <div className="h2">Booking receipt</div>
-                            <div className="muted tiny">Keep this for your records</div>
+                            <div className="muted tiny">
+                                {needsPaymentConfirmation ? "Please verify before continuing to payment." : "Keep this for your records"}
+                            </div>
                         </div>
                         <div className="receiptBody">
                             <div className="receiptRow">
@@ -148,8 +159,16 @@ export default function BookingDetailsPage() {
                                 <strong>{booking.pay_method}</strong>
                             </div>
                             <div className="receiptRow">
+                                <span className="muted">Payment status</span>
+                                <strong>{booking.payment_status ?? "Not paid yet"}</strong>
+                            </div>
+                            <div className="receiptRow">
                                 <span className="muted">Total paid</span>
                                 <strong>{totalLabel}</strong>
+                            </div>
+                            <div className="receiptRow">
+                                <span className="muted">Transaction ID</span>
+                                <strong>{transactionId ?? "Will appear after payment"}</strong>
                             </div>
                             <div className="receiptRow">
                                 <span className="muted">Booking ID</span>
@@ -160,9 +179,9 @@ export default function BookingDetailsPage() {
                             <Link to={`/spots/${booking.parking_spot_id}`} className="btn">
                                 View listing
                             </Link>
-                            {booking.pay_method === "money" && Number(booking.total_price_gbp ?? 0) > 0 && booking.status === "pending" && (
+                            {needsPaymentConfirmation && (
                                 <Link to={`/pay/${booking.id}`} className="btn btn-primary">
-                                    Pay now
+                                    Continue to payment
                                 </Link>
                             )}
                         </div>

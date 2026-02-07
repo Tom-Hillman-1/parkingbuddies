@@ -55,7 +55,16 @@ router.patch("/profile", requireAuth, async (req: AuthRequest, res) => {
             `UPDATE users
        SET ${updates.join(", ")}, updated_at = now()
        WHERE id = $${i}
-       RETURNING id, email, name, points_balance, created_at, updated_at`,
+       RETURNING id,
+                 email,
+                 name,
+                 points_balance,
+                 stripe_account_id,
+                 stripe_charges_enabled,
+                 stripe_payouts_enabled,
+                 stripe_details_submitted,
+                 created_at,
+                 updated_at`,
             values
         );
 

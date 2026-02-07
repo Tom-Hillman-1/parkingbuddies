@@ -46,6 +46,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    useEffect(() => {
+        if (!token) return;
+        refreshMe().catch(() => {});
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [token]);
+
+    useEffect(() => {
+        if (!token) return;
+        const onFocus = () => {
+            refreshMe().catch(() => {});
+        };
+        const onVisibility = () => {
+            if (document.visibilityState === "visible") {
+                refreshMe().catch(() => {});
+            }
+        };
+        const interval = window.setInterval(() => {
+            refreshMe().catch(() => {});
+        }, 30000);
+
+        window.addEventListener("focus", onFocus);
+        document.addEventListener("visibilitychange", onVisibility);
+        return () => {
+            window.clearInterval(interval);
+            window.removeEventListener("focus", onFocus);
+            document.removeEventListener("visibilitychange", onVisibility);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [token]);
+
     async function login(email: string, password: string) {
         const r = await apiPost<{ token: string }>("/auth/login", { email, password });
         localStorage.setItem(TOKEN_KEY, r.token);

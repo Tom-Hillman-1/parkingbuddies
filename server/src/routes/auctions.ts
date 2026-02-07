@@ -11,6 +11,12 @@ function toMoney(x: any) {
     return Number.isFinite(n) ? n : 0;
 }
 
+function calcUnitsForMinutes(minutes: number) {
+    if (!Number.isFinite(minutes) || minutes <= 0) return 0;
+    const roundedMinutes = Math.max(5, Math.ceil(minutes / 5) * 5);
+    return roundedMinutes / 60;
+}
+
 let auctionSchemaReady = false;
 async function ensureAuctionBidSchema() {
     if (auctionSchemaReady) return;
@@ -18,11 +24,16 @@ async function ensureAuctionBidSchema() {
         await pool.query(
             `ALTER TABLE auction_bids
              ADD COLUMN IF NOT EXISTS start_time timestamptz,
-             ADD COLUMN IF NOT EXISTS end_time timestamptz`
+             ADD COLUMN IF NOT EXISTS end_time timestamptz,
+             ADD COLUMN IF NOT EXISTS pay_method text,
+             ADD COLUMN IF NOT EXISTS amount_points integer`
         );
         await pool.query(
             `ALTER TABLE auction_bids
              ALTER COLUMN status SET DEFAULT 'pending'`
+        );
+        await pool.query(
+            `UPDATE auction_bids SET pay_method = 'money' WHERE pay_method IS NULL`
         );
         await pool.query(`UPDATE auction_bids SET status = 'pending' WHERE status IS NULL`);
         auctionSchemaReady = true;
@@ -189,14 +200,26 @@ router.get("/:spotId", async (req, res) => {
             `SELECT amount_gbp FROM auction_bids
              WHERE parking_spot_id = $1
                AND status = 'pending'
+               AND pay_method = 'money'
              ORDER BY amount_gbp DESC, created_at ASC
              LIMIT 1`,
             [spotId]
         );
         const highest = highestR.rowCount ? toMoney(highestR.rows[0].amount_gbp) : 0;
 
+        const highestPointsR = await pool.query(
+            `SELECT amount_points FROM auction_bids
+             WHERE parking_spot_id = $1
+               AND status = 'pending'
+               AND pay_method = 'points'
+             ORDER BY amount_points DESC, created_at ASC
+             LIMIT 1`,
+            [spotId]
+        );
+        const highestPoints = highestPointsR.rowCount ? Number(highestPointsR.rows[0].amount_points ?? 0) : 0;
+
         const approvedR = await pool.query(
-            `SELECT id, amount_gbp, status, start_time, end_time, created_at, updated_at
+            `SELECT id, amount_gbp, amount_points, pay_method, status, start_time, end_time, created_at, updated_at
              FROM auction_bids
              WHERE parking_spot_id = $1 AND status = 'accepted'
              ORDER BY updated_at DESC, created_at DESC
@@ -205,7 +228,7 @@ router.get("/:spotId", async (req, res) => {
         );
 
         const pendingR = await pool.query(
-            `SELECT id, amount_gbp, status, start_time, end_time, created_at
+            `SELECT id, amount_gbp, amount_points, pay_method, status, start_time, end_time, created_at
              FROM auction_bids
              WHERE parking_spot_id = $1 AND status = 'pending'
              ORDER BY amount_gbp DESC, created_at ASC
@@ -221,6 +244,7 @@ router.get("/:spotId", async (req, res) => {
 
         const auction: any = {
             highest_pending_bid_gbp: highest,
+            highest_pending_bid_points: highestPoints,
             auction_end: spot.auction_end,
             auction_start_price_gbp: spot.auction_start_price_gbp,
             pending_bids: pendingR.rows,
@@ -237,7 +261,7 @@ router.get("/:spotId", async (req, res) => {
                 const payload = jwt.verify(token, secret) as { userId: string };
                 if (payload.userId === spot.owner_user_id) {
                     const bidsR = await pool.query(
-                        `SELECT b.id, b.amount_gbp, b.status, b.start_time, b.end_time, b.created_at, u.name AS bidder_name, u.email AS bidder_email
+                        `SELECT b.id, b.amount_gbp, b.amount_points, b.pay_method, b.status, b.start_time, b.end_time, b.created_at, u.name AS bidder_name, u.email AS bidder_email
                          FROM auction_bids b
                          JOIN users u ON u.id = b.bidder_user_id
                          WHERE b.parking_spot_id = $1
@@ -261,27 +285,28 @@ router.get("/:spotId", async (req, res) => {
 
 /**
  * GET /auctions/:spotId/me
- * Returns the authenticated user's latest bid status for this auction.
+ * Returns the authenticated user's bids for this auction.
  */
 router.get("/:spotId/me", requireAuth, async (req: AuthRequest, res) => {
     const spotId = req.params.spotId;
     try {
         await ensureAuctionBidSchema();
 
-        const bidR = await pool.query(
-            `SELECT amount_gbp, status, start_time, end_time
+        const bidsR = await pool.query(
+            `SELECT id, amount_gbp, amount_points, pay_method, status, start_time, end_time, created_at
              FROM auction_bids
              WHERE parking_spot_id = $1 AND bidder_user_id = $2
              ORDER BY created_at DESC
-             LIMIT 1`,
+             LIMIT 50`,
             [spotId, req.userId]
         );
 
-        if (!bidR.rowCount) {
-            return res.json({ ok: true, me: null });
+        if (!bidsR.rowCount) {
+            return res.json({ ok: true, me: null, bids: [] });
         }
 
-        return res.json({ ok: true, me: bidR.rows[0] });
+        // Keep `me` for backwards compatibility while also returning all bids.
+        return res.json({ ok: true, me: bidsR.rows[0], bids: bidsR.rows });
     } catch (e) {
         return res.status(500).json({ ok: false, error: String(e) });
     }
@@ -316,7 +341,7 @@ router.get("/:spotId/owner", requireAuth, async (req: AuthRequest, res) => {
         }
 
         const bidsR = await pool.query(
-            `SELECT b.id, b.amount_gbp, b.status, b.start_time, b.end_time, b.created_at, u.name AS bidder_name, u.email AS bidder_email
+            `SELECT b.id, b.amount_gbp, b.amount_points, b.pay_method, b.status, b.start_time, b.end_time, b.created_at, u.name AS bidder_name, u.email AS bidder_email
              FROM auction_bids b
              JOIN users u ON u.id = b.bidder_user_id
              WHERE b.parking_spot_id = $1
@@ -326,7 +351,7 @@ router.get("/:spotId/owner", requireAuth, async (req: AuthRequest, res) => {
 
         const highestR = await pool.query(
             `SELECT amount_gbp FROM auction_bids
-             WHERE parking_spot_id = $1 AND status = 'pending'
+             WHERE parking_spot_id = $1 AND status = 'pending' AND pay_method = 'money'
              ORDER BY amount_gbp DESC, created_at ASC
              LIMIT 1`,
             [spotId]
@@ -359,6 +384,8 @@ router.get("/owner/bids", requireAuth, async (req: AuthRequest, res) => {
                  b.id,
                  b.parking_spot_id,
                  b.amount_gbp,
+                 b.amount_points,
+                 b.pay_method,
                  b.status,
                  b.created_at,
                  b.start_time,
@@ -389,7 +416,7 @@ router.get("/me/pending", requireAuth, async (req: AuthRequest, res) => {
     try {
         await ensureAuctionBidSchema();
         const r = await pool.query(
-            `SELECT b.id, b.parking_spot_id, b.amount_gbp, b.status, b.created_at, b.start_time, b.end_time, ps.title AS spot_title
+            `SELECT b.id, b.parking_spot_id, b.amount_gbp, b.amount_points, b.pay_method, b.status, b.created_at, b.start_time, b.end_time, ps.title AS spot_title
              FROM auction_bids b
                       JOIN parking_spots ps ON ps.id = b.parking_spot_id
              WHERE b.bidder_user_id = $1
@@ -404,21 +431,118 @@ router.get("/me/pending", requireAuth, async (req: AuthRequest, res) => {
 });
 
 /**
+ * GET /auctions/bids/:bidId
+ * Auth: bidder or owner can view bid receipt details.
+ */
+router.get("/bids/:bidId", requireAuth, async (req: AuthRequest, res) => {
+    const bidId = req.params.bidId;
+    try {
+        await ensureAuctionBidSchema();
+        const r = await pool.query(
+            `SELECT b.id,
+                    b.parking_spot_id,
+                    b.bidder_user_id,
+                    b.amount_gbp,
+                    b.amount_points,
+                    b.pay_method,
+                    b.status,
+                    b.created_at,
+                    b.start_time,
+                    b.end_time,
+                    ps.title AS spot_title,
+                    ps.address_text AS spot_address,
+                    ps.owner_user_id
+             FROM auction_bids b
+                      JOIN parking_spots ps ON ps.id = b.parking_spot_id
+             WHERE b.id = $1`,
+            [bidId]
+        );
+        if (!r.rowCount) {
+            return res.status(404).json({ ok: false, error: "Bid not found" });
+        }
+
+        const row = r.rows[0] as any;
+        if (row.bidder_user_id !== req.userId && row.owner_user_id !== req.userId) {
+            return res.status(403).json({ ok: false, error: "Not authorized to view this bid" });
+        }
+
+        let bookingId: string | null = null;
+        let paymentStatus: string | null = null;
+        if ((row.pay_method ?? "money") === "money" && row.start_time && row.end_time) {
+            const paymentR = await pool.query(
+                `SELECT
+                     b.id AS booking_id,
+                     pay.status AS payment_status
+                 FROM bookings b
+                 LEFT JOIN LATERAL (
+                     SELECT p.status
+                     FROM payments p
+                     WHERE p.booking_id = b.id
+                     ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC, p.id DESC
+                     LIMIT 1
+                 ) pay ON TRUE
+                 WHERE b.parking_spot_id = $1
+                   AND b.driver_user_id = $2
+                   AND b.start_time = $3
+                   AND b.end_time = $4
+                   AND b.pay_method = 'money'
+                 ORDER BY b.created_at DESC
+                 LIMIT 1`,
+                [row.parking_spot_id, row.bidder_user_id, row.start_time, row.end_time]
+            );
+            if (paymentR.rowCount) {
+                bookingId = paymentR.rows[0].booking_id ?? null;
+                paymentStatus = paymentR.rows[0].payment_status ?? null;
+            }
+        }
+
+        return res.json({
+            ok: true,
+            bid: {
+                id: row.id,
+                parking_spot_id: row.parking_spot_id,
+                amount_gbp: row.amount_gbp,
+                amount_points: row.amount_points,
+                pay_method: row.pay_method ?? "money",
+                status: row.status ?? "pending",
+                created_at: row.created_at,
+                start_time: row.start_time,
+                end_time: row.end_time,
+                spot_title: row.spot_title,
+                spot_address: row.spot_address,
+                booking_id: bookingId,
+                payment_status: paymentStatus,
+            },
+        });
+    } catch (e) {
+        return res.status(500).json({ ok: false, error: String(e) });
+    }
+});
+
+/**
  * POST /auctions/:spotId/bid
  * Body: { amount_gbp }
  */
 router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
     const spotId = req.params.spotId;
+    const payMethod = req.body?.pay_method === "points" ? "points" : "money";
     const amount = toMoney(req.body?.amount_gbp);
+    const amountPoints = Number(req.body?.amount_points);
     const paymentIntentId = req.body?.payment_intent_id;
     const startRaw = req.body?.start_time;
     const endRaw = req.body?.end_time;
 
-    if (!amount || amount <= 0) {
-        return res.status(400).json({ ok: false, error: "Invalid bid amount" });
-    }
-    if (typeof paymentIntentId !== "string" || !paymentIntentId.trim()) {
-        return res.status(400).json({ ok: false, error: "payment_intent_id is required" });
+    if (payMethod === "money") {
+        if (!amount || amount <= 0) {
+            return res.status(400).json({ ok: false, error: "Invalid bid amount" });
+        }
+        if (typeof paymentIntentId !== "string" || !paymentIntentId.trim()) {
+            return res.status(400).json({ ok: false, error: "payment_intent_id is required" });
+        }
+    } else {
+        if (!Number.isFinite(amountPoints) || amountPoints <= 0) {
+            return res.status(400).json({ ok: false, error: "Invalid points bid amount" });
+        }
     }
     if (typeof startRaw !== "string" || typeof endRaw !== "string") {
         return res.status(400).json({ ok: false, error: "start_time and end_time are required" });
@@ -438,12 +562,13 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
     }
 
     const client = await pool.connect();
+    let bidId: string | null = null;
     try {
         await client.query("BEGIN");
         await ensureAuctionBidSchema();
 
         const spotR = await client.query(
-            `SELECT id, owner_user_id, mode, auction_end, auction_start_price_gbp, availability_json, availability_type, available_days, daily_start, daily_end
+            `SELECT id, owner_user_id, mode, auction_end, auction_start_price_gbp, allow_points, points_cost, availability_json, availability_type, available_days, daily_start, daily_end
              FROM parking_spots
              WHERE id = $1`,
             [spotId]
@@ -492,47 +617,85 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
             }
         }
 
-        const startPrice = toMoney(spot.auction_start_price_gbp);
-        if (amount < startPrice) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: `Bid must be at least £${startPrice.toFixed(2)}` });
-        }
+        if (payMethod === "money") {
+            const startPrice = toMoney(spot.auction_start_price_gbp);
+            const units = calcUnitsForMinutes(minutes);
+            const minTotal = Math.round(startPrice * units * 100) / 100;
+            if (amount < minTotal) {
+                await client.query("ROLLBACK");
+                return res.status(400).json({ ok: false, error: `Bid must be at least £${minTotal.toFixed(2)} for the selected time` });
+            }
 
-        const highestR = await client.query(
-            `SELECT amount_gbp FROM auction_bids
-             WHERE parking_spot_id = $1
-               AND status = 'pending'
-             ORDER BY amount_gbp DESC, created_at ASC
-             LIMIT 1`,
-            [spotId]
-        );
-        const highest = highestR.rowCount ? toMoney(highestR.rows[0].amount_gbp) : 0;
-        if (amount <= highest) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Bid must be higher than current highest" });
-        }
+            // verify payment intent (manual capture)
+            const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+            if (
+                intent.metadata?.user_id !== req.userId ||
+                intent.metadata?.spot_id !== spotId ||
+                intent.metadata?.owner_user_id !== spot.owner_user_id
+            ) {
+                await client.query("ROLLBACK");
+                return res.status(400).json({ ok: false, error: "Payment intent does not match this bid" });
+            }
+            const amountPence = Math.round(amount * 100);
+            if (intent.amount !== amountPence || intent.currency !== "gbp") {
+                await client.query("ROLLBACK");
+                return res.status(400).json({ ok: false, error: "Payment amount mismatch" });
+            }
+            if (intent.capture_method !== "manual") {
+                await client.query("ROLLBACK");
+                return res.status(400).json({ ok: false, error: "Invalid auction authorization type" });
+            }
+            if (intent.status !== "requires_capture") {
+                await client.query("ROLLBACK");
+                return res.status(400).json({ ok: false, error: "Card authorization not completed" });
+            }
 
-        // verify payment intent (manual capture)
-        const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
-        if (intent.metadata?.user_id !== req.userId || intent.metadata?.spot_id !== spotId) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Payment intent does not match this bid" });
-        }
-        const amountPence = Math.round(amount * 100);
-        if (intent.amount !== amountPence || intent.currency !== "gbp") {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Payment amount mismatch" });
-        }
-        if (intent.status !== "requires_capture") {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Card authorization not completed" });
-        }
+            const insertR = await client.query(
+                `INSERT INTO auction_bids (parking_spot_id, bidder_user_id, amount_gbp, payment_intent_id, start_time, end_time, status, pay_method)
+                 VALUES ($1,$2,$3,$4,$5,$6,'pending','money')
+                 RETURNING id`,
+                [spotId, req.userId, amount.toFixed(2), paymentIntentId, start.toISOString(), end.toISOString()]
+            );
+            bidId = insertR.rows[0]?.id ?? null;
+        } else {
+            if (!spot.allow_points) {
+                await client.query("ROLLBACK");
+                return res.status(400).json({ ok: false, error: "This auction does not accept points" });
+            }
+            const minPoints = Number(spot.points_cost ?? 0);
+            if (!Number.isFinite(minPoints) || minPoints <= 0) {
+                await client.query("ROLLBACK");
+                return res.status(400).json({ ok: false, error: "Invalid points cost for this listing" });
+            }
+            if (amountPoints < minPoints) {
+                await client.query("ROLLBACK");
+                return res.status(400).json({ ok: false, error: `Bid must be at least ${minPoints} pts` });
+            }
 
-        await client.query(
-            `INSERT INTO auction_bids (parking_spot_id, bidder_user_id, amount_gbp, payment_intent_id, start_time, end_time, status)
-             VALUES ($1,$2,$3,$4,$5,$6,'pending')`,
-            [spotId, req.userId, amount.toFixed(2), paymentIntentId, start.toISOString(), end.toISOString()]
-        );
+            const units = calcUnitsForMinutes(minutes);
+            const totalPoints = Math.ceil(amountPoints * units);
+            const userR = await client.query(
+                `SELECT points_balance FROM users WHERE id = $1`,
+                [req.userId]
+            );
+            if (!userR.rowCount) {
+                await client.query("ROLLBACK");
+                return res.status(404).json({ ok: false, error: "User not found" });
+            }
+            const balance = Number(userR.rows[0].points_balance ?? 0);
+            if (balance < totalPoints) {
+                await client.query("ROLLBACK");
+                return res.status(400).json({ ok: false, error: `Not enough points (${totalPoints} required)` });
+            }
+
+            const insertR = await client.query(
+                `INSERT INTO auction_bids (parking_spot_id, bidder_user_id, amount_gbp, amount_points, start_time, end_time, status, pay_method)
+                 VALUES ($1,$2,$3,$4,$5,$6,'pending','points')
+                 RETURNING id`,
+                [spotId, req.userId, "0.00", Math.ceil(amountPoints), start.toISOString(), end.toISOString()]
+            );
+            bidId = insertR.rows[0]?.id ?? null;
+        }
 
         await client.query("COMMIT");
     } catch (e) {
@@ -547,12 +710,13 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
         `SELECT amount_gbp FROM auction_bids
          WHERE parking_spot_id = $1
            AND status = 'pending'
+           AND pay_method = 'money'
          ORDER BY amount_gbp DESC, created_at ASC
          LIMIT 1`,
         [spotId]
     );
     const highest = summary.rowCount ? toMoney(summary.rows[0].amount_gbp) : 0;
-    return res.json({ ok: true, auction: { highest_pending_bid_gbp: highest } });
+    return res.json({ ok: true, auction: { highest_pending_bid_gbp: highest }, bid_id: bidId });
 });
 
 /**
@@ -594,7 +758,7 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
         }
 
         const bidInfoR = await client.query(
-            `SELECT id, bidder_user_id, amount_gbp, payment_intent_id, start_time, end_time
+            `SELECT id, bidder_user_id, amount_gbp, amount_points, pay_method, payment_intent_id, start_time, end_time, status
              FROM auction_bids
              WHERE id = $1 AND parking_spot_id = $2`,
             [bidId, spotId]
@@ -605,11 +769,15 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
         }
 
         const bidInfo = bidInfoR.rows[0];
+        if ((bidInfo.status ?? "pending") !== "pending") {
+            await client.query("ROLLBACK");
+            return res.status(400).json({ ok: false, error: "Only pending bids can be accepted" });
+        }
         if (!bidInfo.start_time || !bidInfo.end_time) {
             await client.query("ROLLBACK");
             return res.status(400).json({ ok: false, error: "Bid has no time slot" });
         }
-        if (!bidInfo.payment_intent_id) {
+        if ((bidInfo.pay_method ?? "money") === "money" && !bidInfo.payment_intent_id) {
             await client.query("ROLLBACK");
             return res.status(400).json({ ok: false, error: "Bid has no payment authorization" });
         }
@@ -641,30 +809,121 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
             return res.status(400).json({ ok: false, error: "Auction is sold out" });
         }
 
-        // capture payment
-        await stripe.paymentIntents.capture(bidInfo.payment_intent_id);
+        if ((bidInfo.pay_method ?? "money") === "money") {
+            // capture payment
+            const captured = await stripe.paymentIntents.capture(bidInfo.payment_intent_id);
 
-        await client.query(
-            `UPDATE auction_bids
-             SET status = 'accepted', updated_at = now()
-             WHERE id = $1`,
-            [bidId]
-        );
+            await client.query(
+                `UPDATE auction_bids
+                 SET status = 'accepted', updated_at = now()
+                 WHERE id = $1`,
+                [bidId]
+            );
 
-        await client.query(
-            `INSERT INTO bookings (
-                parking_spot_id,
-                driver_user_id,
-                start_time,
-                end_time,
-                status,
-                pay_method,
-                total_price_gbp,
-                total_points
-            )
-             VALUES ($1,$2,$3,$4,'confirmed','money',$5,0)`,
-            [spotId, bidInfo.bidder_user_id, start.toISOString(), end.toISOString(), bidInfo.amount_gbp]
-        );
+            const bookingR = await client.query(
+                `INSERT INTO bookings (
+                    parking_spot_id,
+                    driver_user_id,
+                    start_time,
+                    end_time,
+                    status,
+                    pay_method,
+                    total_price_gbp,
+                    total_points
+                )
+                 VALUES ($1,$2,$3,$4,'confirmed','money',$5,0)
+                 RETURNING id`,
+                [spotId, bidInfo.bidder_user_id, start.toISOString(), end.toISOString(), bidInfo.amount_gbp]
+            );
+
+            const bookingId = bookingR.rows[0]?.id;
+            if (bookingId) {
+                await client.query(
+                    `INSERT INTO payments (
+                        booking_id,
+                        provider,
+                        provider_ref,
+                        status,
+                        amount_gbp,
+                        created_at,
+                        updated_at
+                    )
+                     VALUES ($1, 'stripe', $2, 'succeeded', $3, now(), now())`,
+                    [bookingId, captured.id, bidInfo.amount_gbp]
+                );
+            }
+        } else {
+            const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
+            const units = calcUnitsForMinutes(minutes);
+            const perHourPoints = Number(bidInfo.amount_points ?? 0);
+            if (!Number.isFinite(perHourPoints) || perHourPoints <= 0) {
+                await client.query("ROLLBACK");
+                return res.status(400).json({ ok: false, error: "Invalid points bid" });
+            }
+            const totalPoints = Math.ceil(perHourPoints * units);
+
+            const userR = await client.query(`SELECT id, points_balance FROM users WHERE id = $1`, [
+                bidInfo.bidder_user_id,
+            ]);
+            if (!userR.rowCount) {
+                await client.query("ROLLBACK");
+                return res.status(404).json({ ok: false, error: "Bidder not found" });
+            }
+            const balance = Number(userR.rows[0].points_balance ?? 0);
+            if (balance < totalPoints) {
+                await client.query("ROLLBACK");
+                return res.status(400).json({ ok: false, error: `Bidder does not have enough points (${totalPoints} required)` });
+            }
+
+            await client.query(
+                `UPDATE users
+                 SET points_balance = points_balance - $1, updated_at = now()
+                 WHERE id = $2`,
+                [totalPoints, bidInfo.bidder_user_id]
+            );
+            await client.query(
+                `UPDATE users
+                 SET points_balance = points_balance + $1, updated_at = now()
+                 WHERE id = $2`,
+                [totalPoints, spot.owner_user_id]
+            );
+            await client.query(
+                `UPDATE auction_bids
+                 SET status = 'accepted', updated_at = now()
+                 WHERE id = $1`,
+                [bidId]
+            );
+
+            const bookingR = await client.query(
+                `INSERT INTO bookings (
+                    parking_spot_id,
+                    driver_user_id,
+                    start_time,
+                    end_time,
+                    status,
+                    pay_method,
+                    total_price_gbp,
+                    total_points
+                )
+                 VALUES ($1,$2,$3,$4,'confirmed','points','0.00',$5)
+                 RETURNING id`,
+                [spotId, bidInfo.bidder_user_id, start.toISOString(), end.toISOString(), totalPoints]
+            );
+
+            const bookingId = bookingR.rows[0]?.id;
+            if (bookingId) {
+                await client.query(
+                    `INSERT INTO reward_transactions (user_id, type, amount, reason, related_booking_id, related_spot_id)
+                     VALUES ($1,'spend',$2,'auction_bid_points',$3,$4)`,
+                    [bidInfo.bidder_user_id, totalPoints, bookingId, spotId]
+                );
+                await client.query(
+                    `INSERT INTO reward_transactions (user_id, type, amount, reason, related_booking_id, related_spot_id)
+                     VALUES ($1,'earn',$2,'auction_points_received',$3,$4)`,
+                    [spot.owner_user_id, totalPoints, bookingId, spotId]
+                );
+            }
+        }
 
         await client.query("COMMIT");
     } catch (e) {
