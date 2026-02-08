@@ -70,6 +70,32 @@ function estimateTotalForDuration(spot: ParkingSpot, durationMinutes: number) {
     return price;
 }
 
+function getSpotCapacity(spot: ParkingSpot) {
+    const capacity = Number((spot as any).capacity_total ?? 1);
+    return Math.max(1, Number.isFinite(capacity) ? capacity : 1);
+}
+
+function getAuctionEndMs(spot: ParkingSpot) {
+    const raw = (spot as any).auction_end;
+    if (!raw) return null;
+    const ms = new Date(raw).getTime();
+    return Number.isFinite(ms) ? ms : null;
+}
+
+function getListingExpiryMs(spot: ParkingSpot) {
+    const jsonDateTo = (spot as any)?.availability_json?.date_to;
+    if (typeof jsonDateTo === "string" && /^\d{4}-\d{2}-\d{2}$/.test(jsonDateTo)) {
+        const ms = new Date(`${jsonDateTo}T23:59:59`).getTime();
+        if (Number.isFinite(ms)) return ms;
+    }
+    const legacyEnd = (spot as any)?.availability_end;
+    if (legacyEnd) {
+        const ms = new Date(legacyEnd).getTime();
+        if (Number.isFinite(ms)) return ms;
+    }
+    return null;
+}
+
 export default function HomePage() {
     const location = useLocation();
     const navigate = useNavigate();
@@ -286,24 +312,41 @@ export default function HomePage() {
         return arr;
     }, [enriched, appliedSort]);
 
-    const timeFilteredByBookings = useMemo(() => {
-        if (!appliedDate || !appliedTime) return sorted;
-        const start = new Date(`${appliedDate}T${appliedTime}`);
-        if (Number.isNaN(start.getTime())) return sorted;
-
-        return sorted.filter(({ spot }) => {
-            const count = bookingCounts[spot.id] ?? 0;
-            const capacity = Number((spot as any).capacity_total ?? 1);
-            const isPublic = (spot as any).parking_type === "public";
-
-            if (isPublic) {
-                return count < Math.max(1, capacity);
-            }
-            return count === 0;
+    const orderedResults = useMemo(() => {
+        const ranked = sorted.map((entry, index) => {
+            const spot = entry.spot;
+            const bookedCount = bookingCounts[spot.id] ?? 0;
+            const capacity = getSpotCapacity(spot);
+            const fullyBooked = bookedCount >= capacity;
+            const auctionSoldOut = Boolean((spot as any).auction_sold_out);
+            const auctionEndMs = getAuctionEndMs(spot);
+            const auctionEnded = spot.mode === "auction" && auctionEndMs != null && auctionEndMs <= nowMs;
+            const listingExpiryMs = getListingExpiryMs(spot);
+            const listingExpired = listingExpiryMs != null && listingExpiryMs <= nowMs;
+            const listingEnded = fullyBooked || auctionSoldOut || auctionEnded || listingExpired;
+            return {
+                ...entry,
+                rankIndex: index,
+                bookedCount,
+                capacity,
+                fullyBooked,
+                auctionSoldOut,
+                auctionEnded,
+                listingExpired,
+                listingEnded,
+            };
         });
-    }, [sorted, appliedDate, appliedTime, bookingCounts]);
 
-    const visibleResults = useMemo(() => timeFilteredByBookings.slice(0, 4), [timeFilteredByBookings]);
+        ranked.sort((a, b) => {
+            if (a.listingEnded !== b.listingEnded) {
+                return a.listingEnded ? 1 : -1;
+            }
+            return a.rankIndex - b.rankIndex;
+        });
+        return ranked;
+    }, [sorted, bookingCounts, nowMs]);
+
+    const visibleResults = useMemo(() => orderedResults.slice(0, 4), [orderedResults]);
 
     const mapCenter = useMemo(() => {
         if (userLoc) return userLoc;
@@ -515,7 +558,7 @@ export default function HomePage() {
                                 ? "Loading…"
                                 : error
                                     ? "Error loading spots."
-                                    : `Showing ${visibleResults.length} of ${timeFilteredByBookings.length} spot${timeFilteredByBookings.length === 1 ? "" : "s"}`}
+                                    : `Showing ${visibleResults.length} of ${orderedResults.length} spot${orderedResults.length === 1 ? "" : "s"}`}
                             {" · "}
                             {userLoc ? "sorted based on your current location" : "enable location for better results"}
                         </div>
@@ -539,7 +582,7 @@ export default function HomePage() {
                             </div>
                         )}
 
-                        {!loading && !error && visibleResults.map(({ spot, distKm, price, availLabel, estimatedTotal }) => {
+                        {!loading && !error && visibleResults.map(({ spot, distKm, price, availLabel, estimatedTotal, bookedCount, capacity, fullyBooked, auctionSoldOut, auctionEnded, listingExpired, listingEnded }) => {
                             const active = spot.id === selectedId;
                             const isHovered = spot.id === hoveredId;
 
@@ -552,17 +595,9 @@ export default function HomePage() {
                                         : auctionPriceLabel;
                             const nextWindow = getNextAvailableWindow(spot, bookingWindows[spot.id] ?? []);
 
-                            const bookedCount = bookingCounts[spot.id] ?? 0;
-                            const capacity = Number((spot as any).capacity_total ?? 1);
-                            const fullyBooked = bookedCount >= Math.max(1, capacity);
-                            const auctionSoldOut = Boolean((spot as any).auction_sold_out);
-                            const auctionEndRaw = (spot as any).auction_end;
-                            const auctionEndMs =
-                                spot.mode === "auction" && auctionEndRaw
-                                    ? new Date(auctionEndRaw).getTime()
-                                    : null;
+                            const auctionEndMs = spot.mode === "auction" ? getAuctionEndMs(spot) : null;
                             const auctionTimeLeftMs =
-                                auctionEndMs && Number.isFinite(auctionEndMs)
+                                auctionEndMs != null
                                     ? auctionEndMs - nowMs
                                     : null;
                             const auctionTimeLeftLabel =
@@ -571,18 +606,9 @@ export default function HomePage() {
                                     : auctionTimeLeftMs <= 0
                                         ? "Auction ended"
                                         : `Time left: ${formatCountdown(auctionTimeLeftMs)}`;
-                            const auctionEnded = spot.mode === "auction" && auctionTimeLeftMs != null && auctionTimeLeftMs <= 0;
-                            const availabilityEndRaw = (spot as any).availability_end;
-                            const availabilityEndMs =
-                                availabilityEndRaw
-                                    ? new Date(availabilityEndRaw).getTime()
-                                    : null;
-                            const listingExpired =
-                                availabilityEndMs != null &&
-                                Number.isFinite(availabilityEndMs) &&
-                                availabilityEndMs <= nowMs;
-                            const listingEnded = auctionEnded || auctionSoldOut || listingExpired;
-                            const listingEndedLabel = auctionSoldOut
+                            const listingEndedLabel = fullyBooked
+                                ? "Sold out"
+                                : auctionSoldOut
                                 ? "Auction sold out"
                                 : auctionEnded
                                     ? "Auction ended"
@@ -654,9 +680,9 @@ export default function HomePage() {
                                         {listingExpired && (
                                             <span className="badge badge--rose">Listing expired</span>
                                         )}
-                                        {(spot as any).parking_type === "public" && (
+                                        {capacity > 1 && (
                                             <span className="badge badge--cool">
-                                                {(spot as any).capacity_available ?? 0}/{(spot as any).capacity_total ?? 0} spaces
+                                                {Math.max(0, capacity - bookedCount)}/{capacity} spots left
                                             </span>
                                         )}
                                         {appliedDate && appliedTime && spot.mode !== "auction" && (
@@ -868,6 +894,7 @@ function formatWindow(start: Date, end: Date) {
 
 function getNextAvailableWindow(spot: ParkingSpot, bookings: Booking[]) {
     const windows = buildAvailabilityWindows(spot, 14);
+    const capacity = getSpotCapacity(spot);
     const now = new Date();
     const normalized = bookings
         .filter((b) => b.start_time && b.end_time)
@@ -875,7 +902,7 @@ function getNextAvailableWindow(spot: ParkingSpot, bookings: Booking[]) {
         .sort((a, b) => a.start.getTime() - b.start.getTime());
 
     for (const w of windows) {
-        const segments = subtractBookings(w, normalized);
+        const segments = subtractBookings(w, normalized, capacity);
         for (const seg of segments) {
             let start = seg.start;
             if (start < now) start = roundToNextQuarter(now);
@@ -929,8 +956,56 @@ function buildAvailabilityWindows(spot: ParkingSpot, daysForward: number) {
 
 function subtractBookings(
     window: { start: Date; end: Date },
-    bookings: Array<{ start: Date; end: Date }>
+    bookings: Array<{ start: Date; end: Date }>,
+    capacity = 1
 ) {
+    const safeCapacity = Math.max(1, Number.isFinite(capacity) ? Math.floor(capacity) : 1);
+
+    if (safeCapacity > 1) {
+        const events: Array<{ at: number; delta: number }> = [];
+        for (const b of bookings) {
+            if (b.end <= window.start || b.start >= window.end) continue;
+            const startMs = Math.max(window.start.getTime(), b.start.getTime());
+            const endMs = Math.min(window.end.getTime(), b.end.getTime());
+            if (endMs <= startMs) continue;
+            events.push({ at: startMs, delta: 1 });
+            events.push({ at: endMs, delta: -1 });
+        }
+        if (!events.length) return [{ ...window }];
+
+        events.sort((a, b) => (a.at === b.at ? a.delta - b.delta : a.at - b.at));
+        const blocked: Array<{ start: Date; end: Date }> = [];
+        let active = 0;
+        let blockedStart: number | null = null;
+
+        for (const event of events) {
+            const before = active;
+            active += event.delta;
+            if (before < safeCapacity && active >= safeCapacity) {
+                blockedStart = event.at;
+            }
+            if (before >= safeCapacity && active < safeCapacity && blockedStart != null && event.at > blockedStart) {
+                blocked.push({ start: new Date(blockedStart), end: new Date(event.at) });
+                blockedStart = null;
+            }
+        }
+
+        let segments: Array<{ start: Date; end: Date }> = [{ ...window }];
+        for (const b of blocked) {
+            const next: Array<{ start: Date; end: Date }> = [];
+            for (const seg of segments) {
+                if (b.end <= seg.start || b.start >= seg.end) {
+                    next.push(seg);
+                } else {
+                    if (b.start > seg.start) next.push({ start: seg.start, end: b.start });
+                    if (b.end < seg.end) next.push({ start: b.end, end: seg.end });
+                }
+            }
+            segments = next;
+        }
+        return segments;
+    }
+
     let segments: Array<{ start: Date; end: Date }> = [{ ...window }];
     for (const b of bookings) {
         if (b.end <= window.start || b.start >= window.end) continue;

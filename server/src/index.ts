@@ -4,7 +4,7 @@ import dotenv from "dotenv";
 import { pool } from "./db";
 import authRoutes from "./routes/auth";
 import meRoutes from "./routes/me";
-import parkingSpotRoutes from "./routes/parkingSpots";
+import parkingSpotRoutes from "./routes/ParkingSpots";
 import bookingRoutes from "./routes/bookings";
 import settingsRoutes from "./routes/settings";
 import dashboardRoutes from "./routes/dashboard";

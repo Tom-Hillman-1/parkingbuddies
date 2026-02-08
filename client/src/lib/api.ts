@@ -10,9 +10,19 @@ async function parseJson(res: Response) {
     }
 }
 
-export async function apiGet<T>(path: string, token?: string): Promise<ApiOk<T>> {
+export async function apiGet<T>(
+    path: string,
+    token?: string,
+    init?: RequestInit
+): Promise<ApiOk<T>> {
+    const headers = new Headers(init?.headers);
+    if (token) {
+        headers.set("Authorization", `Bearer ${token}`);
+    }
+
     const res = await fetch(`${API_BASE}${path}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        ...init,
+        headers,
     });
 
     const data = await parseJson(res);

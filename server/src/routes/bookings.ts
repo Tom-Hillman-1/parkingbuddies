@@ -298,13 +298,8 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         );
 
         const overlapCount = Number(overlapR.rows[0]?.count ?? 0);
-        const isPublic = spot.parking_type === "public";
-        const capacity = Number(spot.capacity_total ?? 1);
-        if (!isPublic && overlapCount > 0) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "That time slot is already booked" });
-        }
-        if (isPublic && overlapCount >= Math.max(1, capacity)) {
+        const capacity = Math.max(1, Number(spot.capacity_total ?? 1));
+        if (overlapCount >= capacity) {
             await client.query("ROLLBACK");
             return res.status(400).json({ ok: false, error: "No spaces available for that time slot" });
         }

@@ -140,7 +140,7 @@ export default function BookingConfirmPage() {
             <div className="pageHeader">
                 <div className="heroKicker">CONFIRMATION</div>
                 <div className="heroTitle">Confirm the details</div>
-                <div className="heroSub muted">Review all details before finalizing your booking.</div>
+                <div className="heroSub muted">Review details before secure Stripe checkout.</div>
             </div>
 
             {loading && <div className="card formSection">Preparing confirmation…</div>}
@@ -151,7 +151,7 @@ export default function BookingConfirmPage() {
                     <div className="receiptHeader">
                         <div className="heroKicker">PARKINGBUDDIES</div>
                         <div className="h2">Booking confirmation</div>
-                        <div className="tiny muted">No charge is finalized until you confirm.</div>
+                        <div className="tiny muted">Stripe checkout starts after you confirm.</div>
                     </div>
                     <div className="receiptBody">
                         <div className="receiptRow">
@@ -195,7 +195,7 @@ export default function BookingConfirmPage() {
                             onClick={confirmBooking}
                             disabled={busy}
                         >
-                            {busy ? "Preparing…" : "Show receipt"}
+                            {busy ? "Preparing..." : pay === "money" ? "Continue to Stripe checkout" : "Confirm booking"}
                         </button>
                         <Link to={`/spots/${spotId}`} className="btn">
                             Back to listing

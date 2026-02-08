@@ -14,6 +14,7 @@ type Mode = "free" | "rent" | "auction";
 type PriceUnit = "hour" | "day" | "week";
 type ParkingType = "private" | "public";
 type AvailabilityType = "24_7" | "same_everyday" | "custom_weekly";
+type FormSectionKey = "intro" | "type" | "availability" | "pricing" | "location";
 type GeocodeSuggestion = {
     place_id: number;
     display_name: string;
@@ -30,6 +31,10 @@ type AvailabilitySlot = {
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DEFAULT_CENTER: [number, number] = [51.5074, -0.1278];
 const LONDON_VIEWBOX = "-0.5103,51.6919,0.3340,51.2868";
+const MIN_AUCTION_START_PRICE_GBP = 0.1;
+const MIN_POINTS_COST = 1;
+const DEFAULT_AUCTION_START_PRICE = String(MIN_AUCTION_START_PRICE_GBP);
+const DEFAULT_POINTS_COST = String(MIN_POINTS_COST);
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -69,6 +74,45 @@ function parseCoordinates(lat: string, lng: string) {
     if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) return null;
     if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) return null;
     return { lat: latNum, lng: lngNum };
+}
+
+function pad2(value: number) {
+    return String(value).padStart(2, "0");
+}
+
+function toLocalDateInput(date: Date) {
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function toLocalDateTimeValue(date: Date) {
+    return `${toLocalDateInput(date)}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function dateFromToday(daysAhead: number) {
+    const next = new Date();
+    next.setHours(0, 0, 0, 0);
+    next.setDate(next.getDate() + daysAhead);
+    return toLocalDateInput(next);
+}
+
+function dateTimeMonthsFromNow(monthsAhead: number) {
+    const next = new Date();
+    next.setMonth(next.getMonth() + monthsAhead);
+    return toLocalDateTimeValue(next);
+}
+
+function toTitleCaseWords(value: string) {
+    return value.replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function modeDisplayLabel(value: Mode) {
+    if (value === "rent") return "Rent";
+    if (value === "auction") return "Auction";
+    return "Free";
+}
+
+function parkingTypeDisplayLabel(value: ParkingType) {
+    return value === "private" ? "Private" : "Public";
 }
 
 function createAvailabilitySlot(partial?: Partial<Omit<AvailabilitySlot, "id">>): AvailabilitySlot {
@@ -117,13 +161,14 @@ export default function CreateListingPage() {
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
     const [mode, setMode] = useState<Mode>("rent");
-    const [price, setPrice] = useState("");
+    const [price, setPrice] = useState("5");
     const [priceUnit, setPriceUnit] = useState<PriceUnit>("hour");
     const [allowPoints, setAllowPoints] = useState(false);
-    const [pointsCost, setPointsCost] = useState("");
+    const [pointsCost, setPointsCost] = useState(DEFAULT_POINTS_COST);
     const [addressText, setAddressText] = useState("");
     const [addressSuggestions, setAddressSuggestions] = useState<GeocodeSuggestion[]>([]);
     const [addressSearchBusy, setAddressSearchBusy] = useState(false);
+    const [addressSearchMessage, setAddressSearchMessage] = useState("");
     const [addressDropdownOpen, setAddressDropdownOpen] = useState(false);
     const [reverseLookupBusy, setReverseLookupBusy] = useState(false);
     const [lat, setLat] = useState(String(DEFAULT_CENTER[0]));
@@ -138,14 +183,14 @@ export default function CreateListingPage() {
     const [setupSpacesDraft, setSetupSpacesDraft] = useState("1");
 
     const [availabilityType, setAvailabilityType] = useState<AvailabilityType>("24_7");
-    const [dateFrom, setDateFrom] = useState("");
-    const [dateTo, setDateTo] = useState("");
+    const [dateFrom, setDateFrom] = useState(() => dateFromToday(0));
+    const [dateTo, setDateTo] = useState(() => dateFromToday(3));
     const [sameStart, setSameStart] = useState("09:00");
     const [sameEnd, setSameEnd] = useState("17:00");
     const [customWeeklySlots, setCustomWeeklySlots] = useState<AvailabilitySlot[]>([createAvailabilitySlot()]);
 
-    const [auctionStartPrice, setAuctionStartPrice] = useState("");
-    const [auctionEndLocal, setAuctionEndLocal] = useState("");
+    const [auctionStartPrice, setAuctionStartPrice] = useState(DEFAULT_AUCTION_START_PRICE);
+    const [auctionEndLocal, setAuctionEndLocal] = useState(() => dateTimeMonthsFromNow(1));
 
     const [loadingExisting, setLoadingExisting] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -157,6 +202,11 @@ export default function CreateListingPage() {
 
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
+    const introSectionRef = useRef<HTMLDivElement | null>(null);
+    const typeSectionRef = useRef<HTMLDivElement | null>(null);
+    const availabilitySectionRef = useRef<HTMLDivElement | null>(null);
+    const pricingSectionRef = useRef<HTMLDivElement | null>(null);
+    const locationSectionRef = useRef<HTMLDivElement | null>(null);
     const imageInputRef = useRef<HTMLInputElement | null>(null);
     const addressLookupRef = useRef<HTMLDivElement | null>(null);
     const addressSearchAbortRef = useRef<AbortController | null>(null);
@@ -217,8 +267,8 @@ export default function CreateListingPage() {
                 setSetupTypeDraft(nextParkingType);
                 setSetupSpacesDraft(nextCapacity);
 
-                setDateFrom(typeof av?.date_from === "string" ? av.date_from : "");
-                setDateTo(typeof av?.date_to === "string" ? av.date_to : "");
+                setDateFrom(typeof av?.date_from === "string" ? av.date_from : dateFromToday(0));
+                setDateTo(typeof av?.date_to === "string" ? av.date_to : dateFromToday(3));
                 if (av?.type === "same_everyday") {
                     setAvailabilityType("same_everyday");
                     setSameStart(typeof av?.start === "string" ? av.start : "09:00");
@@ -239,8 +289,10 @@ export default function CreateListingPage() {
                     setCustomWeeklySlots([createAvailabilitySlot()]);
                 }
 
-                setAuctionStartPrice(s.auction_start_price_gbp == null ? "" : String(s.auction_start_price_gbp));
-                setAuctionEndLocal(toLocalDateTimeInput(s.auction_end));
+                setAuctionStartPrice(
+                    s.auction_start_price_gbp == null ? DEFAULT_AUCTION_START_PRICE : String(s.auction_start_price_gbp)
+                );
+                setAuctionEndLocal(toLocalDateTimeInput(s.auction_end) || dateTimeMonthsFromNow(1));
             })
             .catch((e: any) => {
                 if (!active) return;
@@ -262,8 +314,84 @@ export default function CreateListingPage() {
         }
         if (mode === "auction") {
             setPrice("0");
+            if (!auctionStartPrice || Number(auctionStartPrice) < MIN_AUCTION_START_PRICE_GBP) {
+                setAuctionStartPrice(DEFAULT_AUCTION_START_PRICE);
+            }
+            if (!auctionEndLocal) {
+                setAuctionEndLocal(dateTimeMonthsFromNow(1));
+            }
         }
-    }, [mode]);
+        if (mode === "rent" && (!price || Number(price) <= 0)) {
+            setPrice("5");
+        }
+    }, [mode, price, auctionStartPrice, auctionEndLocal]);
+
+    useEffect(() => {
+        if (allowPoints && (!pointsCost || Number(pointsCost) < MIN_POINTS_COST)) {
+            setPointsCost(DEFAULT_POINTS_COST);
+        }
+    }, [allowPoints, pointsCost]);
+
+    async function searchAddressSuggestions(rawQuery: string, manualSearch = false) {
+        const query = rawQuery.trim();
+        if (query.length < 3) {
+            setAddressSuggestions([]);
+            setAddressDropdownOpen(false);
+            setAddressSearchBusy(false);
+            addressSearchAbortRef.current?.abort();
+            if (manualSearch) {
+                setAddressSearchMessage("Enter at least 3 characters to search.");
+            } else {
+                setAddressSearchMessage("");
+            }
+            return;
+        }
+
+        addressSearchAbortRef.current?.abort();
+        const controller = new AbortController();
+        addressSearchAbortRef.current = controller;
+        setAddressSearchBusy(true);
+        setAddressSearchMessage("");
+
+        try {
+            const params = new URLSearchParams({
+                format: "jsonv2",
+                limit: "12",
+                addressdetails: "1",
+                countrycodes: "gb",
+                viewbox: LONDON_VIEWBOX,
+                q: query,
+            });
+            const lookup = await apiGet<{ suggestions: GeocodeSuggestion[] }>(
+                `/parking-spots/geocode/search?${params.toString()}`,
+                token || undefined,
+                { signal: controller.signal }
+            );
+            const raw = lookup.suggestions ?? [];
+            const next = Array.isArray(raw)
+                ? raw
+                      .filter((item, index, arr) => arr.findIndex((x) => x.display_name === item.display_name) === index)
+                      .slice(0, 5)
+                : [];
+            setAddressSuggestions(next);
+            setAddressDropdownOpen(next.length > 0);
+            if (manualSearch && next.length === 0) {
+                setAddressSearchMessage("No close matches found. Try adding a postcode or city.");
+            }
+        } catch (e: any) {
+            if (e?.name !== "AbortError") {
+                setAddressSuggestions([]);
+                setAddressDropdownOpen(false);
+                if (manualSearch) {
+                    setAddressSearchMessage("Address search is unavailable right now. Please try again.");
+                }
+            }
+        } finally {
+            if (addressSearchAbortRef.current === controller) {
+                setAddressSearchBusy(false);
+            }
+        }
+    }
 
     useEffect(() => {
         const query = addressText.trim();
@@ -275,48 +403,13 @@ export default function CreateListingPage() {
             setAddressSuggestions([]);
             setAddressDropdownOpen(false);
             setAddressSearchBusy(false);
+            setAddressSearchMessage("");
             addressSearchAbortRef.current?.abort();
             return;
         }
 
-        const timeoutId = window.setTimeout(async () => {
-            addressSearchAbortRef.current?.abort();
-            const controller = new AbortController();
-            addressSearchAbortRef.current = controller;
-            setAddressSearchBusy(true);
-
-            try {
-                const params = new URLSearchParams({
-                    format: "jsonv2",
-                    limit: "8",
-                    addressdetails: "1",
-                    countrycodes: "gb",
-                    viewbox: LONDON_VIEWBOX,
-                    q: query,
-                });
-                const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
-                    signal: controller.signal,
-                    headers: { "Accept-Language": "en-GB,en;q=0.9" },
-                });
-                if (!response.ok) throw new Error(`Address search failed (${response.status})`);
-                const raw = (await response.json()) as GeocodeSuggestion[];
-                const next = Array.isArray(raw)
-                    ? raw
-                          .filter((item, index, arr) => arr.findIndex((x) => x.display_name === item.display_name) === index)
-                          .slice(0, 4)
-                    : [];
-                setAddressSuggestions(next);
-                setAddressDropdownOpen(next.length > 0);
-            } catch (e: any) {
-                if (e?.name !== "AbortError") {
-                    setAddressSuggestions([]);
-                    setAddressDropdownOpen(false);
-                }
-            } finally {
-                if (addressSearchAbortRef.current === controller) {
-                    setAddressSearchBusy(false);
-                }
-            }
+        const timeoutId = window.setTimeout(() => {
+            void searchAddressSuggestions(query, false);
         }, 280);
 
         return () => window.clearTimeout(timeoutId);
@@ -360,6 +453,28 @@ export default function CreateListingPage() {
         setShowSetupModal(false);
     }
 
+    function scrollToSection(section: FormSectionKey) {
+        const sectionMap: Record<FormSectionKey, HTMLDivElement | null> = {
+            intro: introSectionRef.current,
+            type: typeSectionRef.current,
+            availability: availabilitySectionRef.current,
+            pricing: pricingSectionRef.current,
+            location: locationSectionRef.current,
+        };
+        const sectionNode = sectionMap[section];
+        if (!sectionNode) return;
+        sectionNode.scrollIntoView({ behavior: "smooth", block: "center" });
+        const firstField = sectionNode.querySelector<HTMLElement>("input, textarea, select, button");
+        if (firstField) {
+            window.setTimeout(() => firstField.focus({ preventScroll: true }), 140);
+        }
+    }
+
+    function setErrorWithScroll(message: string, section: FormSectionKey) {
+        setError(message);
+        scrollToSection(section);
+    }
+
     function updateCustomSlot(slotId: string, patch: Partial<Omit<AvailabilitySlot, "id">>) {
         setCustomWeeklySlots((prev) => prev.map((slot) => (slot.id === slotId ? { ...slot, ...patch } : slot)));
     }
@@ -381,25 +496,25 @@ export default function CreateListingPage() {
 
     function setupSummaryLabel() {
         const spotCount = Math.max(1, Math.floor(Number(capacityTotal || 1)));
-        return `${parkingType}, ${spotCount} spot${spotCount === 1 ? "" : "s"}!`;
+        return `${spotCount} ${parkingTypeDisplayLabel(parkingType)} Parking Space${spotCount === 1 ? "" : "s"}`;
     }
 
     function availabilitySummaryLabel() {
         if (availabilityType === "24_7") return "24/7";
-        if (availabilityType === "same_everyday") return `Every day ${sameStart}-${sameEnd}`;
+        if (availabilityType === "same_everyday") return `Same Time, Daily (${sameStart}-${sameEnd})`;
         return customWeeklySlots
             .map((slot) => `${DAY_LABELS[slot.dow].slice(0, 3)} ${slot.start}-${slot.end}`)
             .join(", ");
     }
 
     function pricingSummaryLabel() {
-        if (mode === "free") return "Free";
+        if (mode === "free") return "Free Listing";
         if (mode === "auction") {
             const startingBid = Number(auctionStartPrice || 0);
-            return `Auction, start £${Number.isFinite(startingBid) ? startingBid.toFixed(2) : "0.00"}`;
+            return `Auction Starting At £${Number.isFinite(startingBid) ? startingBid.toFixed(2) : "0.00"}`;
         }
         const amount = Number(price || 0);
-        return `£${Number.isFinite(amount) ? amount.toFixed(2) : "0.00"} per ${priceUnit}`;
+        return `£${Number.isFinite(amount) ? amount.toFixed(2) : "0.00"} Per ${toTitleCaseWords(priceUnit)}`;
     }
 
     function applyPickedLocation(nextLat: number, nextLng: number, nextAddress?: string) {
@@ -411,6 +526,7 @@ export default function CreateListingPage() {
         }
         setAddressSuggestions([]);
         setAddressDropdownOpen(false);
+        setAddressSearchMessage("");
     }
 
     async function reverseLookupAddress(nextLat: number, nextLng: number) {
@@ -420,18 +536,14 @@ export default function CreateListingPage() {
         setReverseLookupBusy(true);
         try {
             const params = new URLSearchParams({
-                format: "jsonv2",
                 lat: String(nextLat),
-                lon: String(nextLng),
-                zoom: "18",
-                addressdetails: "1",
+                lng: String(nextLng),
             });
-            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`, {
-                signal: controller.signal,
-                headers: { "Accept-Language": "en-GB,en;q=0.9" },
-            });
-            if (!response.ok) throw new Error(`Reverse lookup failed (${response.status})`);
-            const data = (await response.json()) as { display_name?: string };
+            const data = await apiGet<{ display_name?: string }>(
+                `/parking-spots/geocode/reverse?${params.toString()}`,
+                token || undefined,
+                { signal: controller.signal }
+            );
             if (data?.display_name) {
                 suppressSuggestRef.current = true;
                 setAddressText(data.display_name);
@@ -459,6 +571,10 @@ export default function CreateListingPage() {
         const nextLng = Number(suggestion.lon);
         if (!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) return;
         applyPickedLocation(nextLat, nextLng, suggestion.display_name);
+    }
+
+    function onAddressSearchClick() {
+        void searchAddressSuggestions(addressText, true);
     }
 
     function onImageFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -524,43 +640,43 @@ export default function CreateListingPage() {
         const capacityAvailableNum = Math.floor(Number(capacityAvailable || 1));
 
         if (!title.trim() || title.trim().length < 3) {
-            setError("Title must be at least 3 characters.");
+            setErrorWithScroll("Title must be at least 3 characters.", "intro");
             return null;
         }
         if (!description.trim() || description.trim().length < 5) {
-            setError("Description must be at least 5 characters.");
+            setErrorWithScroll("Description must be at least 5 characters.", "intro");
             return null;
         }
         if (!addressText.trim() || addressText.trim().length < 5) {
-            setError("Address must be at least 5 characters.");
+            setErrorWithScroll("Address must be at least 5 characters.", "location");
             return null;
         }
         if (!coords) {
-            setError("Pick a valid location using address search or by clicking on the map.");
+            setErrorWithScroll("Pick a valid location using address search or by clicking on the map.", "location");
             return null;
         }
         if (mode === "rent" && (!Number.isFinite(priceNum) || priceNum <= 0)) {
-            setError("Rent listings need a price above 0.");
+            setErrorWithScroll("Rent listings need a price above 0.", "pricing");
             return null;
         }
-        if (allowPoints && (!Number.isFinite(pointsNum) || pointsNum <= 0)) {
-            setError("Points cost must be above 0 when enabled.");
+        if (allowPoints && (!Number.isFinite(pointsNum) || pointsNum < MIN_POINTS_COST)) {
+            setErrorWithScroll("Points cost must be at least 1 when enabled.", "pricing");
             return null;
         }
         if (!Number.isInteger(capacityTotalNum) || capacityTotalNum <= 0) {
-            setError("Capacity total must be at least 1.");
+            setErrorWithScroll("Capacity total must be at least 1.", "type");
             return null;
         }
         if (!Number.isInteger(capacityAvailableNum) || capacityAvailableNum < 0) {
-            setError("Capacity available must be 0 or higher.");
+            setErrorWithScroll("Capacity available must be 0 or higher.", "type");
             return null;
         }
         if (capacityAvailableNum > capacityTotalNum) {
-            setError("Capacity available cannot exceed total.");
+            setErrorWithScroll("Capacity available cannot exceed total.", "type");
             return null;
         }
         if (dateFrom && dateTo && dateFrom > dateTo) {
-            setError("Availability start date must be before end date.");
+            setErrorWithScroll("Availability start date must be before end date.", "availability");
             return null;
         }
 
@@ -568,7 +684,7 @@ export default function CreateListingPage() {
         try {
             availability = buildAvailabilityPayload();
         } catch (e: any) {
-            setError(e?.message || "Availability is invalid.");
+            setErrorWithScroll(e?.message || "Availability is invalid.", "availability");
             return null;
         }
 
@@ -593,16 +709,16 @@ export default function CreateListingPage() {
         if (mode === "auction") {
             const auctionStartNum = Number(auctionStartPrice || 0);
             const auctionEndIso = toIsoFromLocalInput(auctionEndLocal);
-            if (!Number.isFinite(auctionStartNum) || auctionStartNum <= 0) {
-                setError("Auction start price must be above 0.");
+            if (!Number.isFinite(auctionStartNum) || auctionStartNum < MIN_AUCTION_START_PRICE_GBP) {
+                setErrorWithScroll("Auction start price must be at least £0.10.", "pricing");
                 return null;
             }
             if (!auctionEndIso) {
-                setError("Auction end date/time is required.");
+                setErrorWithScroll("Auction end date/time is required.", "pricing");
                 return null;
             }
             if (!dateFrom || !dateTo) {
-                setError("Auction listings need availability start and end dates.");
+                setErrorWithScroll("Auction listings need availability start and end dates.", "availability");
                 return null;
             }
             payload.auction_start_price_gbp = auctionStartNum;
@@ -710,7 +826,7 @@ export default function CreateListingPage() {
                     </div>
                 ) : (
                     <form className="formGrid createListingForm" onSubmit={onSubmit}>
-                        <div className="card formSection formSection--intro">
+                        <div ref={introSectionRef} className="card formSection formSection--intro">
                             <div className="sectionHeader">
                                 <div className="h3">1. Name and description</div>
                                 {isEdit && <span className="badge badge--warm">Editing</span>}
@@ -736,7 +852,7 @@ export default function CreateListingPage() {
                             </label>
                         </div>
 
-                        <div className="card formSection formSection--type">
+                        <div ref={typeSectionRef} className="card formSection formSection--type">
                             <div className="h3">2. Listing type</div>
                             <div className="listingTypeGrid">
                                 <button
@@ -766,7 +882,7 @@ export default function CreateListingPage() {
                             </div>
                             <div className="setupSummaryCard">
                                 <div className="setupSummaryText">
-                                    Setup: <strong>{setupSummaryLabel()}</strong>
+                                    <strong>{setupSummaryLabel()}</strong>
                                 </div>
                                 <button
                                     type="button"
@@ -777,39 +893,45 @@ export default function CreateListingPage() {
                                         setShowSetupModal(true);
                                     }}
                                 >
-                                    Edit setup
+                                    Edit
                                 </button>
                             </div>
                         </div>
 
-                        <div className="card formSection formSection--availability">
+                        <div ref={availabilitySectionRef} className="card formSection formSection--availability">
                             <div className="h3">3. Availability</div>
                             <div className="availabilityTypeGrid" role="tablist" aria-label="Availability options">
                                 <button
                                     type="button"
-                                    className={`availabilityTypeBtn${availabilityType === "24_7" ? " is-active" : ""}`}
+                                    className={`availabilityTypeBtn availabilityTypeBtn--custom${
+                                        availabilityType === "custom_weekly" ? " is-active" : ""
+                                    }`}
+                                    onClick={() => setAvailabilityType("custom_weekly")}
+                                >
+                                    Custom Time
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`availabilityTypeBtn availabilityTypeBtn--same${
+                                        availabilityType === "same_everyday" ? " is-active" : ""
+                                    }`}
+                                    onClick={() => setAvailabilityType("same_everyday")}
+                                >
+                                    Same Time, Daily
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`availabilityTypeBtn availabilityTypeBtn--always${
+                                        availabilityType === "24_7" ? " is-active" : ""
+                                    }`}
                                     onClick={() => setAvailabilityType("24_7")}
                                 >
                                     24/7
                                 </button>
-                                <button
-                                    type="button"
-                                    className={`availabilityTypeBtn${availabilityType === "same_everyday" ? " is-active" : ""}`}
-                                    onClick={() => setAvailabilityType("same_everyday")}
-                                >
-                                    Same everyday
-                                </button>
-                                <button
-                                    type="button"
-                                    className={`availabilityTypeBtn${availabilityType === "custom_weekly" ? " is-active" : ""}`}
-                                    onClick={() => setAvailabilityType("custom_weekly")}
-                                >
-                                    Custom daily
-                                </button>
                             </div>
                             <div className="row">
                                 <label>
-                                    <span>Start date (optional)</span>
+                                    <span>Start date</span>
                                     <input
                                         className="input"
                                         type="date"
@@ -818,7 +940,7 @@ export default function CreateListingPage() {
                                     />
                                 </label>
                                 <label>
-                                    <span>End date (optional)</span>
+                                    <span>End date</span>
                                     <input
                                         className="input"
                                         type="date"
@@ -911,7 +1033,7 @@ export default function CreateListingPage() {
                             )}
                         </div>
 
-                        <div className="card formSection formSection--setupPricing">
+                        <div ref={pricingSectionRef} className="card formSection formSection--setupPricing">
                             <div className="h3">4. Pricing</div>
                             <div className="stack">
                                 {mode === "rent" && (
@@ -944,12 +1066,12 @@ export default function CreateListingPage() {
                                 {mode === "auction" && (
                                     <div className="row">
                                         <label>
-                                            <span>Starting bid (GBP)</span>
+                                            <span>Starting bid per hour (GBP)</span>
                                             <input
                                                 className="input"
                                                 type="number"
-                                                min="0"
-                                                step="0.5"
+                                                min="0.1"
+                                                step="0.1"
                                                 value={auctionStartPrice}
                                                 onChange={(e) => setAuctionStartPrice(e.target.value)}
                                             />
@@ -989,7 +1111,7 @@ export default function CreateListingPage() {
                                             <input
                                                 className="input"
                                                 type="number"
-                                                min="0"
+                                                min="1"
                                                 step="1"
                                                 value={pointsCost}
                                                 onChange={(e) => setPointsCost(e.target.value)}
@@ -1000,22 +1122,41 @@ export default function CreateListingPage() {
                             </div>
                         </div>
 
-                        <div className="card formSection formSection--location">
+                        <div ref={locationSectionRef} className="card formSection formSection--location">
                             <div className="sectionHeader">
                                 <div className="h3">5. Location</div>
                             </div>
                             <div className="addressLookupWrap" ref={addressLookupRef}>
                                 <label>
                                     <span>Address</span>
-                                    <input
-                                        className="input"
-                                        value={addressText}
-                                        onChange={(e) => setAddressText(e.target.value)}
-                                        onFocus={() => setAddressDropdownOpen(addressSuggestions.length > 0)}
-                                        placeholder="Start typing an address (e.g. 295 Upper Street)"
-                                        autoComplete="off"
-                                    />
+                                    <div className="addressInputRow">
+                                        <input
+                                            className="input"
+                                            value={addressText}
+                                            onChange={(e) => {
+                                                setAddressText(e.target.value);
+                                                setAddressSearchMessage("");
+                                            }}
+                                            onFocus={() => setAddressDropdownOpen(addressSuggestions.length > 0)}
+                                            onKeyDown={(event) => {
+                                                if (event.key !== "Enter") return;
+                                                event.preventDefault();
+                                                onAddressSearchClick();
+                                            }}
+                                            placeholder="Start typing an address (e.g. 295 Upper Street)"
+                                            autoComplete="off"
+                                        />
+                                        <button
+                                            type="button"
+                                            className="btn btn-primary addressSearchBtn"
+                                            disabled={addressSearchBusy}
+                                            onClick={onAddressSearchClick}
+                                        >
+                                            {addressSearchBusy ? "Searching..." : "Search"}
+                                        </button>
+                                    </div>
                                 </label>
+                                {addressSearchMessage && <div className="addressLookupStatus">{addressSearchMessage}</div>}
                                 {addressSearchBusy && <div className="addressLookupStatus muted">Searching address options...</div>}
                                 {addressDropdownOpen && addressSuggestions.length > 0 && (
                                     <div className="addressSuggestList" role="listbox" aria-label="Address suggestions">
@@ -1181,35 +1322,35 @@ export default function CreateListingPage() {
                     }}
                 >
                     <div className="modalCard">
-                        <div className="receiptCard">
+                        <div className="receiptCard receiptCard--confirm">
                             <div className="receiptHeader">
-                                <div className="h2">Confirm listing</div>
-                                <div className="muted">Review the details below, then confirm to publish.</div>
+                                <div className="h2">Confirm Listing</div>
+                                <div className="muted">Review every detail below, then publish your listing.</div>
                             </div>
                             <div className="receiptBody">
                                 <div className="receiptRow">
-                                    <span>Title</span>
-                                    <strong>{title || "-"}</strong>
+                                    <span className="receiptRowLabel">Listing Name</span>
+                                    <strong className="receiptRowValue">{title || "-"}</strong>
                                 </div>
                                 <div className="receiptRow">
-                                    <span>Type</span>
-                                    <strong>{mode}</strong>
+                                    <span className="receiptRowLabel">Type</span>
+                                    <strong className="receiptRowValue">{modeDisplayLabel(mode)}</strong>
                                 </div>
                                 <div className="receiptRow">
-                                    <span>Setup</span>
-                                    <strong>{setupSummaryLabel()}</strong>
+                                    <span className="receiptRowLabel">Setup</span>
+                                    <strong className="receiptRowValue">{setupSummaryLabel()}</strong>
                                 </div>
                                 <div className="receiptRow">
-                                    <span>Availability</span>
-                                    <strong>{availabilitySummaryLabel() || "-"}</strong>
+                                    <span className="receiptRowLabel">Availability</span>
+                                    <strong className="receiptRowValue">{availabilitySummaryLabel() || "-"}</strong>
                                 </div>
                                 <div className="receiptRow">
-                                    <span>Pricing</span>
-                                    <strong>{pricingSummaryLabel()}</strong>
+                                    <span className="receiptRowLabel">Pricing</span>
+                                    <strong className="receiptRowValue">{pricingSummaryLabel()}</strong>
                                 </div>
                                 <div className="receiptRow">
-                                    <span>Address</span>
-                                    <strong>{addressText || "-"}</strong>
+                                    <span className="receiptRowLabel">Address</span>
+                                    <strong className="receiptRowValue">{addressText || "-"}</strong>
                                 </div>
                             </div>
                             <div className="receiptActions">
@@ -1230,7 +1371,7 @@ export default function CreateListingPage() {
                                     disabled={confirmingPublish}
                                     onClick={onConfirmPublish}
                                 >
-                                    {confirmingPublish ? "Publishing..." : "Confirm and publish"}
+                                    {confirmingPublish ? "Publishing..." : "Confirm And Publish"}
                                 </button>
                             </div>
                         </div>

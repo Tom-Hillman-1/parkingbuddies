@@ -88,6 +88,9 @@ router.patch("/password", requireAuth, async (req: AuthRequest, res) => {
     if (typeof currentPassword !== "string" || typeof newPassword !== "string") {
         return res.status(400).json({ ok: false, error: "currentPassword and newPassword are required" });
     }
+    if (!currentPassword.trim() || !newPassword.trim()) {
+        return res.status(400).json({ ok: false, error: "currentPassword and newPassword are required" });
+    }
 
     if (!isValidPassword(newPassword)) {
         return res.status(400).json({
@@ -109,6 +112,10 @@ router.patch("/password", requireAuth, async (req: AuthRequest, res) => {
         const ok = await bcrypt.compare(currentPassword, r.rows[0].password_hash);
         if (!ok) {
             return res.status(401).json({ ok: false, error: "Current password is incorrect" });
+        }
+        const isSamePassword = await bcrypt.compare(newPassword, r.rows[0].password_hash);
+        if (isSamePassword) {
+            return res.status(400).json({ ok: false, error: "New password must be different from current password" });
         }
 
         const newHash = await bcrypt.hash(newPassword, 10);

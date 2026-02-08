@@ -34,6 +34,14 @@ type ConnectStatus = {
     demo_available: boolean;
 };
 
+type StripeReceiptDetails = {
+    payment_intent_id: string;
+    charge_id: string | null;
+    receipt_url: string | null;
+    receipt_email: string | null;
+    amount_received_gbp: number;
+};
+
 function toMoney(x: unknown) {
     const n = Number(x ?? 0);
     return Number.isFinite(n) ? n : 0;
@@ -53,6 +61,27 @@ function demoConnectStatus(accountId: string | null = null): ConnectStatus {
         dashboard_enabled: false,
         demo_bypass: true,
         demo_available: DEMO_PAYOUTS_ENABLED,
+    };
+}
+
+async function getStripeReceiptDetails(paymentIntentId: string): Promise<StripeReceiptDetails> {
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+        expand: ["latest_charge"],
+    });
+
+    let charge: Stripe.Charge | null = null;
+    if (typeof paymentIntent.latest_charge === "string" && paymentIntent.latest_charge) {
+        charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
+    } else if (paymentIntent.latest_charge && typeof paymentIntent.latest_charge !== "string") {
+        charge = paymentIntent.latest_charge;
+    }
+
+    return {
+        payment_intent_id: paymentIntent.id,
+        charge_id: charge?.id ?? (typeof paymentIntent.latest_charge === "string" ? paymentIntent.latest_charge : null),
+        receipt_url: charge?.receipt_url ?? null,
+        receipt_email: charge?.receipt_email ?? paymentIntent.receipt_email ?? null,
+        amount_received_gbp: toMoney((paymentIntent.amount_received || paymentIntent.amount || 0) / 100),
     };
 }
 
@@ -410,10 +439,12 @@ router.post("/create-intent", requireAuth, async (req: AuthRequest, res) => {
                     b.pay_method,
                     b.total_price_gbp,
                     ps.owner_user_id,
-                    owner.stripe_account_id
+                    owner.stripe_account_id,
+                    driver.email AS driver_email
              FROM bookings b
                       JOIN parking_spots ps ON ps.id = b.parking_spot_id
                       JOIN users owner ON owner.id = ps.owner_user_id
+                      JOIN users driver ON driver.id = b.driver_user_id
              WHERE b.id = $1
                AND b.driver_user_id = $2`,
             [booking_id, req.userId]
@@ -472,6 +503,7 @@ router.post("/create-intent", requireAuth, async (req: AuthRequest, res) => {
             amount: amountPence,
             currency: "gbp",
             automatic_payment_methods: { enabled: true },
+            description: `Parking booking ${booking_id}`,
             metadata: {
                 booking_id,
                 user_id: req.userId ?? "",
@@ -481,6 +513,9 @@ router.post("/create-intent", requireAuth, async (req: AuthRequest, res) => {
                 demo_bypass_connect: ownerConnectStatus.demo_bypass ? "true" : "false",
             },
         };
+        if (typeof booking.driver_email === "string" && booking.driver_email.trim()) {
+            paymentIntentPayload.receipt_email = booking.driver_email.trim().toLowerCase();
+        }
         if (ownerAccountId && !ownerConnectStatus.demo_bypass) {
             paymentIntentPayload.transfer_data = { destination: ownerAccountId };
             paymentIntentPayload.on_behalf_of = ownerAccountId;
@@ -548,6 +583,13 @@ router.post("/confirm-intent", requireAuth, async (req: AuthRequest, res) => {
 
         await finalizePaymentIntent(paymentIntent);
 
+        let receipt: StripeReceiptDetails | null = null;
+        try {
+            receipt = await getStripeReceiptDetails(payment_intent_id);
+        } catch {
+            receipt = null;
+        }
+
         const receiptR = await pool.query(
             `SELECT b.id,
                     b.status,
@@ -567,7 +609,7 @@ router.post("/confirm-intent", requireAuth, async (req: AuthRequest, res) => {
             [booking_id]
         );
 
-        return res.json({ ok: true, booking: receiptR.rows[0] });
+        return res.json({ ok: true, booking: receiptR.rows[0], receipt });
     } catch (e) {
         return res.status(500).json({ ok: false, error: String(e) });
     }
@@ -666,6 +708,51 @@ router.post("/auction-intent", requireAuth, async (req: AuthRequest, res) => {
             client_secret: intent.client_secret,
             payment_intent_id: intent.id,
         });
+    } catch (e) {
+        return res.status(500).json({ ok: false, error: String(e) });
+    }
+});
+
+/**
+ * GET /payments/booking/:bookingId/receipt
+ * Returns official Stripe receipt details for a driver's booking payment.
+ */
+router.get("/booking/:bookingId/receipt", requireAuth, async (req: AuthRequest, res) => {
+    const bookingId = req.params.bookingId;
+    if (!bookingId) {
+        return res.status(400).json({ ok: false, error: "bookingId is required" });
+    }
+
+    try {
+        const ownershipR = await pool.query(
+            `SELECT id
+             FROM bookings
+             WHERE id = $1 AND driver_user_id = $2`,
+            [bookingId, req.userId]
+        );
+        if (!ownershipR.rowCount) {
+            return res.status(404).json({ ok: false, error: "Booking not found" });
+        }
+
+        const paymentR = await pool.query(
+            `SELECT provider_ref, status
+             FROM payments
+             WHERE booking_id = $1
+             ORDER BY updated_at DESC NULLS LAST, created_at DESC, id DESC
+             LIMIT 1`,
+            [bookingId]
+        );
+        if (!paymentR.rowCount) {
+            return res.status(404).json({ ok: false, error: "No payment found for this booking" });
+        }
+
+        const ref = paymentR.rows[0].provider_ref;
+        if (typeof ref !== "string" || !ref.trim()) {
+            return res.status(404).json({ ok: false, error: "No Stripe payment reference found" });
+        }
+
+        const receipt = await getStripeReceiptDetails(ref);
+        return res.json({ ok: true, receipt, payment_status: paymentR.rows[0].status });
     } catch (e) {
         return res.status(500).json({ ok: false, error: String(e) });
     }

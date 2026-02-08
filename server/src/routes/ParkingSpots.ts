@@ -7,6 +7,13 @@ const router = Router();
 // reward amount for uploading a listing (PDD #8)
 const LISTING_REWARD_POINTS = 5;
 const IMAGE_REWARD_POINTS = 2;
+const MIN_AUCTION_START_PRICE_GBP = 0.1;
+const MIN_POINTS_COST = 1;
+const NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org";
+const NOMINATIM_HEADERS = {
+    "Accept-Language": "en-GB,en;q=0.9",
+    "User-Agent": "ParkingBuddies/1.0",
+};
 
 type PriceUnit = "hour" | "day" | "week";
 type Mode = "free" | "rent" | "auction";
@@ -321,8 +328,8 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
     if (allow_points && mode !== "rent" && mode !== "auction") {
         return res.status(400).json({ ok: false, error: "Points can only be enabled for rent or auction listings" });
     }
-    if (allow_points && points_cost <= 0) {
-        return res.status(400).json({ ok: false, error: "points_cost must be > 0 when allow_points is true" });
+    if (allow_points && points_cost < MIN_POINTS_COST) {
+        return res.status(400).json({ ok: false, error: "points_cost must be >= 1 when allow_points is true" });
     }
 
     // availability (new or old)
@@ -335,7 +342,9 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
 
     if (mode === "auction") {
         const ap = safeMoney(body.auction_start_price_gbp);
-        if (ap <= 0) return res.status(400).json({ ok: false, error: "auction_start_price_gbp must be > 0 for auction" });
+        if (ap < MIN_AUCTION_START_PRICE_GBP) {
+            return res.status(400).json({ ok: false, error: "auction_start_price_gbp must be >= 0.1 for auction" });
+        }
 
         const endRaw = body.auction_end;
         if (typeof endRaw !== "string" || Number.isNaN(Date.parse(endRaw))) {
@@ -548,8 +557,8 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
     if (allow_points && mode !== "rent" && mode !== "auction") {
         return res.status(400).json({ ok: false, error: "Points can only be enabled for rent or auction listings" });
     }
-    if (allow_points && points_cost <= 0) {
-        return res.status(400).json({ ok: false, error: "points_cost must be > 0 when allow_points is true" });
+    if (allow_points && points_cost < MIN_POINTS_COST) {
+        return res.status(400).json({ ok: false, error: "points_cost must be >= 1 when allow_points is true" });
     }
 
     const av = buildAvailabilityJson(body);
@@ -560,7 +569,9 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
 
     if (mode === "auction") {
         const ap = safeMoney(body.auction_start_price_gbp);
-        if (ap <= 0) return res.status(400).json({ ok: false, error: "auction_start_price_gbp must be > 0 for auction" });
+        if (ap < MIN_AUCTION_START_PRICE_GBP) {
+            return res.status(400).json({ ok: false, error: "auction_start_price_gbp must be >= 0.1 for auction" });
+        }
 
         const endRaw = body.auction_end;
         if (typeof endRaw !== "string" || Number.isNaN(Date.parse(endRaw))) {
@@ -814,6 +825,103 @@ router.get("/", async (_req, res) => {
         return res.json({ ok: true, parking_spots: spots });
     } catch (e) {
         return res.status(500).json({ ok: false, error: String(e) });
+    }
+});
+
+/**
+ * GET /parking-spots/geocode/search?q=...
+ * Proxies address search through the backend to avoid browser CORS issues.
+ */
+router.get("/geocode/search", async (req, res) => {
+    const rawQuery = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (rawQuery.length < 3) {
+        return res.status(400).json({ ok: false, error: "q must be at least 3 characters" });
+    }
+
+    const limitRaw = Number(req.query.limit ?? 12);
+    const limit = Number.isFinite(limitRaw) ? Math.min(12, Math.max(1, Math.floor(limitRaw))) : 12;
+    const countrycodes =
+        typeof req.query.countrycodes === "string" && req.query.countrycodes.trim()
+            ? req.query.countrycodes.trim()
+            : "gb";
+    const viewbox =
+        typeof req.query.viewbox === "string" && req.query.viewbox.trim()
+            ? req.query.viewbox.trim()
+            : "-0.5103,51.6919,0.3340,51.2868";
+
+    try {
+        const params = new URLSearchParams({
+            format: "jsonv2",
+            limit: String(limit),
+            addressdetails: "1",
+            countrycodes,
+            viewbox,
+            q: rawQuery,
+        });
+
+        const response = await fetch(`${NOMINATIM_BASE_URL}/search?${params.toString()}`, {
+            headers: NOMINATIM_HEADERS,
+        });
+        if (!response.ok) {
+            return res.status(502).json({ ok: false, error: `Address search provider error (${response.status})` });
+        }
+
+        const payload = (await response.json()) as Array<{
+            place_id?: number;
+            display_name?: string;
+            lat?: string;
+            lon?: string;
+        }>;
+        const suggestions = Array.isArray(payload)
+            ? payload
+                  .filter((item) => typeof item.display_name === "string" && typeof item.lat === "string" && typeof item.lon === "string")
+                  .map((item) => ({
+                      place_id: Number(item.place_id ?? 0),
+                      display_name: item.display_name as string,
+                      lat: item.lat as string,
+                      lon: item.lon as string,
+                  }))
+                  .slice(0, 5)
+            : [];
+
+        return res.json({ ok: true, suggestions });
+    } catch (e) {
+        return res.status(503).json({ ok: false, error: "Address search is unavailable right now. Please try again." });
+    }
+});
+
+/**
+ * GET /parking-spots/geocode/reverse?lat=...&lng=...
+ * Proxies reverse geocoding through the backend to avoid browser CORS issues.
+ */
+router.get("/geocode/reverse", async (req, res) => {
+    const lat = Number(req.query.lat);
+    const lng = Number(typeof req.query.lng === "string" ? req.query.lng : req.query.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return res.status(400).json({ ok: false, error: "lat/lng are invalid" });
+    }
+
+    try {
+        const params = new URLSearchParams({
+            format: "jsonv2",
+            lat: String(lat),
+            lon: String(lng),
+            zoom: "18",
+            addressdetails: "1",
+        });
+
+        const response = await fetch(`${NOMINATIM_BASE_URL}/reverse?${params.toString()}`, {
+            headers: NOMINATIM_HEADERS,
+        });
+        if (!response.ok) {
+            return res.status(502).json({ ok: false, error: `Reverse lookup provider error (${response.status})` });
+        }
+
+        const payload = (await response.json()) as { display_name?: string };
+        const display_name = typeof payload.display_name === "string" ? payload.display_name : null;
+        return res.json({ ok: true, display_name });
+    } catch (e) {
+        return res.status(503).json({ ok: false, error: "Reverse lookup is unavailable right now. Please try again." });
     }
 });
 

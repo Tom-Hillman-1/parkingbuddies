@@ -433,8 +433,9 @@ export default function SpotDetailsPage() {
             return bs < e && be > s;
         });
     }, [spotBookings, start, end]);
-    const capacity = Number((spot as any)?.capacity_total ?? 1);
-    const fullyBooked = conflicts.length >= Math.max(1, capacity);
+    const capacity = Math.max(1, Number((spot as any)?.capacity_total ?? 1));
+    const spotsRemaining = Math.max(0, capacity - conflicts.length);
+    const fullyBooked = spotsRemaining <= 0;
     const availabilitySegments = useMemo(
         () => (spot ? getAvailabilitySegments(spot, spotBookings, 45) : []),
         [spot, spotBookings]
@@ -464,8 +465,13 @@ export default function SpotDetailsPage() {
         : !slotAllowed
             ? { ok: false, label: "Requested slot is outside listing availability." }
             : fullyBooked
-                ? { ok: false, label: "Slot is currently booked." }
-                : { ok: true, label: "Slot is available." };
+                ? { ok: false, label: capacity > 1 ? "All spots are booked for this slot." : "Slot is currently booked." }
+                : {
+                    ok: true,
+                    label: capacity > 1
+                        ? `${spotsRemaining} spot${spotsRemaining === 1 ? "" : "s"} left for this slot.`
+                        : "Slot is available.",
+                };
     const calendarDays = useMemo(() => buildCalendarGrid(calendarMonth), [calendarMonth]);
 
     function toIso(date: string, time: string) {
@@ -1215,6 +1221,16 @@ export default function SpotDetailsPage() {
                                     <div className="spotEndedHeadline">{auctionClosedHeadline}</div>
                                 )}
                                 <div className="muted" style={{ marginTop: 6 }}>{spot.description}</div>
+                                <div className="rowInline" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
+                                    <span className="badge badge--cool">
+                                        {capacity === 1 ? "1 Spot" : `${capacity} Spots`}
+                                    </span>
+                                    {capacity > 1 && (
+                                        <span className={`badge ${spotsRemaining > 0 ? "badge--green" : "badge--rose"}`}>
+                                            {spotsRemaining} left for selected time
+                                        </span>
+                                    )}
+                                </div>
                             </div>
                             <div className="pill">
                                 <div>{pill}</div>
@@ -1268,14 +1284,14 @@ export default function SpotDetailsPage() {
                                 <div className="spotInfoLabel">Parking type</div>
                                 <div className="spotInfoValue">{formatModeLabel((spot as any).parking_type ?? "private")}</div>
                             </div>
-                            {(spot as any).parking_type === "public" && (
-                                <div className="spotInfoCard spotInfoCard--secondary">
-                                    <div className="spotInfoLabel">Capacity</div>
-                                    <div className="spotInfoValue">
-                                        {(spot as any).capacity_available ?? 0} / {(spot as any).capacity_total ?? 0} available
-                                    </div>
+                            <div className="spotInfoCard spotInfoCard--secondary">
+                                <div className="spotInfoLabel">Spots</div>
+                                <div className="spotInfoValue">
+                                    {capacity > 1
+                                        ? `${spotsRemaining}/${capacity} available for selected slot`
+                                        : "1 total"}
                                 </div>
-                            )}
+                            </div>
                         </div>
                     </div>
 
@@ -1842,6 +1858,7 @@ function getNextSlots(spot: ParkingSpot, bookings: Booking[], minutes: number, c
 
 function getAvailabilitySegments(spot: ParkingSpot, bookings: Booking[], daysForward = 30) {
     const windows = buildAvailabilityWindows(spot, daysForward);
+    const capacity = Math.max(1, Number((spot as any)?.capacity_total ?? 1));
     const now = roundToNextQuarter(new Date());
     const normalized = bookings
         .filter((b) => b.start_time && b.end_time)
@@ -1850,7 +1867,7 @@ function getAvailabilitySegments(spot: ParkingSpot, bookings: Booking[], daysFor
 
     const segments: Array<{ start: Date; end: Date }> = [];
     for (const window of windows) {
-        const freeSegments = subtractBookings(window, normalized);
+        const freeSegments = subtractBookings(window, normalized, capacity);
         for (const seg of freeSegments) {
             const roundedStart = roundToNextQuarter(seg.start < now ? now : seg.start);
             if (roundedStart < seg.end) {
@@ -1945,8 +1962,57 @@ function buildAvailabilityWindows(spot: ParkingSpot, daysForward: number) {
 
 function subtractBookings(
     window: { start: Date; end: Date },
-    bookings: Array<{ start: Date; end: Date }>
+    bookings: Array<{ start: Date; end: Date }>,
+    capacity = 1
 ) {
+    const safeCapacity = Math.max(1, Number.isFinite(capacity) ? Math.floor(capacity) : 1);
+
+    if (safeCapacity > 1) {
+        const events: Array<{ at: number; delta: number }> = [];
+        for (const b of bookings) {
+            if (b.end <= window.start || b.start >= window.end) continue;
+            const startMs = Math.max(window.start.getTime(), b.start.getTime());
+            const endMs = Math.min(window.end.getTime(), b.end.getTime());
+            if (endMs <= startMs) continue;
+            events.push({ at: startMs, delta: 1 });
+            events.push({ at: endMs, delta: -1 });
+        }
+
+        if (!events.length) return [{ ...window }];
+
+        events.sort((a, b) => (a.at === b.at ? a.delta - b.delta : a.at - b.at));
+        const blocked: Array<{ start: Date; end: Date }> = [];
+        let active = 0;
+        let blockedStart: number | null = null;
+
+        for (const event of events) {
+            const before = active;
+            active += event.delta;
+            if (before < safeCapacity && active >= safeCapacity) {
+                blockedStart = event.at;
+            }
+            if (before >= safeCapacity && active < safeCapacity && blockedStart != null && event.at > blockedStart) {
+                blocked.push({ start: new Date(blockedStart), end: new Date(event.at) });
+                blockedStart = null;
+            }
+        }
+
+        let segments: Array<{ start: Date; end: Date }> = [{ ...window }];
+        for (const b of blocked) {
+            const next: Array<{ start: Date; end: Date }> = [];
+            for (const seg of segments) {
+                if (b.end <= seg.start || b.start >= seg.end) {
+                    next.push(seg);
+                } else {
+                    if (b.start > seg.start) next.push({ start: seg.start, end: b.start });
+                    if (b.end < seg.end) next.push({ start: b.end, end: seg.end });
+                }
+            }
+            segments = next;
+        }
+        return segments;
+    }
+
     let segments: Array<{ start: Date; end: Date }> = [{ ...window }];
     for (const b of bookings) {
         if (b.end <= window.start || b.start >= window.end) continue;

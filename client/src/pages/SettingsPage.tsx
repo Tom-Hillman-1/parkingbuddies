@@ -31,6 +31,13 @@ type SettingsPayload = {
     home_address?: string;
 };
 
+function isStrongPassword(password: string) {
+    if (password.length < 8) return false;
+    const hasLetter = /[A-Za-z]/.test(password);
+    const hasNumber = /[0-9]/.test(password);
+    return hasLetter && hasNumber;
+}
+
 export default function SettingsPage() {
     const { token, user, logout } = useAuth();
     const navigate = useNavigate();
@@ -44,9 +51,12 @@ export default function SettingsPage() {
     const [confirmPassword, setConfirmPassword] = useState("");
 
     const [loading, setLoading] = useState(true);
-    const [saving, setSaving] = useState(false);
+    const [savingProfile, setSavingProfile] = useState(false);
+    const [savingPassword, setSavingPassword] = useState(false);
     const [msg, setMsg] = useState<string | null>(null);
     const [err, setErr] = useState<string | null>(null);
+    const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
+    const [passwordErr, setPasswordErr] = useState<string | null>(null);
     const [connect, setConnect] = useState<ConnectStatus | null>(null);
     const [connectBusy, setConnectBusy] = useState(false);
 
@@ -166,7 +176,7 @@ export default function SettingsPage() {
     }
 
     async function save() {
-        setSaving(true);
+        setSavingProfile(true);
         setErr(null);
         setMsg(null);
 
@@ -183,7 +193,61 @@ export default function SettingsPage() {
         } catch (e: any) {
             setErr(e.message || "Save failed");
         } finally {
-            setSaving(false);
+            setSavingProfile(false);
+        }
+    }
+
+    async function updatePassword() {
+        const current = currentPassword;
+        const next = newPassword;
+        const confirm = confirmPassword;
+
+        setPasswordErr(null);
+        setPasswordMsg(null);
+
+        if (!current.trim()) {
+            setPasswordErr("Enter your current password.");
+            return;
+        }
+        if (!next.trim()) {
+            setPasswordErr("Enter a new password.");
+            return;
+        }
+        if (!isStrongPassword(next)) {
+            setPasswordErr("New password must be at least 8 characters and include at least one letter and one number.");
+            return;
+        }
+        if (next !== confirm) {
+            setPasswordErr("New password and confirmation do not match.");
+            return;
+        }
+        if (current === next) {
+            setPasswordErr("New password must be different from your current password.");
+            return;
+        }
+
+        setSavingPassword(true);
+        try {
+            await apiPatch("/settings/password", { currentPassword: current, newPassword: next }, token ?? undefined);
+            setPasswordMsg("Password changed successfully.");
+            setCurrentPassword("");
+            setNewPassword("");
+            setConfirmPassword("");
+        } catch (e: any) {
+            const raw = String(e?.message || "Password update failed");
+            if (/current password is incorrect/i.test(raw)) {
+                setPasswordErr("Current password is incorrect.");
+            } else if (/must be at least 8 characters/i.test(raw)) {
+                setPasswordErr("New password must be at least 8 characters and include at least one letter and one number.");
+            } else if (/different from/i.test(raw)) {
+                setPasswordErr("New password must be different from your current password.");
+            } else if (/required/i.test(raw)) {
+                setPasswordErr("Current password and new password are required.");
+            } else {
+                setPasswordErr(raw);
+            }
+        } finally {
+            setSavingPassword(false);
         }
     }
 
@@ -243,8 +307,8 @@ export default function SettingsPage() {
                             </label>
 
                             <div className="rowInline">
-                                <button onClick={save} disabled={saving} className="btn btn-primary">
-                                    {saving ? "Saving..." : "Save changes"}
+                                <button onClick={save} disabled={savingProfile} className="btn btn-primary">
+                                    {savingProfile ? "Saving..." : "Save changes"}
                                 </button>
                                 <Link to="/dashboard" className="btn">Back to dashboard</Link>
                             </div>
@@ -265,7 +329,11 @@ export default function SettingsPage() {
                                     type="password"
                                     placeholder="Enter current password"
                                     value={currentPassword}
-                                    onChange={(e) => setCurrentPassword(e.target.value)}
+                                    onChange={(e) => {
+                                        setCurrentPassword(e.target.value);
+                                        setPasswordErr(null);
+                                        setPasswordMsg(null);
+                                    }}
                                 />
                             </label>
                             <label>
@@ -275,7 +343,11 @@ export default function SettingsPage() {
                                     type="password"
                                     placeholder="Create a new password"
                                     value={newPassword}
-                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    onChange={(e) => {
+                                        setNewPassword(e.target.value);
+                                        setPasswordErr(null);
+                                        setPasswordMsg(null);
+                                    }}
                                 />
                             </label>
                             <div className="tiny muted">
@@ -288,35 +360,18 @@ export default function SettingsPage() {
                                     type="password"
                                     placeholder="Repeat new password"
                                     value={confirmPassword}
-                                    onChange={(e) => setConfirmPassword(e.target.value)}
+                                    onChange={(e) => {
+                                        setConfirmPassword(e.target.value);
+                                        setPasswordErr(null);
+                                        setPasswordMsg(null);
+                                    }}
                                 />
                             </label>
+                            {passwordErr && <div className="spotAlert">{passwordErr}</div>}
+                            {passwordMsg && <div className="badge badge--green">{passwordMsg}</div>}
                             <div className="rowInline">
-                                <button onClick={async () => {
-                                    if (!currentPassword || !newPassword) {
-                                        setErr("Please fill in your current and new password.");
-                                        return;
-                                    }
-                                    if (newPassword !== confirmPassword) {
-                                        setErr("New passwords do not match.");
-                                        return;
-                                    }
-                                    setSaving(true);
-                                    setErr(null);
-                                    setMsg(null);
-                                    try {
-                                        await apiPatch("/settings/password", { currentPassword, newPassword }, token ?? undefined);
-                                        setMsg("Password updated.");
-                                        setCurrentPassword("");
-                                        setNewPassword("");
-                                        setConfirmPassword("");
-                                    } catch (e: any) {
-                                        setErr(e.message || "Password update failed");
-                                    } finally {
-                                        setSaving(false);
-                                    }
-                                }} className="btn btn-primary" disabled={saving}>
-                                    {saving ? "Updating..." : "Update password"}
+                                <button onClick={updatePassword} className="btn btn-primary" disabled={savingPassword}>
+                                    {savingPassword ? "Updating..." : "Update password"}
                                 </button>
                                 <button
                                     onClick={() => {

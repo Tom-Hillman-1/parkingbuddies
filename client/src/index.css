@@ -507,9 +507,22 @@ label > span { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; tex
   color: var(--muted);
 }
 .listingTypeCard.is-active {
+  transform: translateY(-1px);
+}
+.listingTypeCard--rent.is-active {
+  border-color: rgba(59,186,156,0.65);
+  box-shadow: 0 0 0 3px rgba(59,186,156,0.18);
+  background: rgba(59,186,156,0.16);
+}
+.listingTypeCard--auction.is-active {
   border-color: rgba(110,168,254,0.55);
   box-shadow: 0 0 0 3px rgba(110,168,254,0.16);
   background: rgba(110,168,254,0.10);
+}
+.listingTypeCard--free.is-active {
+  border-color: rgba(178,130,255,0.66);
+  box-shadow: 0 0 0 3px rgba(178,130,255,0.18);
+  background: rgba(178,130,255,0.15);
 }
 .setupSummaryCard {
   margin-top: 2px;
@@ -540,11 +553,30 @@ label > span { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; tex
   padding: 9px 10px;
   font-weight: 700;
   cursor: pointer;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease, transform 0.08s ease;
+}
+.availabilityTypeBtn:hover {
+  transform: translateY(-1px);
 }
 .availabilityTypeBtn.is-active {
   border-color: rgba(110,168,254,0.55);
   box-shadow: 0 0 0 3px rgba(110,168,254,0.16);
   background: rgba(110,168,254,0.10);
+}
+.availabilityTypeBtn--always.is-active {
+  border-color: rgba(59,186,156,0.65);
+  box-shadow: 0 0 0 3px rgba(59,186,156,0.18);
+  background: rgba(59,186,156,0.16);
+}
+.availabilityTypeBtn--same.is-active {
+  border-color: rgba(110,168,254,0.62);
+  box-shadow: 0 0 0 3px rgba(110,168,254,0.2);
+  background: rgba(110,168,254,0.14);
+}
+.availabilityTypeBtn--custom.is-active {
+  border-color: rgba(178,130,255,0.66);
+  box-shadow: 0 0 0 3px rgba(178,130,255,0.2);
+  background: rgba(178,130,255,0.15);
 }
 .customSlotRow {
   display: grid;
@@ -605,33 +637,47 @@ label > span { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; tex
   display: grid;
   gap: 8px;
 }
+.addressInputRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.addressSearchBtn {
+  min-width: 104px;
+}
 .addressLookupStatus {
   font-size: 12px;
+  color: rgba(210, 237, 228, 0.92);
+  letter-spacing: 0.01em;
 }
 .addressSuggestList {
   display: grid;
   gap: 6px;
   max-height: 220px;
   overflow: auto;
-  border: 1px solid rgba(255,255,255,0.15);
-  border-radius: 10px;
-  padding: 6px;
-  background: rgba(15,18,31,0.92);
+  border: 1px solid rgba(110,168,254,0.28);
+  border-radius: 12px;
+  padding: 8px;
+  background: linear-gradient(180deg, rgba(110,168,254,0.11), rgba(255,255,255,0.03)), var(--panel2);
+  box-shadow: 0 12px 24px rgba(0,0,0,0.24);
 }
 .addressSuggestItem {
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 8px;
-  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.08);
   color: var(--text);
   text-align: left;
-  padding: 8px 10px;
+  padding: 9px 10px;
   cursor: pointer;
   font-size: 12px;
   line-height: 1.35;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.08s ease;
 }
 .addressSuggestItem:hover {
   border-color: rgba(59,186,156,0.55);
-  background: rgba(59,186,156,0.14);
+  background: rgba(59,186,156,0.16);
+  transform: translateY(-1px);
 }
 .createListingMap .leafletShell {
   min-height: 320px;
@@ -696,6 +742,12 @@ label > span { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; tex
   }
   .availabilityTypeGrid {
     grid-template-columns: 1fr;
+  }
+  .addressInputRow {
+    grid-template-columns: 1fr;
+  }
+  .addressSearchBtn {
+    width: 100%;
   }
   .customSlotRow {
     grid-template-columns: 1fr;
@@ -1799,6 +1851,12 @@ label > span { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; tex
   display: grid;
   gap: 12px;
 }
+.receiptCard--confirm {
+  border-radius: 14px;
+  border: 1px solid rgba(59,186,156,0.34);
+  background: linear-gradient(180deg, rgba(59,186,156,0.12), transparent 52%), rgba(255,255,255,0.02);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+}
 .receiptHeader {
   display: grid;
   gap: 4px;
@@ -1815,6 +1873,22 @@ label > span { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; tex
   justify-content: space-between;
   gap: 12px;
   font-variant-numeric: tabular-nums;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.11);
+  background: rgba(255,255,255,0.03);
+}
+.receiptRowLabel {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(242,243,247,0.68);
+}
+.receiptRowValue {
+  text-align: right;
+  color: var(--text);
+  font-size: 13px;
 }
 .receiptActions {
   display: flex;
@@ -1822,6 +1896,16 @@ label > span { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; tex
   gap: 10px;
   border-top: 1px dashed rgba(255,255,255,0.18);
   padding-top: 12px;
+}
+@media (max-width: 700px) {
+  .receiptRow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .receiptRowValue {
+    text-align: left;
+  }
 }
 
 /* Dashboard */
