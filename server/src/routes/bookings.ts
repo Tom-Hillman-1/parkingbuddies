@@ -287,12 +287,12 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
             return res.status(400).json({ ok: false, error: avail.error });
         }
 
-        // Prevent overlaps (confirmed only; pending does not block)
+        // Prevent overlaps for capacity (treat pending as reserved too).
         const overlapR = await client.query(
             `SELECT COUNT(*)::int AS count
        FROM bookings
        WHERE parking_spot_id = $1
-         AND status IN ('confirmed')
+         AND status IN ('confirmed', 'pending')
          AND NOT (end_time <= $2 OR start_time >= $3)`,
             [parking_spot_id, start_time, end_time]
         );
@@ -441,7 +441,7 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
 
 /**
  * GET /bookings/spot/:id
- * Public: confirmed bookings for a spot (times only).
+ * Public: active bookings for a spot (times only).
  * Optional query params: start, end (ISO) to limit to a window.
  */
 router.get("/spot/:id", async (req, res) => {
@@ -456,7 +456,7 @@ router.get("/spot/:id", async (req, res) => {
                 `SELECT id, parking_spot_id, start_time, end_time, status
                  FROM bookings
                  WHERE parking_spot_id = $1
-                   AND status = 'confirmed'
+                   AND status IN ('confirmed', 'pending')
                    AND NOT (end_time <= $2 OR start_time >= $3)
                  ORDER BY start_time ASC`,
                 [spotId, start, end]
@@ -466,7 +466,7 @@ router.get("/spot/:id", async (req, res) => {
                 `SELECT id, parking_spot_id, start_time, end_time, status
                  FROM bookings
                  WHERE parking_spot_id = $1
-                   AND status = 'confirmed'
+                   AND status IN ('confirmed', 'pending')
                  ORDER BY start_time ASC`,
                 [spotId]
             );
@@ -479,7 +479,7 @@ router.get("/spot/:id", async (req, res) => {
 
 /**
  * GET /bookings/availability?ids=uuid,uuid&start=ISO&end=ISO
- * Public: returns confirmed booking counts for each spot in a time window.
+ * Public: returns active booking counts for each spot in a time window.
  */
 router.get("/availability", async (req, res) => {
     const idsParam = typeof req.query.ids === "string" ? req.query.ids : "";
@@ -497,7 +497,7 @@ router.get("/availability", async (req, res) => {
             `SELECT parking_spot_id, COUNT(*)::int AS count
              FROM bookings
              WHERE parking_spot_id = ANY($1)
-               AND status = 'confirmed'
+               AND status IN ('confirmed', 'pending')
                AND NOT (end_time <= $2 OR start_time >= $3)
              GROUP BY parking_spot_id`,
             [ids, s, e]
@@ -512,7 +512,7 @@ router.get("/availability", async (req, res) => {
 
 /**
  * GET /bookings/window?ids=uuid,uuid&start=ISO&end=ISO
- * Public: confirmed bookings within a window, grouped by spot_id.
+ * Public: active bookings within a window, grouped by spot_id.
  */
 router.get("/window", async (req, res) => {
     const idsParam = typeof req.query.ids === "string" ? req.query.ids : "";
@@ -533,7 +533,7 @@ router.get("/window", async (req, res) => {
             `SELECT id, parking_spot_id, start_time, end_time, status
              FROM bookings
              WHERE parking_spot_id = ANY($1)
-               AND status = 'confirmed'
+               AND status IN ('confirmed', 'pending')
                AND NOT (end_time <= $2 OR start_time >= $3)
              ORDER BY start_time ASC`,
             [ids, s, e]

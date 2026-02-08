@@ -107,8 +107,57 @@ function buildAvailabilityWindows(spot: any, maxDaysForward = 30) {
 
 function subtractBookings(
     window: { start: Date; end: Date },
-    bookings: Array<{ start: Date; end: Date }>
+    bookings: Array<{ start: Date; end: Date }>,
+    capacity = 1
 ) {
+    const safeCapacity = Math.max(1, Number.isFinite(capacity) ? Math.floor(capacity) : 1);
+
+    if (safeCapacity > 1) {
+        const events: Array<{ at: number; delta: number }> = [];
+        for (const b of bookings) {
+            if (b.end <= window.start || b.start >= window.end) continue;
+            const startMs = Math.max(window.start.getTime(), b.start.getTime());
+            const endMs = Math.min(window.end.getTime(), b.end.getTime());
+            if (endMs <= startMs) continue;
+            events.push({ at: startMs, delta: 1 });
+            events.push({ at: endMs, delta: -1 });
+        }
+
+        if (!events.length) return [{ ...window }];
+
+        events.sort((a, b) => (a.at === b.at ? a.delta - b.delta : a.at - b.at));
+        const blocked: Array<{ start: Date; end: Date }> = [];
+        let active = 0;
+        let blockedStart: number | null = null;
+
+        for (const event of events) {
+            const before = active;
+            active += event.delta;
+            if (before < safeCapacity && active >= safeCapacity) {
+                blockedStart = event.at;
+            }
+            if (before >= safeCapacity && active < safeCapacity && blockedStart != null && event.at > blockedStart) {
+                blocked.push({ start: new Date(blockedStart), end: new Date(event.at) });
+                blockedStart = null;
+            }
+        }
+
+        let segments: Array<{ start: Date; end: Date }> = [{ ...window }];
+        for (const b of blocked) {
+            const next: Array<{ start: Date; end: Date }> = [];
+            for (const seg of segments) {
+                if (b.end <= seg.start || b.start >= seg.end) {
+                    next.push(seg);
+                } else {
+                    if (b.start > seg.start) next.push({ start: seg.start, end: b.start });
+                    if (b.end < seg.end) next.push({ start: b.end, end: seg.end });
+                }
+            }
+            segments = next;
+        }
+        return segments;
+    }
+
     let segments: Array<{ start: Date; end: Date }> = [{ ...window }];
     for (const b of bookings) {
         if (b.end <= window.start || b.start >= window.end) continue;
@@ -128,9 +177,10 @@ function subtractBookings(
 
 function remainingMinutes(spot: any, approved: Array<{ start: Date; end: Date }>) {
     const windows = buildAvailabilityWindows(spot, 30);
+    const capacity = Math.max(1, Number(spot?.capacity_total ?? 1));
     let total = 0;
     for (const w of windows) {
-        const segments = subtractBookings(w, approved);
+        const segments = subtractBookings(w, approved, capacity);
         for (const s of segments) {
             total += Math.max(0, (s.end.getTime() - s.start.getTime()) / 60000);
         }
@@ -182,7 +232,7 @@ router.get("/:spotId", async (req, res) => {
         await ensureAuctionBidSchema();
 
         const spotR = await pool.query(
-            `SELECT id, owner_user_id, mode, auction_end, auction_start_price_gbp, availability_json, availability_type, available_days, daily_start, daily_end
+            `SELECT id, owner_user_id, mode, auction_end, auction_start_price_gbp, availability_json, availability_type, available_days, daily_start, daily_end, capacity_total
              FROM parking_spots
              WHERE id = $1`,
             [spotId]
@@ -568,7 +618,7 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
         await ensureAuctionBidSchema();
 
         const spotR = await client.query(
-            `SELECT id, owner_user_id, mode, auction_end, auction_start_price_gbp, allow_points, points_cost, availability_json, availability_type, available_days, daily_start, daily_end
+            `SELECT id, owner_user_id, mode, auction_end, auction_start_price_gbp, allow_points, points_cost, availability_json, availability_type, available_days, daily_start, daily_end, capacity_total
              FROM parking_spots
              WHERE id = $1`,
             [spotId]
@@ -737,7 +787,7 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
         await ensureAuctionBidSchema();
 
         const spotR = await client.query(
-            `SELECT id, owner_user_id, mode, availability_json, availability_type, available_days, daily_start, daily_end
+            `SELECT id, owner_user_id, mode, availability_json, availability_type, available_days, daily_start, daily_end, capacity_total
              FROM parking_spots
              WHERE id = $1`,
             [spotId]

@@ -190,7 +190,7 @@ export default function BidReceiptPage() {
                         <div className="rowInline" style={{ marginTop: 10 }}>
                             <Link to="/dashboard?tab=myAuctionBids" className="btn btn-primary">Go to dashboard</Link>
                             {bid.booking_id && (
-                                <Link to={`/bookings/${bid.booking_id}`} className="btn">Show receipt</Link>
+                                <Link to={`/pay/${bid.booking_id}`} className="btn">Payment status</Link>
                             )}
                             {bid.parking_spot_id && (
                                 <Link to={`/spots/${bid.parking_spot_id}`} className="btn">View listing</Link>

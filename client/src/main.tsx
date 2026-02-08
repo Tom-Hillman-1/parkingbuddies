@@ -15,10 +15,8 @@ import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import DashboardPage from "./pages/DashboardPage";
 import AboutPage from "./pages/AboutPage";
-import BookingDetailsPage from "./pages/BookingDetailsPage";
 import BidReceiptPage from "./pages/BidReceiptPage";
 import BidConfirmPage from "./pages/BidConfirmPage";
-import BookingConfirmPage from "./pages/BookingConfirmPage";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
@@ -38,8 +36,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                         <Route path="/bids/:bidId" element={<BidReceiptPage />} />
                         <Route path="/bids/confirm" element={<BidConfirmPage />} />
                         <Route path="/settings" element={<SettingsPage />} />
-                        <Route path="/bookings/confirm" element={<BookingConfirmPage />} />
-                        <Route path="/bookings/:id" element={<BookingDetailsPage />} />
                     </Route>
                 </Routes>
             </BrowserRouter>

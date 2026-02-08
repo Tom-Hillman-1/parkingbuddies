@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, Link, useSearchParams, useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -120,7 +120,6 @@ export default function SpotDetailsPage() {
     const [payMethod, setPayMethod] = useState<"money" | "points">("money");
     const [pointsAmount, setPointsAmount] = useState("");
 
-    const [booking, setBooking] = useState<Booking | null>(null);
     const [actionMsg, setActionMsg] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
     const [spotBookings, setSpotBookings] = useState<Booking[]>([]);
@@ -209,12 +208,19 @@ export default function SpotDetailsPage() {
         }
     }, [searchParams]);
 
+    const refreshSpotBookings = useCallback(async (spotId: string) => {
+        try {
+            const r = await apiGet<{ bookings: Booking[] }>(`/bookings/spot/${spotId}`);
+            setSpotBookings(r.bookings ?? []);
+        } catch {
+            setSpotBookings([]);
+        }
+    }, []);
+
     useEffect(() => {
         if (!id) return;
-        apiGet<{ bookings: Booking[] }>(`/bookings/spot/${id}`)
-            .then((r) => setSpotBookings(r.bookings ?? []))
-            .catch(() => setSpotBookings([]));
-    }, [id]);
+        void refreshSpotBookings(id);
+    }, [id, refreshSpotBookings]);
 
     async function refreshAuction() {
         if (!spot || spot.mode !== "auction") return;
@@ -574,17 +580,40 @@ export default function SpotDetailsPage() {
             setActionMsg("Please choose a valid booking time range.");
             return;
         }
-        const params = new URLSearchParams({
-            spotId: spot.id,
-            start: startIso,
-            end: endIso,
-            pay: payMethod,
-        });
-        if (payMethod === "points") {
-            params.set("points", String(Math.ceil(Number(pointsAmount || 0))));
-        }
+        setBusy(true);
         setActionMsg(null);
-        navigate(`/bookings/confirm?${params.toString()}`);
+        try {
+            const body: any = {
+                parking_spot_id: spot.id,
+                start_time: startIso,
+                end_time: endIso,
+                pay_method: payMethod,
+            };
+            if (payMethod === "points") {
+                body.points_amount = Math.ceil(Number(pointsAmount || 0));
+            }
+
+            const r = await apiPost<{ booking: Booking }>("/bookings", body, token);
+            const created = r.booking;
+            await refreshSpotBookings(spot.id);
+
+            const needsMoneyPayment =
+                created?.pay_method === "money" &&
+                Number(created?.total_price_gbp ?? 0) > 0 &&
+                created?.status === "pending";
+
+            if (needsMoneyPayment && created?.id) {
+                navigate(`/pay/${created.id}`);
+                return;
+            }
+
+            setActionMsg("Booking confirmed.");
+            navigate("/dashboard?tab=myBookings");
+        } catch (e: any) {
+            setActionMsg(e?.message || "Booking failed.");
+        } finally {
+            setBusy(false);
+        }
     }
 
     async function startBidAuthorization() {
@@ -1100,7 +1129,7 @@ export default function SpotDetailsPage() {
                     onClick={() => setPayMethod("money")}
                     disabled={!canBook || isOwner || busy}
                 >
-                    Money
+                    Card
                 </button>
                 {canUsePoints && (
                     <button
@@ -1137,16 +1166,15 @@ export default function SpotDetailsPage() {
                     disabled={!canBook || isOwner || busy || !slotStatus.ok}
                     className="btn btn-primary"
                 >
-                    Show receipt
+                    {busy
+                        ? "Booking..."
+                        : payMethod === "money"
+                            ? "Continue to payment"
+                            : "Confirm points booking"}
                 </button>
                 {actionMsg && (
                     <div className="tiny">
-                        {actionMsg}{" "}
-                        {booking && (
-                            <Link to="/dashboard?tab=myBookings" style={{ textDecoration: "underline" }}>
-                                View in dashboard
-                            </Link>
-                        )}
+                        {actionMsg}
                     </div>
                 )}
             </div>
@@ -1159,22 +1187,6 @@ export default function SpotDetailsPage() {
                 </div>
             )}
 
-            {booking && (
-                <div className="card spotBookingCard">
-                    <div className="tiny muted">Booking ID</div>
-                    <div>{booking.id}</div>
-                    <div className="tiny muted" style={{ marginTop: 6 }}>Status</div>
-                    <div>{booking.status} • {booking.pay_method}</div>
-
-                    {booking.pay_method === "money" && price > 0 && (
-                        <div style={{ marginTop: 10 }}>
-                            <Link to={`/pay/${booking.id}`} className="btn btn-primary">
-                                Pay with card
-                            </Link>
-                        </div>
-                    )}
-                </div>
-            )}
         </div>
     );
 

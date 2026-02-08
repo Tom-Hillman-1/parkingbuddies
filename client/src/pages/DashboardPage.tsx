@@ -221,6 +221,8 @@ export default function DashboardPage() {
     const [auctionBids, setAuctionBids] = useState<AuctionBid[]>([]);
     const [myAuctionBids, setMyAuctionBids] = useState<MyAuctionBid[]>([]);
     const [connect, setConnect] = useState<ConnectStatus | null>(null);
+    const [receiptLoadingId, setReceiptLoadingId] = useState<string | null>(null);
+    const [paymentReceiptErrors, setPaymentReceiptErrors] = useState<Record<string, string | null>>({});
 
     const [loading, setLoading] = useState(true);
     const [msg, setMsg] = useState<string | null>(null);
@@ -623,6 +625,34 @@ export default function DashboardPage() {
         }
     }
 
+    async function openPaymentReceipt(bookingId: string) {
+        if (!token) return;
+        setPaymentReceiptErrors((prev) => ({ ...prev, [bookingId]: null }));
+        setReceiptLoadingId(bookingId);
+        try {
+            const receiptRes = await apiGet<{ receipt: { receipt_url: string | null } }>(
+                `/payments/booking/${bookingId}/receipt`,
+                token
+            );
+            const url = receiptRes.receipt?.receipt_url;
+            if (url) {
+                window.open(url, "_blank", "noopener,noreferrer");
+            } else {
+                setPaymentReceiptErrors((prev) => ({
+                    ...prev,
+                    [bookingId]: "Stripe receipt link is not available yet.",
+                }));
+            }
+        } catch (e: any) {
+            setPaymentReceiptErrors((prev) => ({
+                ...prev,
+                [bookingId]: e?.message || "Failed to load Stripe receipt.",
+            }));
+        } finally {
+            setReceiptLoadingId((prev) => (prev === bookingId ? null : prev));
+        }
+    }
+
     function renderThumb(imageUrl: string | null | undefined, label: string) {
         const letter = (label || "P").slice(0, 1).toUpperCase();
         return (
@@ -755,20 +785,11 @@ export default function DashboardPage() {
 
                                             <div className="rowInline" style={{ marginTop: 8 }}>
                                                 <Link
-                                                    to={`/bookings/${b.id}`}
+                                                    to={`/pay/${b.id}`}
                                                     className="btn"
                                                 >
-                                                    Show receipt
+                                                    Payment status
                                                 </Link>
-
-                                                {b.status === "pending" && b.pay_method === "money" && price > 0 && (
-                                                    <Link
-                                                        to={`/pay/${b.id}`}
-                                                        className="btn btn-primary"
-                                                    >
-                                                        Pay
-                                                    </Link>
-                                                )}
 
                                                 {b.status === "pending" && (
                                                     <button
@@ -1343,6 +1364,31 @@ export default function DashboardPage() {
                                                         <div className="dashLabel">Paid at</div>
                                                         <div className="tiny muted">{dt(p.created_at)}</div>
                                                     </div>
+                                                    <div className="rowInline" style={{ marginTop: 12 }}>
+                                                        {p.direction === "outgoing" && (
+                                                            <button
+                                                                className="btn btn-primary"
+                                                                onClick={() => openPaymentReceipt(p.booking_id)}
+                                                                disabled={receiptLoadingId === p.booking_id}
+                                                            >
+                                                                {receiptLoadingId === p.booking_id ? "Loading receipt…" : "Open Stripe receipt"}
+                                                            </button>
+                                                        )}
+                                                        {p.direction === "incoming" && (
+                                                            <button
+                                                                className="btn btn-primary"
+                                                                onClick={openConnectDashboard}
+                                                                disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}
+                                                            >
+                                                                Open Stripe dashboard
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    {paymentReceiptErrors[p.booking_id] && (
+                                                        <div className="tiny muted" style={{ marginTop: 6 }}>
+                                                            {paymentReceiptErrors[p.booking_id]}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             );
                                         })}

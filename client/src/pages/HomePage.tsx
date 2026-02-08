@@ -75,6 +75,17 @@ function getSpotCapacity(spot: ParkingSpot) {
     return Math.max(1, Number.isFinite(capacity) ? capacity : 1);
 }
 
+function countOverlappingBookings(bookings: Booking[], start: Date, end: Date) {
+    let count = 0;
+    for (const b of bookings) {
+        const bs = new Date(b.start_time);
+        const be = new Date(b.end_time);
+        if (Number.isNaN(bs.getTime()) || Number.isNaN(be.getTime())) continue;
+        if (bs < end && be > start) count += 1;
+    }
+    return count;
+}
+
 function getAuctionEndMs(spot: ParkingSpot) {
     const raw = (spot as any).auction_end;
     if (!raw) return null;
@@ -315,9 +326,25 @@ export default function HomePage() {
     const orderedResults = useMemo(() => {
         const ranked = sorted.map((entry, index) => {
             const spot = entry.spot;
-            const bookedCount = bookingCounts[spot.id] ?? 0;
             const capacity = getSpotCapacity(spot);
-            const fullyBooked = bookedCount >= capacity;
+            const windowBookings = bookingWindows[spot.id] ?? [];
+            let bookedCount = bookingCounts[spot.id];
+
+            if (bookedCount == null && !appliedDate && !appliedTime) {
+                const nextWindow = getNextAvailableWindow(spot, windowBookings);
+                if (!nextWindow) {
+                    bookedCount = capacity;
+                } else {
+                    const sampleEnd = new Date(nextWindow.start.getTime() + 15 * 60 * 1000);
+                    bookedCount = countOverlappingBookings(windowBookings, nextWindow.start, sampleEnd);
+                }
+            }
+
+            const safeBookedCount = Math.max(
+                0,
+                Number.isFinite(Number(bookedCount ?? 0)) ? Number(bookedCount ?? 0) : 0
+            );
+            const fullyBooked = safeBookedCount >= capacity;
             const auctionSoldOut = Boolean((spot as any).auction_sold_out);
             const auctionEndMs = getAuctionEndMs(spot);
             const auctionEnded = spot.mode === "auction" && auctionEndMs != null && auctionEndMs <= nowMs;
@@ -327,7 +354,7 @@ export default function HomePage() {
             return {
                 ...entry,
                 rankIndex: index,
-                bookedCount,
+                bookedCount: safeBookedCount,
                 capacity,
                 fullyBooked,
                 auctionSoldOut,
@@ -344,9 +371,18 @@ export default function HomePage() {
             return a.rankIndex - b.rankIndex;
         });
         return ranked;
-    }, [sorted, bookingCounts, nowMs]);
+    }, [sorted, bookingCounts, bookingWindows, appliedDate, appliedTime, nowMs]);
 
     const visibleResults = useMemo(() => orderedResults.slice(0, 4), [orderedResults]);
+    const mapSpots = useMemo(
+        () =>
+            visibleResults.map(({ spot, bookedCount, capacity }) => ({
+                ...spot,
+                capacity_total: capacity,
+                capacity_available: Math.max(0, capacity - bookedCount),
+            })),
+        [visibleResults]
+    );
 
     const mapCenter = useMemo(() => {
         if (userLoc) return userLoc;
@@ -764,7 +800,7 @@ export default function HomePage() {
                     </div>
                 )}
                 <SpotsMap
-                    spots={visibleResults.map((x) => x.spot)}
+                    spots={mapSpots}
                     center={mapCenter}
                     selectedId={selectedId}
                     hoveredId={hoveredId}

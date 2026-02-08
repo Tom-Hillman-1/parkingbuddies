@@ -92,6 +92,9 @@ export default function SpotsMap({
                 {spots.map((s) => {
                     const isSelected = selectedId === s.id;
                     const isHovered = hoveredId === s.id;
+                    const capacity = Math.max(1, Number((s as any).capacity_total ?? 1));
+                    const leftRaw = Number((s as any).capacity_available);
+                    const left = Number.isFinite(leftRaw) ? Math.max(0, leftRaw) : null;
                     // IMPORTANT: never pass icon={undefined}
                     const iconProps = isSelected ? { icon: selectedIcon } : isHovered ? { icon: hoverIcon } : { icon: defaultIcon };
 
@@ -119,6 +122,11 @@ export default function SpotsMap({
                                     <div style={{ marginTop: 6 }}>
                                         {moneyLabel((s as any).price_gbp, s.mode)} • {modeLabel(s.mode)}
                                     </div>
+                                    {capacity > 1 && left != null && (
+                                        <div style={{ marginTop: 4, fontSize: 12, opacity: 0.85 }}>
+                                            {left}/{capacity} spots left
+                                        </div>
+                                    )}
                                     <div style={{ marginTop: 10 }}>
                                         <Link to={`/spots/${s.id}`}>View details</Link>
                                     </div>

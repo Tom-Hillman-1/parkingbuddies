@@ -420,12 +420,12 @@ router.post("/connect/dashboard-link", requireAuth, async (req: AuthRequest, res
 });
 
 /**
- * POST /payments/create-intent
+ * POST /payments/checkout-session
  * Body: { booking_id: string }
- * Creates a Stripe PaymentIntent and stores it in the payments table.
+ * Creates a Stripe Checkout Session and returns the hosted checkout URL.
  */
-router.post("/create-intent", requireAuth, async (req: AuthRequest, res) => {
-    const { booking_id, provider } = req.body ?? {};
+router.post("/checkout-session", requireAuth, async (req: AuthRequest, res) => {
+    const { booking_id } = req.body ?? {};
 
     if (typeof booking_id !== "string") {
         return res.status(400).json({ ok: false, error: "booking_id is required" });
@@ -438,6 +438,10 @@ router.post("/create-intent", requireAuth, async (req: AuthRequest, res) => {
                     b.driver_user_id,
                     b.pay_method,
                     b.total_price_gbp,
+                    b.start_time,
+                    b.end_time,
+                    ps.title AS spot_title,
+                    ps.address_text AS spot_address,
                     ps.owner_user_id,
                     owner.stripe_account_id,
                     driver.email AS driver_email
@@ -462,11 +466,6 @@ router.post("/create-intent", requireAuth, async (req: AuthRequest, res) => {
         const amountGbp = toMoney(booking.total_price_gbp);
         if (amountGbp <= 0) {
             return res.status(400).json({ ok: false, error: "Invalid booking amount" });
-        }
-
-        const chosenProvider = typeof provider === "string" ? provider : "stripe";
-        if (chosenProvider !== "stripe") {
-            return res.status(400).json({ ok: false, error: "Unsupported provider" });
         }
 
         const ownerAccountId = typeof booking.stripe_account_id === "string" ? booking.stripe_account_id : null;
@@ -499,11 +498,14 @@ router.post("/create-intent", requireAuth, async (req: AuthRequest, res) => {
         }
 
         const amountPence = Math.round(amountGbp * 100);
-        const paymentIntentPayload: Stripe.PaymentIntentCreateParams = {
-            amount: amountPence,
-            currency: "gbp",
-            automatic_payment_methods: { enabled: true },
-            description: `Parking booking ${booking_id}`,
+        const baseUrl = frontendBaseUrl();
+        const title = booking.spot_title ?? "Parking booking";
+        const address = booking.spot_address ?? "Address on file";
+        const when = booking.start_time && booking.end_time
+            ? `${booking.start_time} → ${booking.end_time}`
+            : "Time on file";
+
+        const paymentIntentData: Stripe.Checkout.SessionCreateParams.PaymentIntentData = {
             metadata: {
                 booking_id,
                 user_id: req.userId ?? "",
@@ -512,104 +514,66 @@ router.post("/create-intent", requireAuth, async (req: AuthRequest, res) => {
                 type: "rent_booking",
                 demo_bypass_connect: ownerConnectStatus.demo_bypass ? "true" : "false",
             },
+            description: `Booking ${booking_id} | ${title} | ${address} | ${when}`,
         };
-        if (typeof booking.driver_email === "string" && booking.driver_email.trim()) {
-            paymentIntentPayload.receipt_email = booking.driver_email.trim().toLowerCase();
-        }
         if (ownerAccountId && !ownerConnectStatus.demo_bypass) {
-            paymentIntentPayload.transfer_data = { destination: ownerAccountId };
-            paymentIntentPayload.on_behalf_of = ownerAccountId;
+            paymentIntentData.transfer_data = { destination: ownerAccountId };
+            paymentIntentData.on_behalf_of = ownerAccountId;
         }
 
-        const intent = await stripe.paymentIntents.create(paymentIntentPayload);
-
-        const client = await pool.connect();
-        try {
-            await client.query("BEGIN");
-            await upsertLatestPaymentRow(client, booking_id, intent.id, amountGbp, "pending");
-            await client.query("COMMIT");
-        } catch (e) {
-            await client.query("ROLLBACK");
-            throw e;
-        } finally {
-            client.release();
-        }
-
-        return res.json({
-            ok: true,
-            client_secret: intent.client_secret,
-            payment_intent_id: intent.id,
+        const session = await stripe.checkout.sessions.create({
+            mode: "payment",
+            payment_method_types: ["card"],
+            success_url: `${baseUrl}/pay/${booking_id}?success=1&session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${baseUrl}/pay/${booking_id}?canceled=1`,
+            customer_email: typeof booking.driver_email === "string" ? booking.driver_email.trim().toLowerCase() : undefined,
+            line_items: [
+                {
+                    quantity: 1,
+                    price_data: {
+                        currency: "gbp",
+                        unit_amount: amountPence,
+                        product_data: {
+                            name: title,
+                            description: `Location: ${address}\nWhen: ${when}\nBooking: ${booking_id}`,
+                        },
+                    },
+                },
+            ],
+            payment_intent_data: paymentIntentData,
         });
-    } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
-    }
-});
 
-/**
- * POST /payments/confirm-intent
- * Body: { booking_id: string, payment_intent_id: string }
- * Verifies the intent on the server and confirms booking/payment state.
- */
-router.post("/confirm-intent", requireAuth, async (req: AuthRequest, res) => {
-    const { booking_id, payment_intent_id } = req.body ?? {};
-    if (typeof booking_id !== "string" || typeof payment_intent_id !== "string") {
-        return res.status(400).json({ ok: false, error: "booking_id and payment_intent_id are required" });
-    }
+        const paymentIntentId =
+            typeof session.payment_intent === "string" ? session.payment_intent : null;
 
-    try {
-        const bookingR = await pool.query(
-            `SELECT id, driver_user_id
-             FROM bookings
-             WHERE id = $1`,
-            [booking_id]
-        );
-        if (!bookingR.rowCount) {
-            return res.status(404).json({ ok: false, error: "Booking not found" });
-        }
-        if (bookingR.rows[0].driver_user_id !== req.userId) {
-            return res.status(403).json({ ok: false, error: "Not authorized for this booking" });
-        }
-
-        const paymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
-        if (paymentIntent.metadata?.booking_id !== booking_id || paymentIntent.metadata?.user_id !== req.userId) {
-            return res.status(400).json({ ok: false, error: "Payment intent does not match booking" });
-        }
-        if (paymentIntent.status !== "succeeded") {
-            return res.status(400).json({
-                ok: false,
-                error: `Payment not completed yet (status: ${paymentIntent.status})`,
-            });
+        if (paymentIntentId) {
+            const client = await pool.connect();
+            try {
+                await client.query("BEGIN");
+                await upsertLatestPaymentRow(client, booking_id, paymentIntentId, amountGbp, "pending");
+                await client.query("COMMIT");
+            } catch (e) {
+                await client.query("ROLLBACK");
+                throw e;
+            } finally {
+                client.release();
+            }
+            try {
+                await pool.query(
+                    `UPDATE bookings
+                     SET payment_provider_ref = $1,
+                         updated_at = now()
+                     WHERE id = $2`,
+                    [paymentIntentId, booking_id]
+                );
+            } catch (e: any) {
+                if (!String(e.message).includes("payment_provider_ref")) {
+                    throw e;
+                }
+            }
         }
 
-        await finalizePaymentIntent(paymentIntent);
-
-        let receipt: StripeReceiptDetails | null = null;
-        try {
-            receipt = await getStripeReceiptDetails(payment_intent_id);
-        } catch {
-            receipt = null;
-        }
-
-        const receiptR = await pool.query(
-            `SELECT b.id,
-                    b.status,
-                    b.pay_method,
-                    b.total_price_gbp,
-                    pay.provider_ref AS payment_intent_id,
-                    pay.status AS payment_status
-             FROM bookings b
-             LEFT JOIN LATERAL (
-                SELECT p.provider_ref, p.status
-                FROM payments p
-                WHERE p.booking_id = b.id
-                ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC, p.id DESC
-                LIMIT 1
-             ) pay ON TRUE
-             WHERE b.id = $1`,
-            [booking_id]
-        );
-
-        return res.json({ ok: true, booking: receiptR.rows[0], receipt });
+        return res.json({ ok: true, url: session.url });
     } catch (e) {
         return res.status(500).json({ ok: false, error: String(e) });
     }
@@ -686,7 +650,7 @@ router.post("/auction-intent", requireAuth, async (req: AuthRequest, res) => {
             amount: amountPence,
             currency: "gbp",
             capture_method: "manual",
-            automatic_payment_methods: { enabled: true },
+            payment_method_types: ["card"],
             metadata: {
                 spot_id,
                 user_id: req.userId ?? "",
@@ -722,37 +686,103 @@ router.get("/booking/:bookingId/receipt", requireAuth, async (req: AuthRequest, 
     if (!bookingId) {
         return res.status(400).json({ ok: false, error: "bookingId is required" });
     }
+    const sessionId =
+        typeof req.query?.session_id === "string" && req.query.session_id
+            ? req.query.session_id
+            : null;
 
     try {
-        const ownershipR = await pool.query(
-            `SELECT id
+        const bookingR = await pool.query(
+            `SELECT id, payment_provider_ref
              FROM bookings
              WHERE id = $1 AND driver_user_id = $2`,
             [bookingId, req.userId]
         );
-        if (!ownershipR.rowCount) {
+        if (!bookingR.rowCount) {
             return res.status(404).json({ ok: false, error: "Booking not found" });
         }
 
         const paymentR = await pool.query(
-            `SELECT provider_ref, status
+            `SELECT
+                 provider_ref,
+                 status
              FROM payments
              WHERE booking_id = $1
              ORDER BY updated_at DESC NULLS LAST, created_at DESC, id DESC
              LIMIT 1`,
             [bookingId]
         );
-        if (!paymentR.rowCount) {
-            return res.status(404).json({ ok: false, error: "No payment found for this booking" });
+
+        let providerRef: string | null = null;
+        let paymentStatus: string | null = null;
+        if (paymentR.rowCount) {
+            providerRef = paymentR.rows[0].provider_ref ?? null;
+            paymentStatus = paymentR.rows[0].status ?? null;
+        }
+        if (!providerRef) {
+            providerRef = bookingR.rows[0].payment_provider_ref ?? null;
         }
 
-        const ref = paymentR.rows[0].provider_ref;
-        if (typeof ref !== "string" || !ref.trim()) {
+        if (!providerRef && sessionId) {
+            const session = await stripe.checkout.sessions.retrieve(sessionId, {
+                expand: ["payment_intent"],
+            });
+            const intent = session.payment_intent;
+            const paymentIntentId =
+                typeof intent === "string"
+                    ? intent
+                    : intent && typeof intent === "object"
+                        ? intent.id
+                        : null;
+            if (paymentIntentId) {
+                providerRef = paymentIntentId;
+                const normalizedStatus =
+                    session.payment_status === "paid"
+                        ? "succeeded"
+                        : session.payment_status === "unpaid"
+                            ? "created"
+                            : "pending";
+                paymentStatus = normalizedStatus;
+
+                if (paymentR.rowCount) {
+                    await pool.query(
+                        `UPDATE payments
+                         SET provider_ref = $1,
+                             status = $2,
+                             updated_at = now()
+                         WHERE id = (
+                             SELECT id
+                             FROM payments
+                             WHERE booking_id = $3
+                             ORDER BY updated_at DESC NULLS LAST, created_at DESC, id DESC
+                             LIMIT 1
+                         )`,
+                        [providerRef, normalizedStatus, bookingId]
+                    );
+                } else {
+                    await pool.query(
+                        `INSERT INTO payments (booking_id, provider, provider_ref, status, amount_gbp, created_at, updated_at)
+                         VALUES ($1, 'stripe', $2, $3, 0, now(), now())`,
+                        [bookingId, providerRef, normalizedStatus]
+                    );
+                }
+
+                await pool.query(
+                    `UPDATE bookings
+                     SET payment_provider_ref = $1,
+                         updated_at = now()
+                     WHERE id = $2`,
+                    [providerRef, bookingId]
+                );
+            }
+        }
+
+        if (!providerRef) {
             return res.status(404).json({ ok: false, error: "No Stripe payment reference found" });
         }
 
-        const receipt = await getStripeReceiptDetails(ref);
-        return res.json({ ok: true, receipt, payment_status: paymentR.rows[0].status });
+        const receipt = await getStripeReceiptDetails(providerRef);
+        return res.json({ ok: true, receipt, payment_status: paymentStatus ?? "pending" });
     } catch (e) {
         return res.status(500).json({ ok: false, error: String(e) });
     }

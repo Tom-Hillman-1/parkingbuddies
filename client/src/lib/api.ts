@@ -20,10 +20,15 @@ export async function apiGet<T>(
         headers.set("Authorization", `Bearer ${token}`);
     }
 
-    const res = await fetch(`${API_BASE}${path}`, {
-        ...init,
-        headers,
-    });
+    let res: Response;
+    try {
+        res = await fetch(`${API_BASE}${path}`, {
+            ...init,
+            headers,
+        });
+    } catch {
+        throw new Error(`Network error: API unavailable at ${API_BASE}`);
+    }
 
     const data = await parseJson(res);
 
@@ -39,14 +44,19 @@ export async function apiPost<T>(
     body: unknown,
     token?: string
 ): Promise<ApiOk<T>> {
-    const res = await fetch(`${API_BASE}${path}`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(body),
-    });
+    let res: Response;
+    try {
+        res = await fetch(`${API_BASE}${path}`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify(body),
+        });
+    } catch {
+        throw new Error(`Network error: API unavailable at ${API_BASE}`);
+    }
 
     const data = await parseJson(res);
 
@@ -62,14 +72,19 @@ export async function apiPatch<T>(
     body?: unknown,
     token?: string
 ): Promise<ApiOk<T>> {
-    const res = await fetch(`${API_BASE}${path}`, {
-        method: "PATCH",
-        headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    let res: Response;
+    try {
+        res = await fetch(`${API_BASE}${path}`, {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+        });
+    } catch {
+        throw new Error(`Network error: API unavailable at ${API_BASE}`);
+    }
 
     const data = await parseJson(res);
 
@@ -84,10 +99,15 @@ export async function apiDelete<T>(
     path: string,
     token?: string
 ): Promise<ApiOk<T>> {
-    const res = await fetch(`${API_BASE}${path}`, {
-        method: "DELETE",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
+    let res: Response;
+    try {
+        res = await fetch(`${API_BASE}${path}`, {
+            method: "DELETE",
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+    } catch {
+        throw new Error(`Network error: API unavailable at ${API_BASE}`);
+    }
 
     const data = await parseJson(res);
 
