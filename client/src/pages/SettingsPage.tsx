@@ -387,32 +387,7 @@ export default function SettingsPage() {
                     </div>
 
                     <div className="settingsStack">
-                        <div className="card formSection">
-                            <div className="sectionHeader sectionHeader--owner">
-                                <div className="sectionHeaderTitle">
-                                    <span className="sectionDot" />
-                                    <div className="h3">Account snapshot</div>
-                                </div>
-                                <span className="badge badge--warm">Active</span>
-                            </div>
-                            <div className="stack">
-                                <div>
-                                    <div className="tiny muted">Signed in as</div>
-                                    <div className="spotInfoValue">{me?.email ?? user?.email ?? "Unknown"}</div>
-                                </div>
-                                <div>
-                                    <div className="tiny muted">Display name</div>
-                                    <div className="spotInfoValue">{me?.name ?? user?.name ?? "User"}</div>
-                                </div>
-                                <div className="authStat">
-                                    <div>
-                                        <div className="tiny muted">Reward points</div>
-                                        <div>{me?.points_balance ?? 0} pts</div>
-                                    </div>
-                                    <span className="badge badge--accent">Rewards</span>
-                                </div>
-                            </div>
-                        </div>
+
 
                         <div className="card formSection">
                             <div className="sectionHeader sectionHeader--payments">
@@ -437,7 +412,7 @@ export default function SettingsPage() {
                                     </div>
                                 </div>
                                 <span className={connect?.charges_enabled ? "badge badge--green" : "badge badge--warm"}>
-                                    {connect?.charges_enabled ? "Charges enabled" : "Charges pending"}
+                                    {connect?.charges_enabled ? "Enabled" : "Charges pending"}
                                 </span>
                             </div>
                             <div className="settingRow">
@@ -489,19 +464,6 @@ export default function SettingsPage() {
                             </div>
                         </div>
 
-                        <div className="card formSection">
-                            <div className="sectionHeader sectionHeader--driver">
-                                <div className="sectionHeaderTitle">
-                                    <span className="sectionDot" />
-                                    <div className="h3">Quick actions</div>
-                                </div>
-                            </div>
-                            <div className="stack">
-                                <Link to="/" className="btn">Browse spots</Link>
-                                <Link to="/create-listing" className="btn btn-primary">Create a listing</Link>
-                                <Link to="/dashboard" className="btn">View dashboard</Link>
-                            </div>
-                        </div>
                     </div>
                 </div>
             )}

@@ -157,6 +157,9 @@ export default function SignupPage() {
                     <div className="tiny muted">
                         Already have an account? <Link to="/login">Log in</Link>
                     </div>
+                    <div className="tiny muted" style={{ marginTop: 8 }}>
+                        Need help? Please contact <a href="mailto:parkingbuddiesproject@gmail.com">parkingbuddiesproject@gmail.com</a>
+                    </div>
                 </div>
             </div>
         </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -246,6 +246,7 @@ export default function DashboardPage() {
         payments: false,
         rewards: false,
     });
+    const payoutsRef = useRef<HTMLDivElement | null>(null);
 
     const isLoggedIn = !!token;
     const seenCountsStorageKey = useMemo(
@@ -415,7 +416,7 @@ export default function DashboardPage() {
         : !connect?.account_id
             ? "Not connected"
             : connect.onboarding_complete
-                ? "Ready for payouts"
+                ? "Stripe Connected"
                 : "Onboarding incomplete";
     const connectBadgeClass = connect?.demo_bypass
         ? "badge badge--cool"
@@ -625,6 +626,21 @@ export default function DashboardPage() {
         }
     }
 
+    function focusStripePayoutsCard() {
+        setOpen((prev) => ({ ...prev, payouts: true }));
+        window.setTimeout(() => {
+            payoutsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 80);
+    }
+
+    async function handleTopStripeDashboard() {
+        if (!connect?.account_id || !connect.onboarding_complete || connect.demo_bypass) {
+            focusStripePayoutsCard();
+            return;
+        }
+        await openConnectDashboard();
+    }
+
     async function openPaymentReceipt(bookingId: string) {
         if (!token) return;
         setPaymentReceiptErrors((prev) => ({ ...prev, [bookingId]: null }));
@@ -668,37 +684,21 @@ export default function DashboardPage() {
 
     return (
         <div className="container">
-            <div className="rowInline" style={{ justifyContent: "flex-end", marginTop: 10 }}>
-                <div className="rowInline" style={{ gap: 10 }}>
-                    <span className="badge badge--green">
-                        Total earned (incoming): +£{ownerBookings
-                            .filter((b) => b.status === "confirmed" && b.pay_method === "money")
-                            .reduce((sum, b) => sum + toMoney(b.total_price_gbp), 0)
-                            .toFixed(2)}
-                    </span>
-                </div>
-            </div>
-
             <div className="rowInline" style={{ alignItems: "flex-end", justifyContent: "space-between", gap: 20, marginTop: 10 }}>
                 <div className="pageHeader" style={{ textAlign: "left", marginBottom: 0 }}>
                     <div className="heroKicker">DASHBOARD</div>
                     <div className="heroTitle">Your activity</div>
                     <div className="heroSub muted">Manage bookings, listings, and rewards.</div>
                 </div>
-                {!loading && me && (
-                    <div className="card profileCard profileCard--mini" style={{ marginTop: -2, marginBottom: 12, minWidth: 200, width: 200, maxWidth: "45%" }}>
-                        <div className="profileGrid">
-                            <div>
-                                <div className="tiny muted" style={{ color: "#fff" }}>Name</div>
-                                <div className="spotInfoValue muted" style={{ color: "#b8bcc4" }}>{me.name}</div>
-                            </div>
-                            <div>
-                                <div className="tiny muted" style={{ color: "#fff" }}>Email</div>
-                                <div className="spotInfoValue muted" style={{ color: "#b8bcc4" }}>{me.email}</div>
-                            </div>
-                        </div>
-                    </div>
-                )}
+            </div>
+            <div className="rowInline" style={{ gap: 12, flexWrap: "wrap" , marginBottom: 12 }}>
+                <button
+                    className="btn btn-primary"
+                    onClick={handleTopStripeDashboard}
+                    disabled={connectBusy}
+                >
+                    {connectBusy ? "Opening..." : "Open Stripe dashboard"}
+                </button>
             </div>
 
             {loading && <div className="card formSection">Loading...</div>}
@@ -722,9 +722,6 @@ export default function DashboardPage() {
                             <div className="h2">Driver activity</div>
                         </div>
                     </div>
-                    <span className={`badge badge--cool sectionHeaderBadge${sectionHasNew.manageBookings ? " badge--notify" : ""}`}>
-                        {myBookings.length + myAuctionBids.length + driverUpcoming.length} items
-                    </span>
                 </button>
                 <div className="sectionSub muted">My bookings, my pending bids, and upcoming schedule as a driver.</div>
                 {open.manageBookings && (
@@ -737,9 +734,9 @@ export default function DashboardPage() {
                     >
                         <div className="sectionHeaderTitle">
                             <span className="sectionDot" />
-                            <div className="h3">My bookings</div>
+                            <div className="h3">My Bookings</div>
                         </div>
-                        <span className="badge badge--cool sectionHeaderBadge">Total {myBookings.length}</span>
+                        <span className="badge badge--cool sectionHeaderBadge">{myBookings.length} Bookings</span>
                     </button>
                     <div className="sectionSub muted">
                         Your own bookings as a driver.
@@ -784,12 +781,15 @@ export default function DashboardPage() {
                                             </div>
 
                                             <div className="rowInline" style={{ marginTop: 8 }}>
-                                                <Link
-                                                    to={`/pay/${b.id}`}
-                                                    className="btn"
-                                                >
-                                                    Payment status
-                                                </Link>
+                                                {b.pay_method === "money" && (
+                                                    <button
+                                                        className="btn btn-primary"
+                                                        onClick={() => openPaymentReceipt(b.id)}
+                                                        disabled={receiptLoadingId === b.id}
+                                                    >
+                                                        {receiptLoadingId === b.id ? "Loading receipt…" : "Open Stripe receipt"}
+                                                    </button>
+                                                )}
 
                                                 {b.status === "pending" && (
                                                     <button
@@ -801,6 +801,11 @@ export default function DashboardPage() {
                                                     </button>
                                                 )}
                                             </div>
+                                            {paymentReceiptErrors[b.id] && (
+                                                <div className="tiny muted" style={{ marginTop: 6 }}>
+                                                    {paymentReceiptErrors[b.id]}
+                                                </div>
+                                            )}
                                         </div>
                                     );
                                 })}
@@ -816,9 +821,9 @@ export default function DashboardPage() {
                     >
                         <div className="sectionHeaderTitle">
                             <span className="sectionDot" />
-                            <div className="h3">My pending bids</div>
+                            <div className="h3">My Pending Bids</div>
                         </div>
-                        <span className="badge badge--cool sectionHeaderBadge">Pending {myAuctionBids.length}</span>
+                        <span className="badge badge--cool sectionHeaderBadge">{myAuctionBids.length} Pending</span>
                     </button>
                     <div className="sectionSub muted">
                         Pending bids waiting for owner approval.
@@ -877,9 +882,9 @@ export default function DashboardPage() {
                     >
                         <div className="sectionHeaderTitle">
                             <span className="sectionDot" />
-                            <div className="h3">My upcoming schedule as a driver</div>
+                            <div className="h3">Upcoming Schedule</div>
                         </div>
-                        <span className="badge badge--cool sectionHeaderBadge">{driverUpcoming.length} upcoming</span>
+                        <span className="badge badge--cool sectionHeaderBadge">{driverUpcoming.length} Upcoming</span>
                     </button>
                     <div className="sectionSub muted">
                         Upcoming time slots you booked from other owners.
@@ -915,12 +920,12 @@ export default function DashboardPage() {
                                             <span className="badge badge--cool">Driver booking</span>
                                         </div>
                                         <div className="dashField">
-                                            <div className="dashLabel">Time</div>
+                                            <div className="dashLabel" style={{marginTop:4}}>Time</div>
                                             <div className="tiny muted">{dt(b.start_time)} → {dt(b.end_time)}</div>
                                         </div>
                                         <div className="rowInline" style={{ marginTop: 8 }}>
                                             <Link to={`/spots/${b.parking_spot_id}`} className="btn">
-                                                View spot
+                                                View Listing
                                             </Link>
                                         </div>
                                     </div>
@@ -950,13 +955,6 @@ export default function DashboardPage() {
                             <div className="h2">Owner activity</div>
                         </div>
                     </div>
-                    <span
-                        className={`badge badge--warm sectionHeaderBadge${sectionHasNew.manageListings ? " badge--notify" : ""}${hasPendingOwnerActions ? " badge--action-count" : ""}`}
-                    >
-                        {hasPendingOwnerActions
-                            ? `+${pendingOwnerCount}`
-                            : `${myListings.length + confirmedOwnerBookings.length + ownerUpcoming.length + pendingOwnerCount} items`}
-                    </span>
                 </button>
                 <div className="sectionSub muted">My listings, booked slots, owner schedule, and bids awaiting approval.</div>
                 {open.manageListings && (
@@ -969,9 +967,9 @@ export default function DashboardPage() {
                     >
                         <div className="sectionHeaderTitle">
                             <span className="sectionDot" />
-                            <div className="h3">My listings</div>
+                            <div className="h3">My Listings</div>
                         </div>
-                        <span className="badge badge--warm sectionHeaderBadge">Total {myListings.length}</span>
+                        <span className="badge badge--warm sectionHeaderBadge">{myListings.length} Listings</span>
                     </button>
                     <div className="sectionSub muted">
                         Parking spaces you’ve published.
@@ -1040,10 +1038,10 @@ export default function DashboardPage() {
                     >
                         <div className="sectionHeaderTitle">
                             <span className="sectionDot" />
-                            <div className="h3">Booked slots on my listings</div>
+                            <div className="h3">Booked Slots</div>
                         </div>
                         <span className="badge badge--warm sectionHeaderBadge">
-                            {confirmedOwnerBookings.length} bookings confirmed
+                            {confirmedOwnerBookings.length} Confirmed
                         </span>
                     </button>
                     <div className="sectionSub muted">
@@ -1073,7 +1071,7 @@ export default function DashboardPage() {
                                             <div className="dashMetaRow">
                                                 <span className="badge badge--green">Earned / Incoming</span>
                                                 <span className="badge badge--green">My listing</span>
-                                                <span className="badge badge--warm">Confirmed</span>
+                                                <span className="badge badge--green">Confirmed</span>
                                                 <span className="badge">{formatModeLabel(b.pay_method)}</span>
                                             </div>
                                             <div className="dashField">
@@ -1082,7 +1080,7 @@ export default function DashboardPage() {
                                             </div>
                                             <div className="rowInline" style={{ marginTop: 8 }}>
                                                 <Link to={`/spots/${b.parking_spot_id}`} className="btn">
-                                                    View spot
+                                                    View Listing
                                                 </Link>
                                             </div>
                                         </div>
@@ -1092,63 +1090,7 @@ export default function DashboardPage() {
                     ))}
                 </div>
 
-                <div className="card formSection">
-                    <button
-                        type="button"
-                        className="sectionHeader sectionHeader--owner collapsibleHeader"
-                        onClick={() => setOpen((p) => ({ ...p, ownerUpcoming: !p.ownerUpcoming }))}
-                    >
-                        <div className="sectionHeaderTitle">
-                            <span className="sectionDot" />
-                            <div className="h3">My upcoming schedule as an owner</div>
-                        </div>
-                        <span className="badge badge--warm sectionHeaderBadge">{ownerUpcoming.length} upcoming</span>
-                    </button>
-                    <div className="sectionSub muted">
-                        Upcoming confirmed bookings on your own listings.
-                    </div>
 
-                    {open.ownerUpcoming && (ownerUpcoming.length === 0 ? (
-                        <div className="muted">No upcoming owner bookings.</div>
-                    ) : (
-                        <div className="stack">
-                            {ownerUpcoming.map((b) => {
-                                const spot = spotById.get(b.parking_spot_id);
-                                const title = spot?.title ?? "Parking spot";
-                                const address = shortAddress(spot?.address_text);
-                                const isPoints = b.pay_method === "points";
-                                return (
-                                    <div key={b.id} className="card dashItem dashItem--owner">
-                                        <div className="dashItemHeader">
-                                            {renderThumb(spot?.image_url, title)}
-                                            <div className="dashItemText">
-                                                <div className="dashItemTitle">{title}</div>
-                                                <div className="dashItemSubtitle">{address}</div>
-                                            </div>
-                                            <div className="dashItemPrice dashAmount dashAmount--incoming">
-                                                {isPoints ? `+${b.total_points ?? 0} pts` : `+£${toMoney(b.total_price_gbp).toFixed(2)}`}
-                                            </div>
-                                        </div>
-                                        <div className="dashMetaRow">
-                                            <span className="badge badge--green">Earned / Incoming</span>
-                                            <span className="badge badge--green">Owner schedule</span>
-                                            <span className="badge">{isPoints ? "Points" : "Money"}</span>
-                                        </div>
-                                        <div className="dashField">
-                                            <div className="dashLabel">Time</div>
-                                            <div className="tiny muted">{dt(b.start_time)} → {dt(b.end_time)}</div>
-                                        </div>
-                                        <div className="rowInline" style={{ marginTop: 8 }}>
-                                            <Link to={`/spots/${b.parking_spot_id}`} className="btn">
-                                                View spot
-                                            </Link>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    ))}
-                </div>
 
                 <div className="card formSection">
                     <button
@@ -1158,9 +1100,9 @@ export default function DashboardPage() {
                     >
                         <div className="sectionHeaderTitle">
                             <span className="sectionDot" />
-                            <div className="h3">Pending bids - awaiting approval</div>
+                            <div className="h3">Pending Bids</div>
                         </div>
-                        <span className="badge badge--warm sectionHeaderBadge">{pendingOwnerCount} pending</span>
+                        <span className="badge badge--warm sectionHeaderBadge">{pendingOwnerCount} Pending</span>
                     </button>
                     <div className="sectionSub muted">
                         Review bids and choose the winner. Charges are captured on approval.
@@ -1229,7 +1171,63 @@ export default function DashboardPage() {
                             )}
                         </div>
                     )}
-                </div>
+                </div><div className="card formSection">
+                        <button
+                            type="button"
+                            className="sectionHeader sectionHeader--owner collapsibleHeader"
+                            onClick={() => setOpen((p) => ({ ...p, ownerUpcoming: !p.ownerUpcoming }))}
+                        >
+                            <div className="sectionHeaderTitle">
+                                <span className="sectionDot" />
+                                <div className="h3">Upcoming Schedule</div>
+                            </div>
+                            <span className="badge badge--warm sectionHeaderBadge">{ownerUpcoming.length} Upcoming</span>
+                        </button>
+                        <div className="sectionSub muted">
+                            Upcoming confirmed bookings on your own listings.
+                        </div>
+
+                        {open.ownerUpcoming && (ownerUpcoming.length === 0 ? (
+                            <div className="muted">No upcoming owner bookings.</div>
+                        ) : (
+                            <div className="stack">
+                                {ownerUpcoming.map((b) => {
+                                    const spot = spotById.get(b.parking_spot_id);
+                                    const title = spot?.title ?? "Parking spot";
+                                    const address = shortAddress(spot?.address_text);
+                                    const isPoints = b.pay_method === "points";
+                                    return (
+                                        <div key={b.id} className="card dashItem dashItem--owner">
+                                            <div className="dashItemHeader">
+                                                {renderThumb(spot?.image_url, title)}
+                                                <div className="dashItemText">
+                                                    <div className="dashItemTitle">{title}</div>
+                                                    <div className="dashItemSubtitle">{address}</div>
+                                                </div>
+                                                <div className="dashItemPrice dashAmount dashAmount--incoming">
+                                                    {isPoints ? `+${b.total_points ?? 0} pts` : `+£${toMoney(b.total_price_gbp).toFixed(2)}`}
+                                                </div>
+                                            </div>
+                                            <div className="dashMetaRow">
+                                                <span className="badge badge--green">Earned / Incoming</span>
+                                                <span className="badge badge--green">Owner schedule</span>
+                                                <span className="badge">{isPoints ? "Points" : "Money"}</span>
+                                            </div>
+                                            <div className="dashField">
+                                                <div className="dashLabel">Time</div>
+                                                <div className="tiny muted">{dt(b.start_time)} → {dt(b.end_time)}</div>
+                                            </div>
+                                            <div className="rowInline" style={{ marginTop: 8 }}>
+                                                <Link to={`/spots/${b.parking_spot_id}`} className="btn">
+                                                    View Listing
+                                                </Link>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ))}
+                    </div>
                     </div>
                 )}
             </div>
@@ -1251,7 +1249,6 @@ export default function DashboardPage() {
                             <div className="h2">Payments and rewards</div>
                         </div>
                     </div>
-                    <span className={`badge badge--rose sectionHeaderBadge${sectionHasNew.transactions ? " badge--notify" : ""}`}>{payments.length + rewards.length} records</span>
                 </button>
                 <div className="sectionSub muted">Stripe payouts, payment history, and rewards activity.</div>
                 {open.transactions && (
@@ -1265,7 +1262,7 @@ export default function DashboardPage() {
                                 >
                                     <div className="sectionHeaderTitle">
                                         <span className="sectionDot" />
-                                        <div className="h3">My rewards</div>
+                                        <div className="h3">Rewards History</div>
                                     </div>
                                     <span className="badge badge--accent sectionHeaderBadge">Points</span>
                                 </button>
@@ -1322,12 +1319,21 @@ export default function DashboardPage() {
                                 >
                                     <div className="sectionHeaderTitle">
                                         <span className="sectionDot" />
-                                        <div className="h3">Payments</div>
+                                        <div className="h3">Transaction History</div>
                                     </div>
-                                    <span className="badge badge--rose sectionHeaderBadge">History</span>
+
+                                    <div className="dashMetaRow sectionHeaderBadge">
+                                    <span className="badge badge--green">
+                                      Total earned: £{ownerBookings
+                                      .filter((b) => b.status === "confirmed" && b.pay_method === "money")
+                                      .reduce((sum, b) => sum + toMoney(b.total_price_gbp), 0)
+                                      .toFixed(2)}
+                                  </span>
+
+                                    </div>
                                 </button>
                                 <div className="sectionSub muted">
-                                    Money history across your bookings and your listings (outgoing and incoming).
+                                    Your transaction history across your bookings and your listings.
                                 </div>
 
                                 {open.payments && (payments.length === 0 ? (
@@ -1397,7 +1403,7 @@ export default function DashboardPage() {
                             </div>
                         </div>
 
-                        <div className="dashGrid" style={{ marginTop: 14 }}>
+                        <div className="dashGrid" style={{ marginTop: 2 }}>
                             <div className="card formSection">
                                 <button
                                     type="button"
@@ -1406,14 +1412,14 @@ export default function DashboardPage() {
                                 >
                                     <div className="sectionHeaderTitle">
                                         <span className="sectionDot" />
-                                        <div className="h3">Stripe payouts</div>
+                                        <div className="h3">Stripe Account</div>
                                     </div>
                                     <span className={`${connectBadgeClass} sectionHeaderBadge`}>{connectLabel}</span>
                                 </button>
                                 <div className="sectionSub muted">
                                     {connect?.demo_bypass
                                         ? "Demo bypass mode is active. Owner payouts are simulated and no Stripe onboarding is required."
-                                        : "Connect Stripe to receive money from rent bookings and accepted auction bids."}
+                                        : "Connect Stripe to withdraw your earnings"}
                                 </div>
 
                                 {open.payouts && (
@@ -1441,8 +1447,22 @@ export default function DashboardPage() {
                                             </span>
                                         </div>
                                         <div className="rowInline">
+
+                                            {connect?.demo_available && !connect?.demo_bypass && !connect?.account_id && (
+                                                <button className="btn" onClick={() => beginConnectOnboarding("demo")} disabled={connectBusy}>
+                                                    Use demo payouts
+                                                </button>
+                                            )}
+
                                             <button
                                                 className="btn btn-primary"
+                                                onClick={openConnectDashboard}
+                                                disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}
+                                            >
+                                                Open Stripe dashboard
+                                            </button>
+                                            <button
+                                                className="btn"
                                                 onClick={() => beginConnectOnboarding("stripe")}
                                                 disabled={connectBusy}
                                             >
@@ -1456,20 +1476,8 @@ export default function DashboardPage() {
                                                                 ? "Update Stripe details"
                                                                 : "Continue onboarding"}
                                             </button>
-                                            {connect?.demo_available && !connect?.demo_bypass && !connect?.account_id && (
-                                                <button className="btn" onClick={() => beginConnectOnboarding("demo")} disabled={connectBusy}>
-                                                    Use demo payouts
-                                                </button>
-                                            )}
                                             <button className="btn" onClick={refreshConnectStatus} disabled={connectBusy}>
                                                 Refresh status
-                                            </button>
-                                            <button
-                                                className="btn"
-                                                onClick={openConnectDashboard}
-                                                disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}
-                                            >
-                                                Open Stripe dashboard
                                             </button>
                                         </div>
                                     </div>

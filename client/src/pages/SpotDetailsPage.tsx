@@ -1193,16 +1193,8 @@ export default function SpotDetailsPage() {
     return (
         <div className="container">
             <div className="spotDetails">
-                <aside className="spotMedia">
-                    <Link to="/" className="muted tiny" style={{ textDecoration: "none" }}>← Back to results</Link>
-                    <div className="card spotMediaCard">
-                        {spot.image_url ? (
-                            <img src={spot.image_url} alt={spot.title} className="spotHeroImg" />
-                        ) : (
-                            <div className="spotHeroFallback">No photo</div>
-                        )}
-                    </div>
 
+                <aside className="spotMain">
                     <div className="card spotMediaCard">
                         <div className="h3">Location map</div>
                         <div className="muted tiny" style={{ marginTop: 4 }}>Pinpointed for this listing.</div>
@@ -1213,6 +1205,17 @@ export default function SpotDetailsPage() {
                         ) : (
                             <div className="tiny muted" style={{ marginTop: 10 }}>Map unavailable for this listing.</div>
                         )}
+                    </div>
+                    <div className="card spotMediaCard">
+                        {spot.image_url ? (
+                            <img src={spot.image_url} alt={spot.title} className="spotHeroImg" />
+                        ) : (
+                            <div className="spotHeroFallback">No photo</div>
+                        )}
+                    </div>
+
+                    <div style={{marginTop: -15}}>
+                        {myBidsFooterSection}
                     </div>
                 </aside>
 
@@ -1553,8 +1556,9 @@ export default function SpotDetailsPage() {
                     ) : (
                         bookingPanel
                     )}
+
                     {bidsFooterSection}
-                    {myBidsFooterSection}
+
                 </main>
             </div>
         </div>

@@ -120,6 +120,9 @@ export default function LoginPage() {
                     <div className="tiny muted">
                         No account yet? <Link to="/signup">Create one</Link>
                     </div>
+                    <div className="tiny muted" style={{ marginTop: 8 }}>
+                        Need help? Please contact <a href="mailto:parkingbuddiesproject@gmail.com">parkingbuddiesproject@gmail.com</a>
+                    </div>
                 </div>
             </div>
         </div>

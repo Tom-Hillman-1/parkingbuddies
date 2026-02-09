@@ -77,6 +77,13 @@ export default function AboutPage() {
                     <Link to="/create-listing" className="btn">Create a listing</Link>
                 </div>
             </div>
+            <div className="card aboutCard aboutCard--mint" style={{ marginTop: 12 }}>
+                <div className="aboutKicker">SUPPORT</div>
+                <div className="aboutTitle">Need help?</div>
+                <div className="aboutBody">
+                    Drop us a line at <a href="mailto:parkingbuddiesproject@gmail.com">parkingbuddiesproject@gmail.com</a> with questions about listings, payouts, or payments.
+                </div>
+            </div>
         </div>
     );
 }

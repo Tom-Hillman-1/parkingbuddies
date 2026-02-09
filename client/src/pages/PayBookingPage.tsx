@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
+import {Link, Navigate, useParams, useSearchParams} from "react-router-dom";
 import { apiGet, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
@@ -23,6 +23,17 @@ type StripeReceiptDetails = {
 function money(value: unknown) {
     const n = Number(value ?? 0);
     return Number.isFinite(n) ? n : 0;
+}
+
+function formatDateRange(start?: string | null, end?: string | null) {
+    if (!start || !end) return "Time on file";
+    try {
+        const from = new Date(start).toLocaleString();
+        const to = new Date(end).toLocaleString();
+        return `${from} → ${to}`;
+    } catch {
+        return "Time on file";
+    }
 }
 
 export default function PayBookingPage() {
@@ -134,20 +145,36 @@ export default function PayBookingPage() {
 
     if (!token) return <Navigate to="/login" replace />;
 
-    const receiptSubtitleText = successCheckout
-        ? "Thanks for returning from Stripe. We'll show your official receipt here once it's ready."
-        : booking?.payment_provider_ref
-            ? "Stripe payment recorded. Open your official receipt below."
-            : "Open your official Stripe receipt below.";
-    const receiptWaitMessage = successCheckout
-        ? "Stripe receipt link is still syncing. Please wait a moment and refresh if needed."
-        : "Stripe receipt link is not available yet.";
+    const hasStripeReceipt = Boolean(receipt?.receipt_url);
+    const bookingTitle = booking?.spot_title ?? "Parking booking";
+    const bookingAddress = booking?.spot_address ?? "Address on file";
+    const bookingWindow = booking ? formatDateRange(booking.start_time, booking.end_time) : "Time on file";
+    const stripeSummary = hasStripeReceipt
+        ? [
+              {
+                  label: "Amount received",
+                  value: `£${receipt!.amount_received_gbp.toFixed(2)}`,
+              },
+              {
+                  label: "Payment intent",
+                  value: receipt!.payment_intent_id,
+              },
+              {
+                  label: "Charge ID",
+                  value: receipt!.charge_id ?? "—",
+              },
+              {
+                  label: "Receipt email",
+                  value: receipt!.receipt_email ?? "—",
+              },
+          ]
+        : [];
 
     return (
         <div className="container">
             <div className="pageHeader">
-                <div className="heroKicker">PAYMENT</div>
-                <div className="heroTitle">Stripe checkout</div>
+                <div className="heroKicker">STRIPE</div>
+                <div className="heroTitle">Payment</div>
                 <div className="heroSub muted">Pay securely, then open your official Stripe receipt.</div>
             </div>
 
@@ -171,8 +198,8 @@ export default function PayBookingPage() {
                 )}
 
                 {requiresPayment && successCheckout && (
-                    <div className="card formSection">
-                        <div className="h3">Payment completed</div>
+                    <div className="card formSection" style={{marginBottom: 14}}>
+                        <div className="h3">Payment Completed Successfully</div>
                         <div className="muted" style={{ marginTop: 6 }}>
                             Thanks for confirming payment on Stripe. We're syncing your official receipt now.
                         </div>
@@ -188,27 +215,53 @@ export default function PayBookingPage() {
                     </div>
                 )}
 
-                {booking.pay_method === "money" && (
-                    <div className="card formSection">
-                        <div className="muted" style={{ marginTop: 6 }}>{receiptSubtitleText}</div>
-                        <div className="rowInline" style={{ marginTop: 12 }}>
-                            {receipt?.receipt_url ? (
+                {booking.pay_method === "money" && hasStripeReceipt && (
+                    <div className="card receiptCard receiptCard--confirm">
+                        <div className="receiptHeader">
+                            <div className="heroKicker">STRIPE RECEIPT</div>
+                            <div className="h3">Official summary</div>
+                            <div className="tiny muted">Details provided directly by Stripe.</div>
+                        </div>
+                        <div className="receiptBody">
+                            <div className="receiptRow">
+                                <span className="tiny muted">Booking</span>
+                                <span className="spotInfoValue">{bookingTitle}</span>
+                            </div>
+                            <div className="receiptRow">
+                                <span className="tiny muted">Location</span>
+                                <span className="spotInfoValue">{bookingAddress}</span>
+                            </div>
+                            <div className="receiptRow">
+                                <span className="tiny muted">Window</span>
+                                <span className="spotInfoValue">{bookingWindow}</span>
+                            </div>
+                            <div className="receiptRow">
+                                <span className="tiny muted">Amount</span>
+                                <span className="spotInfoValue">
+                                    £{money(booking.total_price_gbp).toFixed(2)}
+                                </span>
+                            </div>
+                            <div style={{ borderTop: "1px dashed rgba(255,255,255,0.25)", margin: "6px 0" }} />
+                            {stripeSummary.map((row) => (
+                                <div className="receiptRow" key={row.label}>
+                                    <span className="tiny muted">{row.label}</span>
+                                    <span className="spotInfoValue">{row.value}</span>
+                                </div>
+                            ))}
+                            <div className="rowInline" style={{ marginTop: 12 }}>
                                 <a
                                     className="btn btn-primary"
-                                    href={receipt.receipt_url}
+                                    href={receipt!.receipt_url}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                 >
                                     Open Stripe receipt
                                 </a>
-                            ) : (
-                                <span className="tiny muted">
-                                    {receiptWaitMessage}
-                                </span>
-                            )}
-                            <Link className="btn" to="/dashboard?tab=myBookings">
-                                Dashboard
-                            </Link>
+
+                            </div>
+                            <div className="rowInline">
+                                <Link to="/dashboard" className="btn">Back to dashboard</Link>
+                            </div>
                         </div>
                     </div>
                 )}
