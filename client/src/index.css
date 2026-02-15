@@ -488,6 +488,7 @@ label > span:first-child {
 
 .home-hero {
     min-height: calc(100vh - 6.5rem);
+    position: relative;
     display: grid;
     align-content: center;
     justify-items: center;
@@ -496,11 +497,61 @@ label > span:first-child {
     padding: clamp(3rem, 8vh, 5.2rem) clamp(1rem, 3vw, 2rem);
     border-radius: 26px;
     border: 1px solid #d6e2f4;
-    background:
-        radial-gradient(circle at 18% 18%, rgba(25, 118, 255, 0.16) 0%, transparent 42%),
-        radial-gradient(circle at 83% 4%, rgba(121, 176, 255, 0.24) 0%, transparent 37%),
-        linear-gradient(180deg, #ffffff 0%, #f5f8ff 100%);
+    overflow: hidden;
+    isolation: isolate;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.24) 0%, rgba(245, 248, 255, 0.3) 100%);
     box-shadow: var(--shadow-sm);
+}
+
+.home-hero > :not(.home-hero-bg) {
+    position: relative;
+    z-index: 2;
+}
+
+.home-hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background:
+        radial-gradient(circle at 15% 22%, rgba(25, 118, 255, 0.16) 0%, transparent 42%),
+        radial-gradient(circle at 84% 10%, rgba(121, 176, 255, 0.2) 0%, transparent 38%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, rgba(245, 248, 255, 0.32) 100%);
+    pointer-events: none;
+}
+
+.home-hero-bg {
+    position: absolute;
+    inset: -12% -8%;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 1;
+}
+
+.home-hero-bg-animation {
+    width: 100%;
+    height: 100%;
+    transform: scale(1.45);
+}
+
+.home-hero-bg-animation svg {
+    width: 100%;
+    height: 100%;
+}
+
+.home-hero-city {
+    width: clamp(180px, 28vw, 340px);
+    margin-top: 0.75rem;
+}
+
+.home-hero-city-animation {
+    width: 100%;
+    height: clamp(115px, 17vw, 220px);
+}
+
+.home-hero-city-animation svg {
+    width: 100%;
+    height: 100%;
 }
 
 .home-kicker,
@@ -877,8 +928,7 @@ label > span:first-child {
 .locationHelp,
 .pointsDisabledNote,
 .modeInfoNote,
-.sectionSub,
-.setupSummaryText {
+.sectionSub {
     color: var(--muted);
     font-size: 0.84rem;
 }
@@ -1112,7 +1162,6 @@ label > span:first-child {
 .dashItem,
 .aboutCard,
 .listingTypeCard,
-.setupSummaryCard,
 .pointsQuickCard,
 .settingRow {
     border: 1px solid var(--line);
@@ -1350,7 +1399,11 @@ label > span:first-child {
 }
 
 .listingTypeCard {
+    display: grid;
+    gap: 0.18rem;
+    text-align: left;
     cursor: pointer;
+    appearance: none;
     transition: border-color 150ms ease, transform 150ms ease;
 }
 
@@ -1374,13 +1427,38 @@ label > span:first-child {
     margin-top: 0.25rem;
 }
 
-.setupSummaryCard,
+.availabilityTypeBtn {
+    min-height: 44px;
+    border-radius: 12px;
+    border: 1px solid #cbdaf0;
+    background: #fff;
+    color: #304864;
+    font-weight: 700;
+    padding: 0.5rem 0.75rem;
+    appearance: none;
+    cursor: pointer;
+    transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.availabilityTypeBtn:hover {
+    border-color: #9ec2f9;
+    background: #f4f8ff;
+}
+
+.availabilityTypeBtn.is-active {
+    border-color: #8bb8ff;
+    background: #edf4ff;
+    color: #1254b6;
+    box-shadow: 0 0 0 3px rgba(25, 118, 255, 0.12);
+}
+
 .pointsQuickCard {
     background: #f7faff;
 }
 
-.setupSummaryText strong {
-    color: #1f3350;
+.setupInlineRow {
+    margin-top: 0.2rem;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 
 .mapWrap,
@@ -1848,6 +1926,15 @@ label > span:first-child {
         gap: 1.1rem;
         padding: clamp(2.2rem, 7vw, 3.2rem) 1rem;
         border-radius: 20px;
+    }
+
+    .home-hero-bg-animation {
+        transform: scale(1.34);
+    }
+
+    .home-hero-city {
+        width: clamp(150px, 52vw, 270px);
+        margin-top: 0.5rem;
     }
 
     .home-actions {

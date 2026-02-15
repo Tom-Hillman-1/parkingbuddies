@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import Lottie from "lottie-react";
 import { Link } from "react-router-dom";
 import SpotsMap from "../components/SpotsMap";
 import { apiGet } from "../lib/api";
@@ -8,6 +9,8 @@ type SortMode = "distance" | "price_low" | "price_high";
 type ModeFilter = Record<ParkingSpot["mode"], boolean>;
 
 const LONDON = { lat: 51.5074, lng: -0.1278 };
+const HOME_HERO_BACKGROUND_URL = new URL("../assets/background.json", import.meta.url).href;
+const HOME_HERO_CITY_URL = new URL("../assets/city.json", import.meta.url).href;
 
 function toNumber(value: unknown) {
     const n = Number(value ?? 0);
@@ -52,6 +55,8 @@ export default function HomePage() {
     const [spots, setSpots] = useState<ParkingSpot[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [heroBackgroundAnimationData, setHeroBackgroundAnimationData] = useState<Record<string, unknown> | null>(null);
+    const [heroCityAnimationData, setHeroCityAnimationData] = useState<Record<string, unknown> | null>(null);
 
     const [query, setQuery] = useState("");
     const [sort, setSort] = useState<SortMode>("distance");
@@ -82,6 +87,38 @@ export default function HomePage() {
         }
 
         load();
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    useEffect(() => {
+        let active = true;
+
+        fetch(HOME_HERO_BACKGROUND_URL)
+            .then((response) => {
+                if (!response.ok) throw new Error("Background animation file failed to load.");
+                return response.json();
+            })
+            .then((json) => {
+                if (active) setHeroBackgroundAnimationData(json);
+            })
+            .catch(() => {
+                if (active) setHeroBackgroundAnimationData(null);
+            });
+
+        fetch(HOME_HERO_CITY_URL)
+            .then((response) => {
+                if (!response.ok) throw new Error("City animation file failed to load.");
+                return response.json();
+            })
+            .then((json) => {
+                if (active) setHeroCityAnimationData(json);
+            })
+            .catch(() => {
+                if (active) setHeroCityAnimationData(null);
+            });
+
         return () => {
             active = false;
         };
@@ -202,6 +239,16 @@ export default function HomePage() {
     return (
         <div className="home">
             <section className="home-hero container">
+                <div className="home-hero-bg" aria-hidden="true">
+                    {heroBackgroundAnimationData ? (
+                        <Lottie
+                            className="home-hero-bg-animation"
+                            animationData={heroBackgroundAnimationData}
+                            loop
+                            autoplay
+                        />
+                    ) : null}
+                </div>
                 <p className="home-kicker">ParkingBuddies</p>
                 <h1 className="home-title">Park on your own terms.</h1>
                 <p className="home-copy">
@@ -211,6 +258,16 @@ export default function HomePage() {
                     <Link to="/create-listing" className="btn btn-primary">List your spot</Link>
                     <button type="button" className="btn btn-ghost" onClick={goToSpots}>View spots</button>
                 </div>
+                {heroCityAnimationData ? (
+                    <div className="home-hero-city" aria-hidden="true">
+                        <Lottie
+                            className="home-hero-city-animation"
+                            animationData={heroCityAnimationData}
+                            loop
+                            autoplay
+                        />
+                    </div>
+                ) : null}
             </section>
 
             <section className="home-content container">

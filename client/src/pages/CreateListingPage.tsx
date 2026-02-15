@@ -14,7 +14,6 @@ type Mode = "free" | "rent" | "auction";
 type PriceUnit = "hour" | "day" | "week";
 type ParkingType = "private" | "public";
 type AvailabilityType = "24_7" | "same_everyday" | "custom_weekly";
-type FormSectionKey = "intro" | "type" | "availability" | "pricing" | "location";
 type GeocodeSuggestion = {
     place_id: number;
     display_name: string;
@@ -101,20 +100,6 @@ function dateTimeMonthsFromNow(monthsAhead: number) {
     return toLocalDateTimeValue(next);
 }
 
-function toTitleCaseWords(value: string) {
-    return value.replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function modeDisplayLabel(value: Mode) {
-    if (value === "rent") return "Rent";
-    if (value === "auction") return "Auction";
-    return "Free";
-}
-
-function parkingTypeDisplayLabel(value: ParkingType) {
-    return value === "private" ? "Private" : "Public";
-}
-
 function createAvailabilitySlot(partial?: Partial<Omit<AvailabilitySlot, "id">>): AvailabilitySlot {
     return {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -179,9 +164,6 @@ export default function CreateListingPage() {
     const [parkingType, setParkingType] = useState<ParkingType>("private");
     const [capacityTotal, setCapacityTotal] = useState("1");
     const [capacityAvailable, setCapacityAvailable] = useState("1");
-    const [showSetupModal, setShowSetupModal] = useState(false);
-    const [setupTypeDraft, setSetupTypeDraft] = useState<ParkingType>("private");
-    const [setupSpacesDraft, setSetupSpacesDraft] = useState("1");
 
     const [availabilityType, setAvailabilityType] = useState<AvailabilityType>("24_7");
     const [dateFrom, setDateFrom] = useState(() => dateFromToday(0));
@@ -195,19 +177,10 @@ export default function CreateListingPage() {
 
     const [loadingExisting, setLoadingExisting] = useState(false);
     const [saving, setSaving] = useState(false);
-    const [showConfirmModal, setShowConfirmModal] = useState(false);
-    const [pendingPayload, setPendingPayload] = useState<Record<string, any> | null>(null);
-    const [confirmingPublish, setConfirmingPublish] = useState(false);
-    const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [deleting, setDeleting] = useState(false);
 
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
-    const introSectionRef = useRef<HTMLDivElement | null>(null);
-    const typeSectionRef = useRef<HTMLDivElement | null>(null);
-    const availabilitySectionRef = useRef<HTMLDivElement | null>(null);
-    const pricingSectionRef = useRef<HTMLDivElement | null>(null);
-    const locationSectionRef = useRef<HTMLDivElement | null>(null);
     const imageInputRef = useRef<HTMLInputElement | null>(null);
     const addressLookupRef = useRef<HTMLDivElement | null>(null);
     const addressSearchAbortRef = useRef<AbortController | null>(null);
@@ -217,23 +190,6 @@ export default function CreateListingPage() {
     const parsedCoords = useMemo(() => parseCoordinates(lat, lng), [lat, lng]);
     const mapCenter: [number, number] = parsedCoords ? [parsedCoords.lat, parsedCoords.lng] : DEFAULT_CENTER;
     const markerPosition: [number, number] | null = parsedCoords ? [parsedCoords.lat, parsedCoords.lng] : null;
-
-    useEffect(() => {
-        if (!showDeleteModal && !showSetupModal && !showConfirmModal) return;
-        const onEsc = (event: KeyboardEvent) => {
-            if (event.key !== "Escape") return;
-            if (showDeleteModal && !deleting) {
-                setShowDeleteModal(false);
-            } else if (showSetupModal) {
-                setShowSetupModal(false);
-            } else if (showConfirmModal && !confirmingPublish) {
-                setShowConfirmModal(false);
-                setPendingPayload(null);
-            }
-        };
-        window.addEventListener("keydown", onEsc);
-        return () => window.removeEventListener("keydown", onEsc);
-    }, [showDeleteModal, deleting, showSetupModal, showConfirmModal, confirmingPublish]);
 
     useEffect(() => {
         if (!isEdit || !token || !editId) return;
@@ -265,8 +221,6 @@ export default function CreateListingPage() {
                 setParkingType(nextParkingType);
                 setCapacityTotal(nextCapacity);
                 setCapacityAvailable(String(s.capacity_available ?? s.capacity_total ?? 1));
-                setSetupTypeDraft(nextParkingType);
-                setSetupSpacesDraft(nextCapacity);
 
                 setDateFrom(typeof av?.date_from === "string" ? av.date_from : dateFromToday(0));
                 setDateTo(typeof av?.date_to === "string" ? av.date_to : dateFromToday(3));
@@ -434,48 +388,6 @@ export default function CreateListingPage() {
         };
     }, []);
 
-    function openSetupModal(nextMode: Mode) {
-        setMode(nextMode);
-        setSetupTypeDraft(parkingType);
-        setSetupSpacesDraft(capacityTotal || "1");
-        setShowSetupModal(true);
-    }
-
-    function saveSetupModal() {
-        const spaces = Math.floor(Number(setupSpacesDraft || 1));
-        if (!Number.isInteger(spaces) || spaces <= 0) {
-            setError("Number of spaces must be at least 1.");
-            return;
-        }
-        setError("");
-        setParkingType(setupTypeDraft);
-        setCapacityTotal(String(spaces));
-        setCapacityAvailable(String(spaces));
-        setShowSetupModal(false);
-    }
-
-    function scrollToSection(section: FormSectionKey) {
-        const sectionMap: Record<FormSectionKey, HTMLDivElement | null> = {
-            intro: introSectionRef.current,
-            type: typeSectionRef.current,
-            availability: availabilitySectionRef.current,
-            pricing: pricingSectionRef.current,
-            location: locationSectionRef.current,
-        };
-        const sectionNode = sectionMap[section];
-        if (!sectionNode) return;
-        sectionNode.scrollIntoView({ behavior: "smooth", block: "center" });
-        const firstField = sectionNode.querySelector<HTMLElement>("input, textarea, select, button");
-        if (firstField) {
-            window.setTimeout(() => firstField.focus({ preventScroll: true }), 140);
-        }
-    }
-
-    function setErrorWithScroll(message: string, section: FormSectionKey) {
-        setError(message);
-        scrollToSection(section);
-    }
-
     function updateCustomSlot(slotId: string, patch: Partial<Omit<AvailabilitySlot, "id">>) {
         setCustomWeeklySlots((prev) => prev.map((slot) => (slot.id === slotId ? { ...slot, ...patch } : slot)));
     }
@@ -493,29 +405,6 @@ export default function CreateListingPage() {
             const next = prev.filter((slot) => slot.id !== slotId);
             return next.length > 0 ? next : [createAvailabilitySlot()];
         });
-    }
-
-    function setupSummaryLabel() {
-        const spotCount = Math.max(1, Math.floor(Number(capacityTotal || 1)));
-        return `${spotCount} ${parkingTypeDisplayLabel(parkingType)} Parking Space${spotCount === 1 ? "" : "s"}`;
-    }
-
-    function availabilitySummaryLabel() {
-        if (availabilityType === "24_7") return "24/7";
-        if (availabilityType === "same_everyday") return `Same Time, Daily (${sameStart}-${sameEnd})`;
-        return customWeeklySlots
-            .map((slot) => `${DAY_LABELS[slot.dow].slice(0, 3)} ${slot.start}-${slot.end}`)
-            .join(", ");
-    }
-
-    function pricingSummaryLabel() {
-        if (mode === "free") return "Free Listing";
-        if (mode === "auction") {
-            const startingBid = Number(auctionStartPrice || 0);
-            return `Auction Starting At £${Number.isFinite(startingBid) ? startingBid.toFixed(2) : "0.00"}`;
-        }
-        const amount = Number(price || 0);
-        return `£${Number.isFinite(amount) ? amount.toFixed(2) : "0.00"} Per ${toTitleCaseWords(priceUnit)}`;
     }
 
     function applyPickedLocation(nextLat: number, nextLng: number, nextAddress?: string) {
@@ -641,43 +530,43 @@ export default function CreateListingPage() {
         const capacityAvailableNum = Math.floor(Number(capacityAvailable || 1));
 
         if (!title.trim() || title.trim().length < 3) {
-            setErrorWithScroll("Title must be at least 3 characters.", "intro");
+            setError("Title must be at least 3 characters.");
             return null;
         }
         if (!description.trim() || description.trim().length < 5) {
-            setErrorWithScroll("Description must be at least 5 characters.", "intro");
+            setError("Description must be at least 5 characters.");
             return null;
         }
         if (!addressText.trim() || addressText.trim().length < 5) {
-            setErrorWithScroll("Address must be at least 5 characters.", "location");
+            setError("Address must be at least 5 characters.");
             return null;
         }
         if (!coords) {
-            setErrorWithScroll("Pick a valid location using address search or by clicking on the map.", "location");
+            setError("Pick a valid location using address search or by clicking on the map.");
             return null;
         }
         if (mode === "rent" && (!Number.isFinite(priceNum) || priceNum <= 0)) {
-            setErrorWithScroll("Rent listings need a price above 0.", "pricing");
+            setError("Rent listings need a price above 0.");
             return null;
         }
         if (allowPoints && (!Number.isFinite(pointsNum) || pointsNum < MIN_POINTS_COST)) {
-            setErrorWithScroll("Points cost must be at least 1 when enabled.", "pricing");
+            setError("Points cost must be at least 1 when enabled.");
             return null;
         }
         if (!Number.isInteger(capacityTotalNum) || capacityTotalNum <= 0) {
-            setErrorWithScroll("Capacity total must be at least 1.", "type");
+            setError("Capacity total must be at least 1.");
             return null;
         }
         if (!Number.isInteger(capacityAvailableNum) || capacityAvailableNum < 0) {
-            setErrorWithScroll("Capacity available must be 0 or higher.", "type");
+            setError("Capacity available must be 0 or higher.");
             return null;
         }
         if (capacityAvailableNum > capacityTotalNum) {
-            setErrorWithScroll("Capacity available cannot exceed total.", "type");
+            setError("Capacity available cannot exceed total.");
             return null;
         }
         if (dateFrom && dateTo && dateFrom > dateTo) {
-            setErrorWithScroll("Availability start date must be before end date.", "availability");
+            setError("Availability start date must be before end date.");
             return null;
         }
 
@@ -685,7 +574,7 @@ export default function CreateListingPage() {
         try {
             availability = buildAvailabilityPayload();
         } catch (e: any) {
-            setErrorWithScroll(e?.message || "Availability is invalid.", "availability");
+            setError(e?.message || "Availability is invalid.");
             return null;
         }
 
@@ -711,15 +600,15 @@ export default function CreateListingPage() {
             const auctionStartNum = Number(auctionStartPrice || 0);
             const auctionEndIso = toIsoFromLocalInput(auctionEndLocal);
             if (!Number.isFinite(auctionStartNum) || auctionStartNum < MIN_AUCTION_START_PRICE_GBP) {
-                setErrorWithScroll("Auction start price must be at least £0.10.", "pricing");
+                setError("Auction start price must be at least GBP 0.10.");
                 return null;
             }
             if (!auctionEndIso) {
-                setErrorWithScroll("Auction end date/time is required.", "pricing");
+                setError("Auction end date/time is required.");
                 return null;
             }
             if (!dateFrom || !dateTo) {
-                setErrorWithScroll("Auction listings need availability start and end dates.", "availability");
+                setError("Auction listings need availability start and end dates.");
                 return null;
             }
             payload.auction_start_price_gbp = auctionStartNum;
@@ -754,28 +643,22 @@ export default function CreateListingPage() {
             return;
         }
 
-        setPendingPayload(payload);
-        setShowConfirmModal(true);
-    }
-
-    async function onConfirmPublish() {
-        if (!token || !pendingPayload || isEdit) return;
-        setConfirmingPublish(true);
+        setSaving(true);
         setError("");
         try {
-            const res = await apiPost<{ parking_spot: ParkingSpot }>("/parking-spots", pendingPayload, token);
-            setShowConfirmModal(false);
-            setPendingPayload(null);
+            const res = await apiPost<{ parking_spot: ParkingSpot }>("/parking-spots", payload, token);
             navigate(`/spots/${res.parking_spot.id}`, { replace: true });
         } catch (e: any) {
             setError(e?.message || "Failed to publish listing.");
         } finally {
-            setConfirmingPublish(false);
+            setSaving(false);
         }
     }
 
     async function onDeleteListing() {
         if (!token || !editId) return;
+        const confirmed = window.confirm("Delete this listing permanently?");
+        if (!confirmed) return;
         setDeleting(true);
         setError("");
         try {
@@ -783,8 +666,8 @@ export default function CreateListingPage() {
             navigate("/dashboard", { replace: true });
         } catch (e: any) {
             setError(e?.message || "Failed to delete listing.");
+        } finally {
             setDeleting(false);
-            setShowDeleteModal(false);
         }
     }
 
@@ -808,7 +691,7 @@ export default function CreateListingPage() {
                     </div>
                 ) : (
                     <form className="formGrid createListingForm" onSubmit={onSubmit}>
-                        <div ref={introSectionRef} className="card formSection formSection--intro">
+                        <div className="card formSection formSection--intro">
                             <div className="sectionHeader">
                                 <div className="h3">1. Name and description</div>
                                 {isEdit && <span className="badge badge--warm">Editing</span>}
@@ -834,13 +717,13 @@ export default function CreateListingPage() {
                             </label>
                         </div>
 
-                        <div ref={typeSectionRef} className="card formSection formSection--type">
+                        <div className="card formSection formSection--type">
                             <div className="h3">2. Listing type</div>
                             <div className="listingTypeGrid">
                                 <button
                                     type="button"
                                     className={`listingTypeCard listingTypeCard--rent${mode === "rent" ? " is-active" : ""}`}
-                                    onClick={() => openSetupModal("rent")}
+                                    onClick={() => setMode("rent")}
                                 >
                                     <div className="listingTypeTitle">Rent</div>
                                     <div className="listingTypeCopy">Paid listing with fixed price.</div>
@@ -848,7 +731,7 @@ export default function CreateListingPage() {
                                 <button
                                     type="button"
                                     className={`listingTypeCard listingTypeCard--auction${mode === "auction" ? " is-active" : ""}`}
-                                    onClick={() => openSetupModal("auction")}
+                                    onClick={() => setMode("auction")}
                                 >
                                     <div className="listingTypeTitle">Auction</div>
                                     <div className="listingTypeCopy">Highest bid wins before the end time.</div>
@@ -856,31 +739,44 @@ export default function CreateListingPage() {
                                 <button
                                     type="button"
                                     className={`listingTypeCard listingTypeCard--free${mode === "free" ? " is-active" : ""}`}
-                                    onClick={() => openSetupModal("free")}
+                                    onClick={() => setMode("free")}
                                 >
                                     <div className="listingTypeTitle">Free</div>
                                     <div className="listingTypeCopy">No payment required.</div>
                                 </button>
                             </div>
-                            <div className="setupSummaryCard">
-                                <div className="setupSummaryText">
-                                    <strong>{setupSummaryLabel()}</strong>
-                                </div>
-                                <button
-                                    type="button"
-                                    className="btn"
-                                    onClick={() => {
-                                        setSetupTypeDraft(parkingType);
-                                        setSetupSpacesDraft(capacityTotal || "1");
-                                        setShowSetupModal(true);
-                                    }}
-                                >
-                                    Edit
-                                </button>
+                            <div className="row setupInlineRow">
+                                <label>
+                                    <span>Parking type</span>
+                                    <select className="input" value={parkingType} onChange={(e) => setParkingType(e.target.value as ParkingType)}>
+                                        <option value="private">Private</option>
+                                        <option value="public">Public</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>Total spaces</span>
+                                    <input
+                                        className="input"
+                                        type="number"
+                                        min="1"
+                                        value={capacityTotal}
+                                        onChange={(e) => setCapacityTotal(e.target.value)}
+                                    />
+                                </label>
+                                <label>
+                                    <span>Available now</span>
+                                    <input
+                                        className="input"
+                                        type="number"
+                                        min="0"
+                                        value={capacityAvailable}
+                                        onChange={(e) => setCapacityAvailable(e.target.value)}
+                                    />
+                                </label>
                             </div>
                         </div>
 
-                        <div ref={availabilitySectionRef} className="card formSection formSection--availability">
+                        <div className="card formSection formSection--availability">
                             <div className="h3">3. Availability</div>
                             <div className="availabilityTypeGrid" role="tablist" aria-label="Availability options">
                                 <button
@@ -962,6 +858,7 @@ export default function CreateListingPage() {
                                             <label>
                                                 <span>Day</span>
                                                 <select
+                                                    className="input"
                                                     value={slot.dow}
                                                     onChange={(e) =>
                                                         updateCustomSlot(slot.id, { dow: Number(e.target.value) })
@@ -1015,7 +912,7 @@ export default function CreateListingPage() {
                             )}
                         </div>
 
-                        <div ref={pricingSectionRef} className="card formSection formSection--setupPricing">
+                        <div className="card formSection formSection--setupPricing">
                             <div className="h3">4. Pricing</div>
                             <div className="stack">
                                 {mode === "rent" && (
@@ -1023,6 +920,7 @@ export default function CreateListingPage() {
                                         <label>
                                             <span>Price unit</span>
                                             <select
+                                                className="input"
                                                 value={priceUnit}
                                                 onChange={(e) => setPriceUnit(e.target.value as PriceUnit)}
                                             >
@@ -1104,7 +1002,7 @@ export default function CreateListingPage() {
                             </div>
                         </div>
 
-                        <div ref={locationSectionRef} className="card formSection formSection--location">
+                        <div className="card formSection formSection--location">
                             <div className="sectionHeader">
                                 <div className="h3">5. Location</div>
                             </div>
@@ -1224,7 +1122,7 @@ export default function CreateListingPage() {
                                         type="button"
                                         className="btn btn-danger"
                                         disabled={saving || deleting}
-                                        onClick={() => setShowDeleteModal(true)}
+                                        onClick={onDeleteListing}
                                     >
                                         Delete listing
                                     </button>
@@ -1235,169 +1133,6 @@ export default function CreateListingPage() {
                 )}
             </div>
 
-            {showSetupModal && (
-                <div
-                    className="modalOverlay"
-                    role="dialog"
-                    aria-modal="true"
-                    onClick={(e) => {
-                        if (e.target === e.currentTarget) setShowSetupModal(false);
-                    }}
-                >
-                    <div className="modalCard">
-                        <div className="receiptCard">
-                            <div className="receiptHeader">
-                                <div className="h2">Setup details</div>
-                                <div className="muted">Choose if this listing is private or public, and how many spaces it has.</div>
-                            </div>
-                            <div className="receiptBody">
-                                <div className="availabilityTypeGrid" role="tablist" aria-label="Parking type options">
-                                    <button
-                                        type="button"
-                                        className={`availabilityTypeBtn${setupTypeDraft === "private" ? " is-active" : ""}`}
-                                        onClick={() => setSetupTypeDraft("private")}
-                                    >
-                                        Private
-                                    </button>
-                                    <button
-                                        type="button"
-                                        className={`availabilityTypeBtn${setupTypeDraft === "public" ? " is-active" : ""}`}
-                                        onClick={() => setSetupTypeDraft("public")}
-                                    >
-                                        Public
-                                    </button>
-                                </div>
-                                <label>
-                                    <span>How many spaces?</span>
-                                    <input
-                                        className="input"
-                                        type="number"
-                                        min="1"
-                                        value={setupSpacesDraft}
-                                        onChange={(e) => setSetupSpacesDraft(e.target.value)}
-                                    />
-                                </label>
-                            </div>
-                            <div className="receiptActions">
-                                <button type="button" className="btn" onClick={() => setShowSetupModal(false)}>
-                                    Cancel
-                                </button>
-                                <button type="button" className="btn btn-primary" onClick={saveSetupModal}>
-                                    Save setup
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {showConfirmModal && !isEdit && (
-                <div
-                    className="modalOverlay"
-                    role="dialog"
-                    aria-modal="true"
-                    onClick={(e) => {
-                        if (e.target === e.currentTarget && !confirmingPublish) {
-                            setShowConfirmModal(false);
-                            setPendingPayload(null);
-                        }
-                    }}
-                >
-                    <div className="modalCard">
-                        <div className="receiptCard receiptCard--confirm">
-                            <div className="receiptHeader">
-                                <div className="h2">Confirm Listing</div>
-                                <div className="muted">Review every detail below, then publish your listing.</div>
-                            </div>
-                            <div className="receiptBody">
-                                <div className="receiptRow">
-                                    <span className="receiptRowLabel">Listing Name</span>
-                                    <strong className="receiptRowValue">{title || "-"}</strong>
-                                </div>
-                                <div className="receiptRow">
-                                    <span className="receiptRowLabel">Type</span>
-                                    <strong className="receiptRowValue">{modeDisplayLabel(mode)}</strong>
-                                </div>
-                                <div className="receiptRow">
-                                    <span className="receiptRowLabel">Setup</span>
-                                    <strong className="receiptRowValue">{setupSummaryLabel()}</strong>
-                                </div>
-                                <div className="receiptRow">
-                                    <span className="receiptRowLabel">Availability</span>
-                                    <strong className="receiptRowValue">{availabilitySummaryLabel() || "-"}</strong>
-                                </div>
-                                <div className="receiptRow">
-                                    <span className="receiptRowLabel">Pricing</span>
-                                    <strong className="receiptRowValue">{pricingSummaryLabel()}</strong>
-                                </div>
-                                <div className="receiptRow">
-                                    <span className="receiptRowLabel">Address</span>
-                                    <strong className="receiptRowValue">{addressText || "-"}</strong>
-                                </div>
-                            </div>
-                            <div className="receiptActions">
-                                <button
-                                    type="button"
-                                    className="btn"
-                                    disabled={confirmingPublish}
-                                    onClick={() => {
-                                        setShowConfirmModal(false);
-                                        setPendingPayload(null);
-                                    }}
-                                >
-                                    Go back
-                                </button>
-                                <button
-                                    type="button"
-                                    className="btn btn-primary"
-                                    disabled={confirmingPublish}
-                                    onClick={onConfirmPublish}
-                                >
-                                    {confirmingPublish ? "Publishing..." : "Confirm And Publish"}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {showDeleteModal && (
-                <div
-                    className="modalOverlay"
-                    role="dialog"
-                    aria-modal="true"
-                    onClick={(e) => {
-                        if (e.target === e.currentTarget && !deleting) setShowDeleteModal(false);
-                    }}
-                >
-                    <div className="modalCard">
-                        <div className="receiptCard">
-                            <div className="receiptHeader">
-                                <div className="h2">Delete this listing?</div>
-                                <div className="muted">This action is permanent and removes the listing for all users.</div>
-                            </div>
-                            <div className="receiptBody">
-                                <div className="receiptRow">
-                                    <span>Title</span>
-                                    <strong>{title || "Untitled listing"}</strong>
-                                </div>
-                                <div className="receiptRow">
-                                    <span>Address</span>
-                                    <strong>{addressText || "-"}</strong>
-                                </div>
-                            </div>
-                            <div className="receiptActions">
-                                <button type="button" className="btn" disabled={deleting} onClick={() => setShowDeleteModal(false)}>
-                                    Keep listing
-                                </button>
-                                <button type="button" className="btn btn-danger" disabled={deleting} onClick={onDeleteListing}>
-                                    {deleting ? "Deleting..." : "Delete permanently"}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

@@ -1321,7 +1321,7 @@ export default function DashboardPage() {
                                         <div className="h3">Transaction History</div>
                                     </div>
 
-                                    <div className="dashMetaRow sectionHeaderBadge">
+                                    <div className="dashMetaRow">
                                     <span className="badge badge--green">
                                       Total earned: £{ownerBookings
                                       .filter((b) => b.status === "confirmed" && b.pay_method === "money")
