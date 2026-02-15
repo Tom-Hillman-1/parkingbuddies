@@ -202,10 +202,13 @@ function isSlotAllowed(spot: any, start: Date, end: Date) {
     if (!rules.length) return false;
 
     const a: any = spot?.availability_json;
+    const isTwentyFourSeven = a?.type === "24_7" || (!a && (spot?.availability_type ?? "24_7") === "24_7");
     const dateFrom = a?.date_from ? new Date(`${a.date_from}T00:00:00`) : null;
     const dateTo = a?.date_to ? new Date(`${a.date_to}T23:59:59`) : null;
     if (dateFrom && start < dateFrom) return false;
     if (dateTo && end > dateTo) return false;
+
+    if (isTwentyFourSeven) return true;
 
     if (start.toDateString() !== end.toDateString()) return false;
     const dow = start.getDay();
