@@ -12,174 +12,391 @@ if (!connectionString) {
 
 const pool = new Pool({ connectionString });
 
-function addDays(d, days) {
-    const out = new Date(d);
+function addDays(base, days) {
+    const out = new Date(base);
     out.setDate(out.getDate() + days);
     return out;
+}
+
+function at(daysAhead, hours, minutes) {
+    const d = addDays(new Date(), daysAhead);
+    d.setHours(hours, minutes, 0, 0);
+    return d;
+}
+
+function ymd(daysAhead) {
+    return addDays(new Date(), daysAhead).toISOString().slice(0, 10);
+}
+
+async function insertSpot(client, ownerId, data) {
+    const r = await client.query(
+        `INSERT INTO parking_spots (
+            owner_user_id,
+            title,
+            description,
+            mode,
+            price_gbp,
+            price_unit,
+            allow_points,
+            points_cost,
+            address_text,
+            lat,
+            lng,
+            image_url,
+            availability_json,
+            availability_type,
+            available_days,
+            daily_start,
+            daily_end,
+            auction_end,
+            auction_start_price_gbp,
+            parking_type,
+            capacity_total,
+            capacity_available,
+            is_active
+        )
+         VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23
+        )
+         RETURNING id, title`,
+        [
+            ownerId,
+            data.title,
+            data.description,
+            data.mode,
+            data.price_gbp,
+            data.price_unit,
+            data.allow_points,
+            data.points_cost,
+            data.address_text,
+            data.lat,
+            data.lng,
+            data.image_url,
+            data.availability_json,
+            data.availability_type,
+            data.available_days,
+            data.daily_start,
+            data.daily_end,
+            data.auction_end,
+            data.auction_start_price_gbp,
+            data.parking_type,
+            data.capacity_total,
+            data.capacity_available,
+            true,
+        ]
+    );
+    return r.rows[0];
 }
 
 async function seed() {
     const client = await pool.connect();
     try {
-        const existing = await client.query("SELECT COUNT(*)::int AS count FROM users");
-        if ((existing.rows[0]?.count ?? 0) > 0) {
-            console.log("Seed skipped: users already exist.");
-            return;
-        }
-
         await client.query("BEGIN");
+
+        await client.query(`
+            TRUNCATE TABLE
+                payments,
+                reward_transactions,
+                bookings,
+                auction_bids,
+                parking_spots,
+                users
+            RESTART IDENTITY CASCADE
+        `);
 
         const passwordHash = await bcrypt.hash("demo1234", 10);
 
         const ownerR = await client.query(
-            `INSERT INTO users (email, name, password_hash, points_balance)
-             VALUES ($1, $2, $3, $4)
+            `INSERT INTO users (
+                email,
+                name,
+                password_hash,
+                points_balance,
+                stripe_account_id,
+                stripe_charges_enabled,
+                stripe_payouts_enabled,
+                stripe_details_submitted
+            )
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
              RETURNING id`,
-            ["owner@demo.com", "Demo Owner", passwordHash, 250]
+            [
+                "owner@demo.com",
+                "Demo Owner",
+                passwordHash,
+                1400,
+                "acct_demo_owner_connected",
+                true,
+                true,
+                true,
+            ]
         );
+
         const driverR = await client.query(
-            `INSERT INTO users (email, name, password_hash, points_balance)
-             VALUES ($1, $2, $3, $4)
+            `INSERT INTO users (
+                email,
+                name,
+                password_hash,
+                points_balance,
+                stripe_account_id,
+                stripe_charges_enabled,
+                stripe_payouts_enabled,
+                stripe_details_submitted
+            )
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
              RETURNING id`,
-            ["driver@demo.com", "Demo Driver", passwordHash, 120]
+            [
+                "driver@demo.com",
+                "Demo Driver",
+                passwordHash,
+                650,
+                null,
+                false,
+                false,
+                false,
+            ]
         );
 
         const ownerId = ownerR.rows[0].id;
         const driverId = driverR.rows[0].id;
 
-        const auctionEnd = addDays(new Date(), 7).toISOString();
-
-        const rentSpotR = await client.query(
-            `INSERT INTO parking_spots (
-                owner_user_id,
-                title,
-                description,
-                mode,
-                price_gbp,
-                allow_points,
-                points_cost,
-                address_text,
-                lat,
-                lng,
-                image_url,
-                auction_end,
-                auction_start_price_gbp,
-                parking_type,
-                capacity_total,
-                capacity_available
-            )
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-             RETURNING id`,
-            [
-                ownerId,
-                "City Center Garage",
-                "Covered garage space close to the main station.",
-                "rent",
-                4.5,
-                true,
-                8,
-                "12 Market St, London",
-                51.5074,
-                -0.1278,
-                null,
-                null,
-                null,
-                "private",
-                1,
-                1,
-            ]
+        const listingRows = [];
+        listingRows.push(
+            await insertSpot(client, ownerId, {
+                title: "Canary Wharf Secure Garage",
+                description: "Covered bay with CCTV and direct access to the station.",
+                mode: "rent",
+                price_gbp: 5.5,
+                price_unit: "hour",
+                allow_points: true,
+                points_cost: 12,
+                address_text: "14 Bank St, Canary Wharf, London",
+                lat: 51.5047,
+                lng: -0.0189,
+                image_url: "https://picsum.photos/id/1067/1200/800",
+                availability_json: { type: "same_everyday", start: "06:00", end: "23:00", date_from: ymd(0), date_to: ymd(120) },
+                availability_type: "weekly",
+                available_days: [0, 1, 2, 3, 4, 5, 6],
+                daily_start: "06:00",
+                daily_end: "23:00",
+                auction_end: null,
+                auction_start_price_gbp: null,
+                parking_type: "private",
+                capacity_total: 1,
+                capacity_available: 1,
+            })
         );
 
-        const freeSpotR = await client.query(
-            `INSERT INTO parking_spots (
-                owner_user_id,
-                title,
-                description,
-                mode,
-                price_gbp,
-                allow_points,
-                points_cost,
-                address_text,
-                lat,
-                lng,
-                image_url,
-                auction_end,
-                auction_start_price_gbp,
-                parking_type,
-                capacity_total,
-                capacity_available
-            )
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-             RETURNING id`,
-            [
-                ownerId,
-                "Riverside Free Spot",
-                "Uncovered spot with quick access to the riverside path.",
-                "free",
-                0,
-                false,
-                0,
-                "8 Riverside Walk, London",
-                51.505,
-                -0.11,
-                null,
-                null,
-                null,
-                "public",
-                2,
-                2,
-            ]
+        listingRows.push(
+            await insertSpot(client, ownerId, {
+                title: "Islington Family Driveway",
+                description: "Quiet off-street driveway, ideal for full-day parking.",
+                mode: "rent",
+                price_gbp: 22,
+                price_unit: "day",
+                allow_points: false,
+                points_cost: 0,
+                address_text: "63 Upper St, Islington, London",
+                lat: 51.5364,
+                lng: -0.1033,
+                image_url: "https://picsum.photos/id/1025/1200/800",
+                availability_json: { type: "24_7", date_from: ymd(0), date_to: ymd(180) },
+                availability_type: "24_7",
+                available_days: null,
+                daily_start: null,
+                daily_end: null,
+                auction_end: null,
+                auction_start_price_gbp: null,
+                parking_type: "private",
+                capacity_total: 1,
+                capacity_available: 1,
+            })
         );
 
-        const auctionSpotR = await client.query(
-            `INSERT INTO parking_spots (
-                owner_user_id,
-                title,
-                description,
-                mode,
-                price_gbp,
-                allow_points,
-                points_cost,
-                address_text,
-                lat,
-                lng,
-                image_url,
-                auction_end,
-                auction_start_price_gbp,
-                parking_type,
-                capacity_total,
-                capacity_available
-            )
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-             RETURNING id`,
-            [
-                ownerId,
-                "Market Street Auction",
-                "Auction-only listing with flexible evening hours.",
-                "auction",
-                0,
-                true,
-                10,
-                "22 Market St, London",
-                51.509,
-                -0.09,
-                null,
-                auctionEnd,
-                2.0,
-                "private",
-                1,
-                1,
-            ]
+        listingRows.push(
+            await insertSpot(client, ownerId, {
+                title: "Shoreditch Free Curbside Spot",
+                description: "Free community slot near local shops, weekdays only.",
+                mode: "free",
+                price_gbp: 0,
+                price_unit: "hour",
+                allow_points: false,
+                points_cost: 0,
+                address_text: "88 Curtain Rd, Shoreditch, London",
+                lat: 51.5242,
+                lng: -0.0786,
+                image_url: "https://picsum.photos/id/1011/1200/800",
+                availability_json: {
+                    type: "custom_weekly",
+                    rules: [
+                        { dow: 1, start: "08:00", end: "19:00" },
+                        { dow: 2, start: "08:00", end: "19:00" },
+                        { dow: 3, start: "08:00", end: "19:00" },
+                        { dow: 4, start: "08:00", end: "19:00" },
+                        { dow: 5, start: "08:00", end: "19:00" },
+                    ],
+                    date_from: ymd(0),
+                    date_to: ymd(90),
+                },
+                availability_type: "weekly",
+                available_days: [1, 2, 3, 4, 5],
+                daily_start: "08:00",
+                daily_end: "19:00",
+                auction_end: null,
+                auction_start_price_gbp: null,
+                parking_type: "public",
+                capacity_total: 2,
+                capacity_available: 2,
+            })
         );
 
-        const rentSpotId = rentSpotR.rows[0].id;
-        const auctionSpotId = auctionSpotR.rows[0].id;
+        listingRows.push(
+            await insertSpot(client, ownerId, {
+                title: "Soho Evening Auction Spot",
+                description: "Prime evening slot for West End visits and theatre nights.",
+                mode: "auction",
+                price_gbp: 0,
+                price_unit: "hour",
+                allow_points: true,
+                points_cost: 16,
+                address_text: "20 Wardour St, Soho, London",
+                lat: 51.5137,
+                lng: -0.1313,
+                image_url: "https://picsum.photos/id/1074/1200/800",
+                availability_json: { type: "24_7", date_from: ymd(0), date_to: ymd(45) },
+                availability_type: "24_7",
+                available_days: null,
+                daily_start: null,
+                daily_end: null,
+                auction_end: addDays(new Date(), 12).toISOString(),
+                auction_start_price_gbp: 2.5,
+                parking_type: "private",
+                capacity_total: 1,
+                capacity_available: 1,
+            })
+        );
 
-        const bookingStart = addDays(new Date(), 1);
-        bookingStart.setHours(9, 0, 0, 0);
-        const bookingEnd = new Date(bookingStart.getTime() + 2 * 60 * 60 * 1000);
+        listingRows.push(
+            await insertSpot(client, ownerId, {
+                title: "Kings Cross Weekly Garage",
+                description: "Best for commuters and week-long stays near the rail hub.",
+                mode: "rent",
+                price_gbp: 84,
+                price_unit: "week",
+                allow_points: true,
+                points_cost: 75,
+                address_text: "3 Pancras Sq, Kings Cross, London",
+                lat: 51.5342,
+                lng: -0.1257,
+                image_url: "https://picsum.photos/id/1033/1200/800",
+                availability_json: { type: "24_7", date_from: ymd(0), date_to: ymd(180) },
+                availability_type: "24_7",
+                available_days: null,
+                daily_start: null,
+                daily_end: null,
+                auction_end: null,
+                auction_start_price_gbp: null,
+                parking_type: "private",
+                capacity_total: 1,
+                capacity_available: 1,
+            })
+        );
 
-        await client.query(
+        listingRows.push(
+            await insertSpot(client, ownerId, {
+                title: "Brixton Market Auction Bay",
+                description: "Busy-zone listing with high demand during market hours.",
+                mode: "auction",
+                price_gbp: 0,
+                price_unit: "hour",
+                allow_points: false,
+                points_cost: 0,
+                address_text: "45 Atlantic Rd, Brixton, London",
+                lat: 51.4626,
+                lng: -0.1144,
+                image_url: "https://picsum.photos/id/1043/1200/800",
+                availability_json: {
+                    type: "same_everyday",
+                    start: "07:00",
+                    end: "22:00",
+                    date_from: ymd(0),
+                    date_to: ymd(60),
+                },
+                availability_type: "weekly",
+                available_days: [0, 1, 2, 3, 4, 5, 6],
+                daily_start: "07:00",
+                daily_end: "22:00",
+                auction_end: addDays(new Date(), 8).toISOString(),
+                auction_start_price_gbp: 1.8,
+                parking_type: "private",
+                capacity_total: 1,
+                capacity_available: 1,
+            })
+        );
+
+        listingRows.push(
+            await insertSpot(client, ownerId, {
+                title: "Camden Multi-Space Lot",
+                description: "Public lot with several spaces and good daytime flow.",
+                mode: "rent",
+                price_gbp: 3.25,
+                price_unit: "hour",
+                allow_points: true,
+                points_cost: 9,
+                address_text: "9 Camden High St, Camden, London",
+                lat: 51.5392,
+                lng: -0.1426,
+                image_url: "https://picsum.photos/id/1056/1200/800",
+                availability_json: { type: "24_7", date_from: ymd(0), date_to: ymd(365) },
+                availability_type: "24_7",
+                available_days: null,
+                daily_start: null,
+                daily_end: null,
+                auction_end: null,
+                auction_start_price_gbp: null,
+                parking_type: "public",
+                capacity_total: 4,
+                capacity_available: 3,
+            })
+        );
+
+        listingRows.push(
+            await insertSpot(client, ownerId, {
+                title: "Greenwich Free Driveway",
+                description: "Quiet free driveway near parks and riverside paths.",
+                mode: "free",
+                price_gbp: 0,
+                price_unit: "hour",
+                allow_points: false,
+                points_cost: 0,
+                address_text: "11 Park Vista, Greenwich, London",
+                lat: 51.4769,
+                lng: -0.0005,
+                image_url: "https://picsum.photos/id/1080/1200/800",
+                availability_json: { type: "24_7", date_from: ymd(0), date_to: ymd(180) },
+                availability_type: "24_7",
+                available_days: null,
+                daily_start: null,
+                daily_end: null,
+                auction_end: null,
+                auction_start_price_gbp: null,
+                parking_type: "private",
+                capacity_total: 1,
+                capacity_available: 1,
+            })
+        );
+
+        const spotIds = Object.fromEntries(listingRows.map((row) => [row.title, row.id]));
+
+        const rentBookingStart = at(1, 9, 0);
+        const rentBookingEnd = at(1, 11, 0);
+        const pendingBookingStart = at(3, 8, 0);
+        const pendingBookingEnd = at(4, 8, 0);
+        const pointsBookingStart = at(2, 14, 0);
+        const pointsBookingEnd = at(2, 16, 0);
+        const weeklyBookingStart = at(5, 10, 0);
+        const weeklyBookingEnd = at(12, 10, 0);
+
+        const bookingMoneyConfirmedR = await client.query(
             `INSERT INTO bookings (
                 parking_spot_id,
                 driver_user_id,
@@ -188,25 +405,185 @@ async function seed() {
                 status,
                 pay_method,
                 total_price_gbp,
-                total_points
+                total_points,
+                payment_provider_ref
             )
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-            [rentSpotId, driverId, bookingStart.toISOString(), bookingEnd.toISOString(), "confirmed", "money", 9.0, 0]
+             VALUES ($1,$2,$3,$4,'confirmed','money',$5,0,$6)
+             RETURNING id`,
+            [
+                spotIds["Canary Wharf Secure Garage"],
+                driverId,
+                rentBookingStart.toISOString(),
+                rentBookingEnd.toISOString(),
+                "11.00",
+                "pi_demo_paid_001",
+            ]
         );
+
+        const bookingMoneyPendingR = await client.query(
+            `INSERT INTO bookings (
+                parking_spot_id,
+                driver_user_id,
+                start_time,
+                end_time,
+                status,
+                pay_method,
+                total_price_gbp,
+                total_points,
+                payment_provider_ref
+            )
+             VALUES ($1,$2,$3,$4,'pending','money',$5,0,$6)
+             RETURNING id`,
+            [
+                spotIds["Islington Family Driveway"],
+                driverId,
+                pendingBookingStart.toISOString(),
+                pendingBookingEnd.toISOString(),
+                "22.00",
+                "pi_demo_pending_001",
+            ]
+        );
+
+        const bookingPointsConfirmedR = await client.query(
+            `INSERT INTO bookings (
+                parking_spot_id,
+                driver_user_id,
+                start_time,
+                end_time,
+                status,
+                pay_method,
+                total_price_gbp,
+                total_points,
+                payment_provider_ref
+            )
+             VALUES ($1,$2,$3,$4,'confirmed','points','0.00',$5,$6)
+             RETURNING id`,
+            [
+                spotIds["Camden Multi-Space Lot"],
+                driverId,
+                pointsBookingStart.toISOString(),
+                pointsBookingEnd.toISOString(),
+                18,
+                "points_demo_001",
+            ]
+        );
+
+        const bookingWeeklyConfirmedR = await client.query(
+            `INSERT INTO bookings (
+                parking_spot_id,
+                driver_user_id,
+                start_time,
+                end_time,
+                status,
+                pay_method,
+                total_price_gbp,
+                total_points,
+                payment_provider_ref
+            )
+             VALUES ($1,$2,$3,$4,'confirmed','money',$5,0,$6)
+             RETURNING id`,
+            [
+                spotIds["Kings Cross Weekly Garage"],
+                driverId,
+                weeklyBookingStart.toISOString(),
+                weeklyBookingEnd.toISOString(),
+                "84.00",
+                "pi_demo_paid_002",
+            ]
+        );
+
+        await client.query(
+            `INSERT INTO payments (booking_id, provider, provider_ref, status, amount_gbp)
+             VALUES
+                 ($1, 'stripe', 'ch_demo_paid_001', 'succeeded', 11.00),
+                 ($2, 'stripe', 'pi_demo_pending_001', 'created', 22.00),
+                 ($3, 'stripe', 'ch_demo_paid_002', 'succeeded', 84.00)`,
+            [
+                bookingMoneyConfirmedR.rows[0].id,
+                bookingMoneyPendingR.rows[0].id,
+                bookingWeeklyConfirmedR.rows[0].id,
+            ]
+        );
+
+        const acceptedAuctionStart = at(2, 18, 0);
+        const acceptedAuctionEnd = at(2, 22, 0);
+        const pendingAuctionMultiStart = at(4, 10, 0);
+        const pendingAuctionMultiEnd = at(6, 10, 0);
+        const pendingAuctionPointsStart = at(7, 9, 0);
+        const pendingAuctionPointsEnd = at(7, 17, 0);
+        const pendingBrixtonStart = at(5, 18, 0);
+        const pendingBrixtonEnd = at(5, 22, 0);
 
         await client.query(
             `INSERT INTO auction_bids (
                 parking_spot_id,
                 bidder_user_id,
                 amount_gbp,
-                status
+                amount_points,
+                pay_method,
+                status,
+                payment_intent_id,
+                start_time,
+                end_time
             )
-             VALUES ($1,$2,$3,$4)`,
-            [auctionSpotId, driverId, 5.5, "pending"]
+             VALUES
+                ($1,$2,18.00,0,'money','accepted','pi_demo_auction_accepted',$3,$4),
+                ($1,$2,48.00,0,'money','pending','pi_demo_auction_pending_multi',$5,$6),
+                ($1,$2,0.00,24,'points','pending',NULL,$7,$8),
+                ($9,$2,25.00,0,'money','pending','pi_demo_brixton_pending',$10,$11),
+                ($9,$2,19.50,0,'money','rejected','pi_demo_brixton_rejected',$12,$13)`,
+            [
+                spotIds["Soho Evening Auction Spot"],
+                driverId,
+                acceptedAuctionStart.toISOString(),
+                acceptedAuctionEnd.toISOString(),
+                pendingAuctionMultiStart.toISOString(),
+                pendingAuctionMultiEnd.toISOString(),
+                pendingAuctionPointsStart.toISOString(),
+                pendingAuctionPointsEnd.toISOString(),
+                spotIds["Brixton Market Auction Bay"],
+                pendingBrixtonStart.toISOString(),
+                pendingBrixtonEnd.toISOString(),
+                at(1, 12, 0).toISOString(),
+                at(1, 16, 0).toISOString(),
+            ]
+        );
+
+        await client.query(
+            `INSERT INTO reward_transactions (user_id, type, amount, reason, related_spot_id)
+             SELECT $1, 'earn', 5, 'listing_upload', id
+             FROM parking_spots
+             WHERE owner_user_id = $1`,
+            [ownerId]
+        );
+
+        await client.query(
+            `INSERT INTO reward_transactions (user_id, type, amount, reason, related_spot_id)
+             SELECT $1, 'earn', 2, 'listing_photo', id
+             FROM parking_spots
+             WHERE owner_user_id = $1`,
+            [ownerId]
+        );
+
+        await client.query(
+            `INSERT INTO reward_transactions (user_id, type, amount, reason, related_booking_id, related_spot_id)
+             VALUES
+                ($1, 'spend', 18, 'booking_with_points', $2, $3),
+                ($4, 'earn', 18, 'booking_points_received', $2, $3)`,
+            [
+                driverId,
+                bookingPointsConfirmedR.rows[0].id,
+                spotIds["Camden Multi-Space Lot"],
+                ownerId,
+            ]
         );
 
         await client.query("COMMIT");
+
         console.log("Seed complete.");
+        console.log("Demo owner: owner@demo.com / demo1234");
+        console.log("Demo driver: driver@demo.com / demo1234");
+        console.log(`Listings created: ${listingRows.length}`);
     } catch (e) {
         await client.query("ROLLBACK");
         throw e;

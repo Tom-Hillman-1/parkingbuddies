@@ -715,7 +715,7 @@ export default function DashboardPage() {
     }
 
     return (
-        <div className="container">
+        <div className="container dashboardPage">
             <div className="rowInline" style={{ alignItems: "flex-end", justifyContent: "space-between", gap: 20, marginTop: 10 }}>
                 <div className="pageHeader" style={{ textAlign: "left", marginBottom: 0 }}>
                     <div className="heroKicker">DASHBOARD</div>

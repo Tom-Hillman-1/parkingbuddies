@@ -493,7 +493,7 @@ label > span:first-child {
     align-content: center;
     justify-items: center;
     text-align: center;
-    gap: 1.45rem;
+    gap: 1.2rem;
     padding: clamp(3rem, 8vh, 5.2rem) clamp(1rem, 3vw, 2rem);
     border-radius: 26px;
     border: 1px solid #d6e2f4;
@@ -540,13 +540,13 @@ label > span:first-child {
 }
 
 .home-hero-city {
-    width: clamp(180px, 28vw, 340px);
-    margin-top: 0.75rem;
+    width: clamp(74px, 11.5vw, 136px);
+    margin-top: calc(0.75rem + 68px);
 }
 
 .home-hero-city-animation {
     width: 100%;
-    height: clamp(115px, 17vw, 220px);
+    height: clamp(46px, 6.9vw, 86px);
 }
 
 .home-hero-city-animation svg {
@@ -577,6 +577,9 @@ label > span:first-child {
     max-width: 19ch;
     font-size: clamp(2.2rem, 6vw, 4.2rem);
     line-height: 1.02;
+    margin-inline: auto;
+    text-align: center;
+    transform: translateY(18px);
 }
 
 .home-copy {
@@ -591,9 +594,9 @@ label > span:first-child {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 1rem;
+    gap: 0.85rem;
     margin-top: 0.5rem;
-    transform: translateY(10%);
+    transform: translateY(calc(8% + 30px));
 }
 
 .home-actions .btn {
@@ -668,21 +671,79 @@ label > span:first-child {
 }
 
 .spot-card {
+    --spot-accent: #2f6fed;
+    --spot-soft: #eaf2ff;
+    --spot-glow: rgba(47, 111, 237, 0.14);
+    --spot-sign: "P";
+    position: relative;
     display: grid;
     gap: 0.62rem;
-    border: 1px solid var(--line);
+    border: 1px solid #d7e2f2;
     border-radius: 12px;
-    background: var(--surface);
+    background:
+        radial-gradient(circle at 100% -10%, var(--spot-glow) 0%, transparent 48%),
+        linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
     padding: 0.72rem 0.75rem;
-    transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+    overflow: hidden;
+    transform-style: preserve-3d;
+    box-shadow: 0 2px 8px rgba(17, 21, 28, 0.05), 0 10px 18px rgba(17, 21, 28, 0.06);
+    transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.spot-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    background: var(--spot-accent, #2f6fed);
+}
+
+.spot-card::after {
+    content: var(--spot-sign);
+    position: absolute;
+    top: 0.5rem;
+    right: 0.55rem;
+    min-width: 1.35rem;
+    height: 1.35rem;
+    border-radius: 999px;
+    border: 1px solid rgba(19, 59, 130, 0.12);
+    background: rgba(255, 255, 255, 0.84);
+    color: var(--spot-accent, #2f6fed);
+    font-size: 0.68rem;
+    font-weight: 800;
+    line-height: 1.35rem;
+    text-align: center;
+    letter-spacing: 0.02em;
+    pointer-events: none;
+}
+
+.spot-card--rent {
+    --spot-accent: #2f6fed;
+    --spot-soft: #eaf2ff;
+    --spot-glow: rgba(47, 111, 237, 0.14);
+    --spot-sign: "P";
+}
+
+.spot-card--free {
+    --spot-accent: #2e9f79;
+    --spot-soft: #eaf8f2;
+    --spot-glow: rgba(46, 159, 121, 0.16);
+    --spot-sign: "F";
+}
+
+.spot-card--auction {
+    --spot-accent: #cc8a2f;
+    --spot-soft: #fff5e8;
+    --spot-glow: rgba(204, 138, 47, 0.16);
+    --spot-sign: "A";
 }
 
 .spot-card:hover,
 .spot-card:focus-within,
 .spot-card.is-active {
-    border-color: #9ec2f9;
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-xs);
+    border-color: var(--spot-accent, #2f6fed);
+    transform: translateY(-3px) rotateX(1deg);
+    box-shadow: 0 8px 18px rgba(17, 21, 28, 0.08), 0 20px 34px rgba(17, 21, 28, 0.1);
 }
 
 .spot-head {
@@ -697,16 +758,16 @@ label > span:first-child {
     justify-content: center;
     align-self: flex-start;
     border-radius: 999px;
-    border: 1px solid #cbe0ff;
-    background: #ecf4ff;
-    color: #0f5dcf;
+    border: 1px solid rgba(19, 59, 130, 0.14);
+    background: var(--spot-soft, #eaf2ff);
+    color: var(--spot-accent, #2f6fed);
     font-size: 0.72rem;
     font-weight: 800;
     line-height: 1.1;
-    text-align: center;
     white-space: nowrap;
     padding: 0.24rem 0.56rem;
     min-height: 1.6rem;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 .spot-copy {
@@ -720,10 +781,19 @@ label > span:first-child {
     gap: 0.36rem;
 }
 
+.spot-meta .badge:first-child {
+    border-color: rgba(19, 59, 130, 0.14);
+    background: var(--spot-soft, #eaf2ff);
+    color: var(--spot-accent, #2f6fed);
+}
+
+.spot-meta .badge:not(:first-child) {
+    background: #ffffff;
+}
+
 .spot-actions {
     display: flex;
     justify-content: flex-end;
-    margin-top: 0.12rem;
 }
 
 .spot-actions .btn {
@@ -1226,18 +1296,92 @@ label > span:first-child {
 }
 
 .aboutPanel {
+    --about-accent: #3f7ee8;
+    --about-glow: rgba(63, 126, 232, 0.12);
+    --about-sign: "P";
+    position: relative;
+    overflow: hidden;
     border-color: #d6e1f2;
-    background: #ffffff;
+    background:
+        radial-gradient(circle at 100% -14%, var(--about-glow) 0%, transparent 52%),
+        linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
+}
+
+.aboutPanel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+        120deg,
+        rgba(255, 255, 255, 0) 0 14px,
+        rgba(255, 255, 255, 0.54) 14px 16px
+    );
+    pointer-events: none;
+}
+
+.aboutPanel::after {
+    content: var(--about-sign);
+    position: absolute;
+    top: 0.75rem;
+    right: 0.86rem;
+    min-width: 1.48rem;
+    height: 1.48rem;
+    border-radius: 999px;
+    border: 1px solid rgba(19, 59, 130, 0.12);
+    background: rgba(255, 255, 255, 0.88);
+    color: var(--about-accent);
+    font-size: 0.72rem;
+    font-weight: 800;
+    line-height: 1.48rem;
+    text-align: center;
+    letter-spacing: 0.03em;
+    pointer-events: none;
+}
+
+.aboutPanel > * {
+    position: relative;
+    z-index: 1;
+}
+
+.aboutPanel .aboutKicker {
+    color: var(--about-accent);
 }
 
 .aboutHero {
+    --about-accent: #2f6fed;
+    --about-glow: rgba(47, 111, 237, 0.16);
+    --about-sign: "PB";
     display: grid;
     gap: 0.8rem;
     border-color: #d2deef;
     background:
-        linear-gradient(180deg, #ffffff 0%, #f8faff 100%),
-        radial-gradient(circle at 84% 0%, rgba(86, 154, 255, 0.08) 0%, transparent 34%);
+        radial-gradient(circle at 84% 0%, rgba(86, 154, 255, 0.1) 0%, transparent 36%),
+        linear-gradient(180deg, #ffffff 0%, #f8faff 100%);
     padding: 1.28rem;
+}
+
+.aboutPanel--drivers {
+    --about-accent: #2f6fed;
+    --about-glow: rgba(47, 111, 237, 0.14);
+    --about-sign: "P";
+}
+
+.aboutPanel--owners {
+    --about-accent: #2e9f79;
+    --about-glow: rgba(46, 159, 121, 0.16);
+    --about-sign: "R";
+}
+
+.aboutPanel--story {
+    --about-accent: #cc8a2f;
+    --about-glow: rgba(204, 138, 47, 0.16);
+    --about-sign: "A";
+}
+
+.aboutPanel--contact {
+    --about-accent: #6076a2;
+    --about-glow: rgba(96, 118, 162, 0.16);
+    --about-sign: "?";
 }
 
 .aboutHero .aboutTitle {
@@ -1571,6 +1715,442 @@ label > span:first-child {
 
 .settingsGrid {
     gap: 0.72rem;
+}
+
+.createListingPage,
+.settingsPage,
+.dashboardPage {
+    display: grid;
+    gap: 1rem;
+}
+
+.createListingPage .formNarrow {
+    width: min(840px, 100%);
+    margin-inline: auto;
+}
+
+.createListingPage .pageHeader,
+.settingsPage .pageHeader,
+.dashboardPage .pageHeader {
+    margin-bottom: 0.45rem;
+}
+
+.createListingPage .formSection,
+.settingsPage .formSection,
+.dashboardPage .formSection,
+.dashboardPage .dashItem,
+.createListingPage .listingTypeCard,
+.createListingPage .pointsQuickCard {
+    --surface-glow: rgba(63, 126, 232, 0.14);
+    border: 1px solid #d6e2f4;
+    background:
+        radial-gradient(circle at 100% -14%, var(--surface-glow) 0%, transparent 52%),
+        linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    box-shadow: 0 6px 16px rgba(16, 24, 40, 0.06);
+}
+
+.createListingPage .formSection--intro {
+    --surface-glow: rgba(47, 111, 237, 0.15);
+}
+
+.createListingPage .formSection--type {
+    --surface-glow: rgba(46, 159, 121, 0.15);
+}
+
+.createListingPage .formSection--availability {
+    --surface-glow: rgba(96, 118, 162, 0.16);
+}
+
+.createListingPage .formSection--setupPricing {
+    --surface-glow: rgba(204, 138, 47, 0.16);
+}
+
+.createListingPage .formSection--location {
+    --surface-glow: rgba(47, 111, 237, 0.15);
+}
+
+.createListingPage .formSection--media {
+    --surface-glow: rgba(96, 118, 162, 0.16);
+}
+
+.createListingPage .listingTypeCard--rent {
+    --surface-glow: rgba(47, 111, 237, 0.14);
+}
+
+.createListingPage .listingTypeCard--auction {
+    --surface-glow: rgba(204, 138, 47, 0.16);
+}
+
+.createListingPage .listingTypeCard--free {
+    --surface-glow: rgba(46, 159, 121, 0.16);
+}
+
+.createListingPage .listingTypeCard.is-active,
+.createListingPage .listingTypeCard--rent.is-active,
+.createListingPage .listingTypeCard--auction.is-active,
+.createListingPage .listingTypeCard--free.is-active {
+    border-color: #8fb7f3;
+    box-shadow:
+        0 0 0 3px rgba(80, 143, 232, 0.2),
+        0 8px 18px rgba(16, 24, 40, 0.08);
+}
+
+.createListingPage .pointsQuickCard {
+    --surface-glow: rgba(96, 118, 162, 0.14);
+}
+
+.settingsPage .settingsPanel--profile {
+    --surface-glow: rgba(47, 111, 237, 0.15);
+}
+
+.settingsPage .settingsPanel--security {
+    --surface-glow: rgba(96, 118, 162, 0.16);
+}
+
+.settingsPage .settingsPanel--payouts {
+    --surface-glow: rgba(46, 159, 121, 0.16);
+}
+
+.dashboardPage .dashboardTopActions {
+    margin: 0.1rem 0 1rem;
+}
+
+.dashboardPage .dashboardNavBtn {
+    --surface-glow: rgba(96, 118, 162, 0.12);
+    border-color: #d6e2f4;
+    box-shadow: 0 6px 14px rgba(16, 24, 40, 0.06);
+    background:
+        radial-gradient(circle at 100% -14%, var(--surface-glow) 0%, transparent 54%),
+        linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.dashboardPage .dashboardNavBtn.is-active {
+    border-color: #8fb7f3;
+    color: #134ea3;
+    box-shadow: 0 0 0 3px rgba(80, 143, 232, 0.16), 0 10px 18px rgba(16, 24, 40, 0.08);
+}
+
+.dashboardPage .dashboardNavBtn--driver {
+    --surface-glow: rgba(86, 168, 255, 0.16);
+}
+
+.dashboardPage .dashboardNavBtn--owner {
+    --surface-glow: rgba(46, 159, 121, 0.16);
+    border-left-color: #2e9f79;
+}
+
+.dashboardPage .dashboardNavBtn--payments {
+    --surface-glow: rgba(204, 138, 47, 0.16);
+    border-left-color: #cc8a2f;
+}
+
+.dashboardPage .dashboardNavBtn--driver.is-active {
+    border-color: #8fb7f3;
+    color: #134ea3;
+    box-shadow: 0 0 0 3px rgba(80, 143, 232, 0.16), 0 10px 18px rgba(16, 24, 40, 0.08);
+}
+
+.dashboardPage .dashboardNavBtn--owner.is-active {
+    border-color: #9cd6c4;
+    color: #1b7a58;
+    box-shadow: 0 0 0 3px rgba(46, 159, 121, 0.16), 0 10px 18px rgba(16, 24, 40, 0.08);
+}
+
+.dashboardPage .dashboardNavBtn--payments.is-active {
+    border-color: #e8c891;
+    color: #8f5f00;
+    box-shadow: 0 0 0 3px rgba(204, 138, 47, 0.16), 0 10px 18px rgba(16, 24, 40, 0.08);
+}
+
+.dashboardPage .sectionHeader--driver {
+    border-left-color: #56a8ff;
+}
+
+.dashboardPage .sectionHeader--owner {
+    border-left-color: #2e9f79;
+}
+
+.dashboardPage .sectionHeader--payments,
+.dashboardPage .sectionHeader--rewards {
+    border-left-color: #cc8a2f;
+}
+
+.dashboardPage .sectionHeader--driver .sectionDot {
+    background: #56a8ff;
+}
+
+.dashboardPage .sectionHeader--owner .sectionDot {
+    background: #2e9f79;
+}
+
+.dashboardPage .sectionHeader--payments .sectionDot,
+.dashboardPage .sectionHeader--rewards .sectionDot {
+    background: #cc8a2f;
+}
+
+.dashboardPage .dashboardGroup--bookings .formSection {
+    --surface-glow: rgba(86, 168, 255, 0.16);
+}
+
+.dashboardPage .dashboardGroup--listings .formSection {
+    --surface-glow: rgba(46, 159, 121, 0.16);
+}
+
+.dashboardPage .dashboardGroup--transactions .formSection {
+    --surface-glow: rgba(204, 138, 47, 0.16);
+}
+
+.dashboardPage .dashboardPanel .card.formSection {
+    border: 1px solid #d6e2f4;
+    box-shadow: 0 6px 16px rgba(16, 24, 40, 0.06);
+}
+
+.dashboardPage .dashItem--driver {
+    --surface-glow: rgba(86, 168, 255, 0.15);
+}
+
+.dashboardPage .dashItem--owner {
+    --surface-glow: rgba(46, 159, 121, 0.16);
+}
+
+.dashboardPage .dashItem--payments {
+    --surface-glow: rgba(204, 138, 47, 0.16);
+}
+
+.dashboardPage .dashItem--rewards {
+    --surface-glow: rgba(189, 127, 44, 0.15);
+}
+
+.settingsPage .settingRow,
+.dashboardPage .settingRow,
+.createListingPage .mapWrap,
+.createListingPage .listingImagePreviewWrap,
+.createListingPage .addressSuggestList {
+    border-color: #d6e2f4;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.spotSimple {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    align-items: start;
+    gap: 1rem;
+}
+
+.spotSimpleSide,
+.spotSimpleMain,
+.spotSimpleMedia,
+.spotSimpleInfo,
+.spotSimpleAction,
+.spotSimpleBidList {
+    display: grid;
+    gap: 0.72rem;
+}
+
+.spotSimpleHeader {
+    border: 1px solid #d8e4f5;
+    background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+
+.spotSimpleHeader--closed {
+    border-color: #f0c8c8;
+    background: linear-gradient(180deg, #ffffff, #fff4f4);
+}
+
+.spotSimpleBadges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.6rem;
+}
+
+.spotSimpleInfo {
+    border: 1px solid var(--line);
+    background: #fff;
+}
+
+.spotSimpleInfoRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    padding: 0.44rem 0;
+    border-bottom: 1px solid #eef2f8;
+}
+
+.spotSimpleInfoRow:last-child {
+    border-bottom: 0;
+}
+
+.spotSimpleAction {
+    border: 1px solid var(--line);
+    background: #fff;
+}
+
+.spotSimpleFormGrid {
+    display: grid;
+    gap: 0.65rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.spotSimpleInlineMeta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.65rem;
+}
+
+.spotSimpleBid {
+    border: 1px solid #dbe4f2;
+    border-radius: 10px;
+    background: #fbfdff;
+    padding: 0.58rem 0.66rem;
+    display: grid;
+    gap: 0.35rem;
+}
+
+.spotSimpleBid.pending {
+    border-color: #f2ddbc;
+    background: #fff9ee;
+}
+
+.spotSimpleBid.accepted,
+.spotSimpleBid.won {
+    border-color: #b8e6ca;
+    background: #f1fbf5;
+}
+
+.spotSimpleBid.rejected,
+.spotSimpleBid.declined {
+    border-color: #f0cbcb;
+    background: #fff2f2;
+}
+
+.slotCal {
+    display: grid;
+    gap: 0.45rem;
+}
+
+.slotCalHead {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 0.35rem;
+    color: #617088;
+    font-size: 0.76rem;
+    font-weight: 700;
+    text-align: center;
+}
+
+.slotCalGrid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 0.38rem;
+}
+
+.slotCalBlank {
+    min-height: 64px;
+}
+
+.slotCalDay {
+    min-height: 64px;
+    border: 1px solid #dbe4f2;
+    border-radius: 10px;
+    background: #fff;
+    display: grid;
+    align-content: space-between;
+    justify-items: center;
+    gap: 0.2rem;
+    padding: 0.38rem 0.3rem;
+}
+
+.slotCalDay:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.slotCalDay--selected {
+    border-color: #90b8f6;
+    box-shadow: 0 0 0 2px rgba(80, 143, 232, 0.22);
+}
+
+.slotCalDay--range {
+    background: #f7fbff;
+}
+
+.slotCalNum {
+    font-weight: 800;
+    line-height: 1;
+}
+
+.slotCalMonth {
+    font-size: 0.68rem;
+    color: #6a7a91;
+}
+
+.slotCalDot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+}
+
+.slotCalDot--ok {
+    background: #2e9462;
+}
+
+.slotCalDot--off {
+    background: #c9d3e4;
+}
+
+.slotCalFillWrap {
+    width: 100%;
+    height: 4px;
+    border-radius: 99px;
+    background: #e9f0fb;
+    overflow: hidden;
+}
+
+.slotCalFill {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, #61a2ff, #3f83f4);
+    border-radius: 99px;
+}
+
+.slotDialogBackdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgba(9, 19, 39, 0.4);
+}
+
+.slotDialog {
+    width: min(420px, 100%);
+    display: grid;
+    gap: 0.68rem;
+}
+
+.slotDialogChoices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.42rem;
+}
+
+.slotChip {
+    border: 1px solid #d0ddf3;
+    border-radius: 999px;
+    background: #fff;
+    color: #456188;
+    font-weight: 700;
+    padding: 0.34rem 0.64rem;
+}
+
+.slotChip--active {
+    border-color: #9fc2f8;
+    background: #edf4ff;
+    color: #145dc8;
 }
 
 .spotDetails {
@@ -1923,7 +2503,7 @@ label > span:first-child {
 
     .home-hero {
         min-height: auto;
-        gap: 1.1rem;
+        gap: 1rem;
         padding: clamp(2.2rem, 7vw, 3.2rem) 1rem;
         border-radius: 20px;
     }
@@ -1933,16 +2513,17 @@ label > span:first-child {
     }
 
     .home-hero-city {
-        width: clamp(150px, 52vw, 270px);
-        margin-top: 0.5rem;
+        width: clamp(62px, 20vw, 108px);
+        margin-top: calc(0.5rem + 66px);
     }
 
     .home-actions {
-        transform: translateY(6%);
+        transform: translateY(calc(5% + 28px));
     }
 
     .home-content,
-    .spotDetails {
+    .spotDetails,
+    .spotSimple {
         grid-template-columns: minmax(0, 1fr);
     }
 
@@ -1971,6 +2552,10 @@ label > span:first-child {
     .spotMapWrap .leafletShell,
     .spotMapWrap .leafletMap {
         height: 300px;
+    }
+
+    .spotSimpleFormGrid {
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .dashboardLayout {

@@ -64,7 +64,7 @@ export default function AboutPage() {
             </section>
 
             <section className="aboutSectionGrid">
-                <article className="card aboutPanel">
+                <article className="card aboutPanel aboutPanel--drivers">
                     <div className="aboutKicker">FOR DRIVERS</div>
                     <h2 className="aboutCardTitle">How booking works</h2>
                     <p className="aboutCardCopy">
@@ -77,7 +77,7 @@ export default function AboutPage() {
                     </ol>
                 </article>
 
-                <article className="card aboutPanel">
+                <article className="card aboutPanel aboutPanel--owners">
                     <div className="aboutKicker">FOR OWNERS</div>
                     <h2 className="aboutCardTitle">How listings and auctions work</h2>
                     <p className="aboutCardCopy">
@@ -91,7 +91,7 @@ export default function AboutPage() {
                     </ul>
                 </article>
 
-                <article className="card aboutPanel aboutPanel--wide">
+                <article className="card aboutPanel aboutPanel--wide aboutPanel--story">
                     <div className="aboutKicker">HOW IT CAME TO BE</div>
                     <h2 className="aboutCardTitle">A dissertation project built around a real daily problem</h2>
                     <p className="aboutCardCopy">
@@ -105,7 +105,7 @@ export default function AboutPage() {
                 </article>
             </section>
 
-            <section className="card aboutPanel aboutHelpCard">
+            <section className="card aboutPanel aboutHelpCard aboutPanel--contact">
                 <div className="aboutKicker">CONTACT</div>
                 <h2 className="aboutCardTitle">Questions about booking, listings, or auctions?</h2>
                 <p className="aboutBody">

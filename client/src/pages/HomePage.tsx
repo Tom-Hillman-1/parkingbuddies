@@ -348,7 +348,7 @@ export default function HomePage() {
                                     key={spot.id}
                                     role="listitem"
                                     tabIndex={0}
-                                    className={`spot-card${active ? " is-active" : ""}`}
+                                    className={`spot-card spot-card--${spot.mode}${active ? " is-active" : ""}`}
                                     onFocus={() => setSelectedId(spot.id)}
                                     onMouseEnter={() => {
                                         setHoveredId(spot.id);

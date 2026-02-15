@@ -253,7 +253,7 @@ export default function SettingsPage() {
 
 
     return (
-        <div className="container">
+        <div className="container settingsPage">
             <div className="pageHeader">
                 <div className="heroKicker">SETTINGS</div>
                 <div className="heroTitle">Account settings</div>
@@ -267,7 +267,7 @@ export default function SettingsPage() {
             {!loading && (
                 <div className="settingsGrid">
                     <div className="settingsStack">
-                        <div className="card formSection">
+                        <div className="card formSection settingsPanel settingsPanel--profile">
                             <div className="sectionHeader sectionHeader--driver">
                                 <div className="sectionHeaderTitle">
                                     <span className="sectionDot" />
@@ -314,7 +314,7 @@ export default function SettingsPage() {
                             </div>
                         </div>
 
-                        <div className="card formSection">
+                        <div className="card formSection settingsPanel settingsPanel--security">
                             <div className="sectionHeader sectionHeader--payments">
                                 <div className="sectionHeaderTitle">
                                     <span className="sectionDot" />
@@ -389,7 +389,7 @@ export default function SettingsPage() {
                     <div className="settingsStack">
 
 
-                        <div className="card formSection">
+                        <div className="card formSection settingsPanel settingsPanel--payouts">
                             <div className="sectionHeader sectionHeader--payments">
                                 <div className="sectionHeaderTitle">
                                     <span className="sectionDot" />
