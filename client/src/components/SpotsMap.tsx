@@ -1,77 +1,64 @@
+﻿import { useEffect, useRef } from "react";
+import type { Marker as LeafletMarker } from "leaflet";
 import L from "leaflet";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
-import type { ParkingSpot } from "../types";
+import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import { Link } from "react-router-dom";
+import type { ParkingSpot } from "../types";
 
-// Fix default marker icons in Vite builds
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
+type PinState = "default" | "hovered" | "selected";
 
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-    iconRetinaUrl: markerIcon2x,
-    iconUrl: markerIcon,
-    shadowUrl: markerShadow,
-});
-
-const defaultIcon = new L.Icon.Default();
-
-const selectedIcon = new L.Icon({
-    iconRetinaUrl: markerIcon2x,
-    iconUrl: markerIcon,
-    shadowUrl: markerShadow,
-    iconSize: [30, 46],
-    iconAnchor: [15, 46],
-    popupAnchor: [0, -40],
-    shadowSize: [41, 41],
-});
-
-const hoverIcon = new L.Icon({
-    iconRetinaUrl: markerIcon2x,
-    iconUrl: markerIcon,
-    shadowUrl: markerShadow,
-    iconSize: [26, 40],
-    iconAnchor: [13, 40],
-    popupAnchor: [0, -36],
-    shadowSize: [38, 38],
-});
-
-function moneyLabel(x: any, mode?: string) {
-    if (mode === "auction") return "Auction";
-    const n = Number(x ?? 0);
-    if (!Number.isFinite(n) || n <= 0) return "Free";
-    return `£${n.toFixed(2)}`;
+function makePin(state: PinState) {
+    return L.divIcon({
+        className: "",
+        html: `<span class="map-pin map-pin--${state}" aria-hidden="true"></span>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+        popupAnchor: [0, -12],
+    });
 }
 
-function modeLabel(mode?: string) {
+const pinIcon = {
+    default: makePin("default"),
+    hovered: makePin("hovered"),
+    selected: makePin("selected"),
+};
+
+function moneyLabel(value: number | string | null | undefined, mode?: ParkingSpot["mode"]) {
+    const amount = Number(value ?? 0);
+
+    if (mode === "auction") {
+        if (!Number.isFinite(amount) || amount <= 0) return "Bid now";
+        return `Bid from \u00A3${amount.toFixed(1)}`;
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) return "Free";
+    return `\u00A3${amount.toFixed(2)}`;
+}
+
+function modeLabel(mode?: ParkingSpot["mode"]) {
     if (!mode) return "Unknown";
     return mode.charAt(0).toUpperCase() + mode.slice(1);
 }
 
-
 function Recenter({ center }: { center: { lat: number; lng: number } }) {
     const map = useMap();
-    // Only recenter if user isn't actively dragging/zooming (simple safeguard)
-    // and avoid jitter by using setView without changing zoom.
-    React.useEffect(() => {
-        const z = map.getZoom();
-        map.setView([center.lat, center.lng], z, { animate: true });
-    }, [center.lat, center.lng]);
+
+    useEffect(() => {
+        const zoom = map.getZoom();
+        map.setView([center.lat, center.lng], zoom, { animate: true });
+    }, [map, center.lat, center.lng]);
+
     return null;
 }
 
-// React isn't imported above (Vite + TS sometimes needs it for hooks in this file)
-import React from "react";
-
 export default function SpotsMap({
-                                     spots,
-                                     center = { lat: 51.5074, lng: -0.1278 },
-                                     selectedId,
-                                     hoveredId,
-                                     onSelect,
-                                     onHover,
-                                 }: {
+    spots,
+    center = { lat: 51.5074, lng: -0.1278 },
+    selectedId,
+    hoveredId,
+    onSelect,
+    onHover,
+}: {
     spots: ParkingSpot[];
     center?: { lat: number; lng: number };
     selectedId?: string | null;
@@ -79,57 +66,88 @@ export default function SpotsMap({
     onSelect?: (id: string) => void;
     onHover?: (id: string | null) => void;
 }) {
+    const markerRefs = useRef<Record<string, LeafletMarker | null>>({});
+    const previousHoveredId = useRef<string | null>(null);
+
+    useEffect(() => {
+        if (!selectedId) return;
+        markerRefs.current[selectedId]?.openPopup();
+    }, [selectedId, spots]);
+
+    useEffect(() => {
+        const previous = previousHoveredId.current;
+
+        if (previous && previous !== hoveredId && previous !== selectedId) {
+            markerRefs.current[previous]?.closePopup();
+        }
+
+        if (hoveredId && hoveredId !== selectedId) {
+            markerRefs.current[hoveredId]?.openPopup();
+        }
+
+        previousHoveredId.current = hoveredId ?? null;
+    }, [hoveredId, selectedId]);
+
     return (
         <div className="leafletShell">
-            <MapContainer center={[center.lat, center.lng]} zoom={13} className="leafletMap">
+            <MapContainer center={[center.lat, center.lng]} zoom={13} className="leafletMap" zoomControl={false}>
                 <Recenter center={center} />
 
                 <TileLayer
-                    attribution='&copy; OpenStreetMap contributors'
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                    url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                 />
 
-                {spots.map((s) => {
-                    const isSelected = selectedId === s.id;
-                    const isHovered = hoveredId === s.id;
-                    const capacity = Math.max(1, Number((s as any).capacity_total ?? 1));
-                    const leftRaw = Number((s as any).capacity_available);
+                {spots.map((spot) => {
+                    const isSelected = selectedId === spot.id;
+                    const isHovered = hoveredId === spot.id;
+                    const capacity = Math.max(1, Number(spot.capacity_total ?? 1));
+                    const leftRaw = Number(spot.capacity_available);
                     const left = Number.isFinite(leftRaw) ? Math.max(0, leftRaw) : null;
-                    // IMPORTANT: never pass icon={undefined}
-                    const iconProps = isSelected ? { icon: selectedIcon } : isHovered ? { icon: hoverIcon } : { icon: defaultIcon };
+
+                    const icon = isSelected
+                        ? pinIcon.selected
+                        : isHovered
+                            ? pinIcon.hovered
+                            : pinIcon.default;
 
                     return (
                         <Marker
-                            key={s.id}
-                            position={[s.lat, s.lng]}
-                            {...iconProps}
+                            key={spot.id}
+                            position={[spot.lat, spot.lng]}
+                            icon={icon}
+                            ref={(instance) => {
+                                markerRefs.current[spot.id] = instance;
+                            }}
                             eventHandlers={{
-                                click: () => onSelect?.(s.id),
-                                mouseover: (e) => {
-                                    onHover?.(s.id);
-                                    e.target.openPopup();
+                                click: (event) => {
+                                    onSelect?.(spot.id);
+                                    onHover?.(spot.id);
+                                    event.target.openPopup();
                                 },
-                                mouseout: (e) => {
+                                mouseover: (event) => {
+                                    onHover?.(spot.id);
+                                    event.target.openPopup();
+                                },
+                                mouseout: (event) => {
                                     onHover?.(null);
-                                    e.target.closePopup();
+                                    if (!isSelected) {
+                                        event.target.closePopup();
+                                    }
                                 },
                             }}
                         >
-                            <Popup>
-                                <div style={{ maxWidth: 240 }}>
-                                    <div style={{ fontWeight: 800 }}>{s.title}</div>
-                                    <div style={{ fontSize: 12, opacity: 0.8 }}>{s.address_text}</div>
-                                    <div style={{ marginTop: 6 }}>
-                                        {moneyLabel((s as any).price_gbp, s.mode)} • {modeLabel(s.mode)}
+                            <Popup className="map-popup">
+                                <div className="map-popup__body">
+                                    <div className="map-popup__title">{spot.title}</div>
+                                    <div className="map-popup__address">{spot.address_text}</div>
+                                    <div className="map-popup__meta">
+                                        {moneyLabel(spot.price_gbp, spot.mode)} | {modeLabel(spot.mode)}
                                     </div>
                                     {capacity > 1 && left != null && (
-                                        <div style={{ marginTop: 4, fontSize: 12, opacity: 0.85 }}>
-                                            {left}/{capacity} spots left
-                                        </div>
+                                        <div className="map-popup__meta">{left}/{capacity} spots left</div>
                                     )}
-                                    <div style={{ marginTop: 10 }}>
-                                        <Link to={`/spots/${s.id}`}>View details</Link>
-                                    </div>
+                                    <Link to={`/spots/${spot.id}`} className="map-popup__link">View details</Link>
                                 </div>
                             </Popup>
                         </Marker>

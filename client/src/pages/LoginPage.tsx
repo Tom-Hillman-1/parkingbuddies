@@ -1,28 +1,21 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import logoFull from "../assets/logo.png";
+
+const remembered = localStorage.getItem("pb_remember") === "true";
 
 export default function LoginPage() {
     const { login } = useAuth();
     const nav = useNavigate();
+    const [searchParams] = useSearchParams();
 
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
+    const [email, setEmail] = useState(() => (remembered ? localStorage.getItem("pb_email") ?? "" : ""));
+    const [password, setPassword] = useState(() => (remembered ? localStorage.getItem("pb_password") ?? "" : ""));
     const [msg, setMsg] = useState<string | null>(null);
     const [showPass, setShowPass] = useState(false);
-    const [remember, setRemember] = useState(true);
-
-    useEffect(() => {
-        const savedRemember = localStorage.getItem("pb_remember") === "true";
-        const savedEmail = localStorage.getItem("pb_email") ?? "";
-        const savedPass = localStorage.getItem("pb_password") ?? "";
-        if (savedRemember) {
-            setRemember(true);
-            if (savedEmail) setEmail(savedEmail);
-            if (savedPass) setPassword(savedPass);
-        }
-    }, []);
+    const [remember, setRemember] = useState(remembered);
+    const next = searchParams.get("next");
+    const redirectTarget = next && next.startsWith("/") ? next : "/";
 
     async function onSubmit(e: React.FormEvent) {
         e.preventDefault();
@@ -39,7 +32,7 @@ export default function LoginPage() {
                 localStorage.removeItem("pb_email");
                 localStorage.removeItem("pb_password");
             }
-            nav("/");
+            nav(redirectTarget);
         } catch (err) {
             setMsg(err instanceof Error ? err.message : "Login failed");
         }
@@ -49,15 +42,12 @@ export default function LoginPage() {
 
     return (
         <div className="container authPage">
-            <div className="pageHeaderWithLogo">
-                <div className="pageHeader">
-                    <div className="heroKicker">WELCOME BACK</div>
-                    <div className="heroTitle">Log in to ParkingBuddies</div>
-                    <div className="heroSub muted">
-                        Jump back into your bookings, listings, and rewards.
-                    </div>
+            <div className="pageHeader authPageHeader">
+                <div className="heroKicker">WELCOME BACK</div>
+                <div className="heroTitle">Log in to ParkingBuddies</div>
+                <div className="heroSub muted">
+                    Jump back into your bookings, listings, and rewards.
                 </div>
-                <img className="pageHeaderLogo" src={logoFull} alt="ParkingBuddies logo" />
             </div>
 
             <div className="authGrid authGrid--single">
@@ -90,7 +80,7 @@ export default function LoginPage() {
                                     onChange={(e) => setPassword(e.target.value)}
                                     type={showPass ? "text" : "password"}
                                     autoComplete="current-password"
-                                    placeholder="••••••••"
+                                    placeholder="Enter your password"
                                     required
                                 />
                                 <button type="button" className="btn" onClick={() => setShowPass((v) => !v)}>

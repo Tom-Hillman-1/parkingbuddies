@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import logoFull from "../assets/logo.png";
 
 export default function SignupPage() {
     const { signup } = useAuth();
@@ -25,7 +24,6 @@ export default function SignupPage() {
             return;
         }
 
-        // Minimal password requirements (PDD #9 style check)
         if (password.length < 8) {
             setMsg("Password must be at least 8 characters.");
             return;
@@ -63,21 +61,18 @@ export default function SignupPage() {
 
     return (
         <div className="container authPage">
-            <div className="pageHeaderWithLogo">
-                <div className="pageHeader">
-                    <div className="heroKicker">GET STARTED</div>
-                    <div className="heroTitle">Create your ParkingBuddies account</div>
-                    <div className="heroSub muted">
-                        Set up your profile, list spaces, and start booking in minutes.
-                    </div>
+            <div className="pageHeader authPageHeader">
+                <div className="heroKicker">GET STARTED</div>
+                <div className="heroTitle">Create your ParkingBuddies account</div>
+                <div className="heroSub muted">
+                    Set up your profile, list spaces, and start booking in minutes.
                 </div>
-                <img className="pageHeaderLogo" src={logoFull} alt="ParkingBuddies logo" />
             </div>
 
             <div className="authGrid authGrid--single">
                 <div className="card authCard">
                     <div className="h2">Sign up</div>
-                    <div className="muted tiny">We’ll use this info to personalize your dashboard.</div>
+                    <div className="muted tiny">We'll use this info to personalize your dashboard.</div>
 
                     {msg && <div className="card formSection" style={{ color: "crimson" }}>{msg}</div>}
 

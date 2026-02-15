@@ -1,1060 +1,362 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import SpotsMap from "../components/SpotsMap";
 import { apiGet } from "../lib/api";
 import type { ParkingSpot } from "../types";
-import SpotsMap from "../components/SpotsMap";
-import logoImg from "../assets/logo.png";
 
-type UserLoc = { lat: number; lng: number } | null;
 type SortMode = "distance" | "price_low" | "price_high";
-type ViewMode = "split" | "list" | "map";
+type ModeFilter = Record<ParkingSpot["mode"], boolean>;
 
-type Booking = {
-    id: string;
-    parking_spot_id: string;
-    start_time: string;
-    end_time: string;
-    status: string;
-};
+const LONDON = { lat: 51.5074, lng: -0.1278 };
 
-function toMoney(x: any) {
-    const n = Number(x ?? 0);
+function toNumber(value: unknown) {
+    const n = Number(value ?? 0);
     return Number.isFinite(n) ? n : 0;
 }
 
+function priceValue(spot: ParkingSpot) {
+    if (spot.mode === "free") return 0;
+    return Math.max(0, toNumber(spot.price_gbp));
+}
+
+function priceLabel(spot: ParkingSpot) {
+    const price = priceValue(spot);
+    const unit = String(spot.price_unit ?? "hour");
+
+    if (spot.mode === "auction") {
+        return `Bid from \u00A3${price.toFixed(1)}`;
+    }
+    if (price <= 0) return "Free";
+    return `\u00A3${price.toFixed(2)} / ${unit}`;
+}
+
+function modeLabel(mode: ParkingSpot["mode"]) {
+    return mode.charAt(0).toUpperCase() + mode.slice(1);
+}
+
 function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
-    const R = 6371;
+    const earthKm = 6371;
     const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-    const dLon = ((b.lng - a.lng) * Math.PI) / 180;
-    const la1 = (a.lat * Math.PI) / 180;
-    const la2 = (b.lat * Math.PI) / 180;
+    const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+    const lat1 = (a.lat * Math.PI) / 180;
+    const lat2 = (b.lat * Math.PI) / 180;
+
     const x =
         Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    return 2 * R * Math.asin(Math.sqrt(x));
-}
+        Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
 
-function availabilityLabel(spot: ParkingSpot) {
-    const rules = extractAvailabilityRules(spot);
-    if (!rules.length) return "Limited";
-
-    const isAllDay = isExplicitAllDay(spot, rules);
-    if (isAllDay) return "24/7";
-
-    const today = new Date().getDay();
-    const todaysRules = rules.filter((r) => r.dow === today);
-    return todaysRules.length ? "Available today" : "Limited";
-}
-
-function estimateTotalForDuration(spot: ParkingSpot, durationMinutes: number) {
-    const unit = (spot as any).price_unit ?? "hour";
-    const price = toMoney((spot as any).price_gbp);
-    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return 0;
-    if (spot.mode === "auction") return 0;
-    if (spot.mode === "free" || price <= 0) return 0;
-
-    const minutes = durationMinutes;
-    if (unit === "hour") {
-        const roundedMinutes = Math.max(5, Math.ceil(minutes / 5) * 5);
-        const units = roundedMinutes / 60;
-        return price * units;
-    }
-    if (unit === "day") {
-        const units = Math.max(1, Math.ceil(minutes / (60 * 24)));
-        return price * units;
-    }
-    if (unit === "week") {
-        const units = Math.max(1, Math.ceil(minutes / (60 * 24 * 7)));
-        return price * units;
-    }
-    return price;
-}
-
-function getSpotCapacity(spot: ParkingSpot) {
-    const capacity = Number((spot as any).capacity_total ?? 1);
-    return Math.max(1, Number.isFinite(capacity) ? capacity : 1);
-}
-
-function countOverlappingBookings(bookings: Booking[], start: Date, end: Date) {
-    let count = 0;
-    for (const b of bookings) {
-        const bs = new Date(b.start_time);
-        const be = new Date(b.end_time);
-        if (Number.isNaN(bs.getTime()) || Number.isNaN(be.getTime())) continue;
-        if (bs < end && be > start) count += 1;
-    }
-    return count;
-}
-
-function getAuctionEndMs(spot: ParkingSpot) {
-    const raw = (spot as any).auction_end;
-    if (!raw) return null;
-    const ms = new Date(raw).getTime();
-    return Number.isFinite(ms) ? ms : null;
-}
-
-function getListingExpiryMs(spot: ParkingSpot) {
-    const jsonDateTo = (spot as any)?.availability_json?.date_to;
-    if (typeof jsonDateTo === "string" && /^\d{4}-\d{2}-\d{2}$/.test(jsonDateTo)) {
-        const ms = new Date(`${jsonDateTo}T23:59:59`).getTime();
-        if (Number.isFinite(ms)) return ms;
-    }
-    const legacyEnd = (spot as any)?.availability_end;
-    if (legacyEnd) {
-        const ms = new Date(legacyEnd).getTime();
-        if (Number.isFinite(ms)) return ms;
-    }
-    return null;
+    return 2 * earthKm * Math.asin(Math.sqrt(x));
 }
 
 export default function HomePage() {
-    const location = useLocation();
-    const navigate = useNavigate();
     const [spots, setSpots] = useState<ParkingSpot[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    // UI state
-    const [q, setQ] = useState("");
+    const [query, setQuery] = useState("");
     const [sort, setSort] = useState<SortMode>("distance");
-    const [maxPrice, setMaxPrice] = useState<number>(0);
-    const [onlyFree, setOnlyFree] = useState(false);
-    const [modes, setModes] = useState<{ free: boolean; rent: boolean; auction: boolean }>({
-        free: true,
-        rent: true,
-        auction: true,
-    });
-    const [viewMode, setViewMode] = useState<ViewMode>("split");
-    const [sortOpen, setSortOpen] = useState(false);
-    const [timeFilterOpen, setTimeFilterOpen] = useState(false);
-    const [viewOpen, setViewOpen] = useState(false);
-    const [desiredDate, setDesiredDate] = useState("");
-    const [desiredTime, setDesiredTime] = useState("");
-    const [desiredDuration, setDesiredDuration] = useState(60);
-
-    // Applied filters (only update when user presses Search)
-    const [appliedQ, setAppliedQ] = useState("");
-    const [appliedSort, setAppliedSort] = useState<SortMode>("distance");
-    const [appliedMaxPrice, setAppliedMaxPrice] = useState<number>(0);
-    const [appliedOnlyFree, setAppliedOnlyFree] = useState(false);
-    const [appliedModes, setAppliedModes] = useState<{ free: boolean; rent: boolean; auction: boolean }>({
-        free: true,
-        rent: true,
-        auction: true,
-    });
-    const [appliedDate, setAppliedDate] = useState("");
-    const [appliedTime, setAppliedTime] = useState("");
-    const [appliedDuration, setAppliedDuration] = useState(60);
-
-    const [userLoc, setUserLoc] = useState<UserLoc>(null);
+    const [modeFilter, setModeFilter] = useState<ModeFilter>({ free: true, rent: true, auction: true });
+    const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(null);
     const [locStatus, setLocStatus] = useState<string | null>(null);
 
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [hoveredId, setHoveredId] = useState<string | null>(null);
-    const [bookingCounts, setBookingCounts] = useState<Record<string, number>>({});
-    const [bookingWindows, setBookingWindows] = useState<Record<string, Booking[]>>({});
-    const [nowMs, setNowMs] = useState(() => Date.now());
+
+    const spotsRef = useRef<HTMLDivElement | null>(null);
+    const mapRef = useRef<HTMLElement | null>(null);
 
     useEffect(() => {
-        const id = setInterval(() => setNowMs(Date.now()), 1000);
-        return () => clearInterval(id);
+        let active = true;
+
+        async function load() {
+            setLoading(true);
+            setError(null);
+            try {
+                const result = await apiGet<{ parking_spots: ParkingSpot[] }>("/parking-spots");
+                if (active) setSpots(result.parking_spots ?? []);
+            } catch (err) {
+                if (active) setError(err instanceof Error ? err.message : "Failed to load parking spots.");
+            } finally {
+                if (active) setLoading(false);
+            }
+        }
+
+        load();
+        return () => {
+            active = false;
+        };
     }, []);
 
+    const filtered = useMemo(() => {
+        const q = query.trim().toLowerCase();
+
+        return spots.filter((spot) => {
+            if (!modeFilter[spot.mode]) return false;
+            if (!q) return true;
+            const searchable = `${spot.title} ${spot.address_text} ${spot.description}`.toLowerCase();
+            return searchable.includes(q);
+        });
+    }, [spots, query, modeFilter]);
+
+    const anchor = useMemo(() => {
+        if (userLoc) return userLoc;
+        if (filtered[0]) return { lat: filtered[0].lat, lng: filtered[0].lng };
+        return LONDON;
+    }, [filtered, userLoc]);
+
+    const ranked = useMemo(() => {
+        const rows = filtered.map((spot) => ({
+            spot,
+            distKm: haversineKm(anchor, { lat: spot.lat, lng: spot.lng }),
+            price: priceValue(spot),
+        }));
+
+        rows.sort((a, b) => {
+            if (sort === "distance") return a.distKm - b.distKm;
+            if (sort === "price_low") return a.price - b.price;
+            return b.price - a.price;
+        });
+
+        return rows;
+    }, [filtered, anchor, sort]);
+
+    const visible = useMemo(() => ranked.slice(0, 4), [ranked]);
+
     useEffect(() => {
-        (async () => {
-            try {
-                const r = await apiGet<{ parking_spots: ParkingSpot[] }>("/parking-spots");
-                setSpots(r.parking_spots ?? []);
-            } catch (e) {
-                setError(e instanceof Error ? e.message : "Failed to load spots");
-            } finally {
-                setLoading(false);
-            }
-        })();
-    }, [location.state]);
-
-    function requestLocation() {
-        setLocStatus(null);
-
-        if (!("geolocation" in navigator)) {
-            setLocStatus("Your browser doesn't support location.");
+        if (!visible.length) {
+            setSelectedId(null);
             return;
         }
 
-        setLocStatus("Getting your location…");
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                setUserLoc({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-                setLocStatus("Using your location.");
-            },
-            () => setLocStatus("Location blocked. You can still search and browse.")
-        );
+        if (!selectedId || !visible.some((entry) => entry.spot.id === selectedId)) {
+            setSelectedId(visible[0].spot.id);
+        }
+    }, [visible, selectedId]);
+
+    const mapCenter = useMemo(() => {
+        const selected = visible.find((entry) => entry.spot.id === selectedId)?.spot;
+        if (selected) return { lat: selected.lat, lng: selected.lng };
+        if (visible[0]) return { lat: visible[0].spot.lat, lng: visible[0].spot.lng };
+        return LONDON;
+    }, [visible, selectedId]);
+
+    const isLocEnabled = locStatus === "Location enabled.";
+    const isLocPending = locStatus === "Enabling location...";
+    const locationButtonTone =
+        isLocEnabled ? "btn-loc-enabled"
+        : locStatus === "Location was blocked." ? "btn-loc-blocked"
+        : "btn-ghost";
+    const locationButtonLabel =
+        isLocEnabled ? "Location enabled"
+        : isLocPending ? "Enabling..."
+        : locStatus === "Location was blocked." ? "Location blocked"
+        : locStatus === "Location is not supported on this browser." ? "Not supported"
+        : "Enable location";
+
+    function toggleMode(mode: ParkingSpot["mode"]) {
+        setModeFilter((current) => ({ ...current, [mode]: !current[mode] }));
     }
 
     function resetFilters() {
-        setQ("");
+        setQuery("");
         setSort("distance");
-        setMaxPrice(0);
-        setOnlyFree(false);
-        setModes({ free: true, rent: true, auction: true });
-        setDesiredDate("");
-        setDesiredTime("");
-        setDesiredDuration(60);
-
-        setAppliedQ("");
-        setAppliedSort("distance");
-        setAppliedMaxPrice(0);
-        setAppliedOnlyFree(false);
-        setAppliedModes({ free: true, rent: true, auction: true });
-        setAppliedDate("");
-        setAppliedTime("");
-        setAppliedDuration(60);
-
-        setSortOpen(false);
-        setTimeFilterOpen(false);
+        setModeFilter({ free: true, rent: true, auction: true });
     }
 
-    useEffect(() => {
-        const handle = setTimeout(() => {
-            setAppliedQ(q);
-        }, 250);
-        return () => clearTimeout(handle);
-    }, [q]);
-
-    useEffect(() => {
-        setAppliedSort(sort);
-        setAppliedMaxPrice(maxPrice);
-        setAppliedOnlyFree(onlyFree);
-        setAppliedModes(modes);
-        setAppliedDate(desiredDate);
-        setAppliedTime(desiredTime);
-        setAppliedDuration(desiredDuration);
-    }, [sort, maxPrice, onlyFree, modes, desiredDate, desiredTime, desiredDuration]);
-
-
-    const filtered = useMemo(() => {
-        const query = appliedQ.trim().toLowerCase();
-
-        return spots.filter((s) => {
-            const modeOk = (appliedModes as any)[s.mode] === true;
-            if (!modeOk) return false;
-
-            const price = toMoney((s as any).price_gbp);
-            if (appliedOnlyFree && price > 0) return false;
-            if (!appliedOnlyFree && appliedMaxPrice > 0 && price > appliedMaxPrice && s.mode !== "auction") return false;
-
-            if (!query) return true;
-
-            const hay = `${s.title ?? ""} ${s.address_text ?? ""} ${s.description ?? ""}`.toLowerCase();
-            return hay.includes(query);
-        });
-    }, [spots, appliedQ, appliedModes, appliedMaxPrice, appliedOnlyFree]);
-
-    const timeFiltered = useMemo(() => {
-        if (!appliedDate || !appliedTime) return filtered;
-        const start = new Date(`${appliedDate}T${appliedTime}`);
-        if (Number.isNaN(start.getTime())) return filtered;
-        const end = new Date(start.getTime() + appliedDuration * 60 * 1000);
-        return filtered.filter((s) => isSpotAvailableFor(s, start, end));
-    }, [filtered, appliedDate, appliedTime, appliedDuration]);
-
-    useEffect(() => {
-        if (!timeFiltered.length) {
-            setBookingCounts({});
-            setBookingWindows({});
+    function requestLocation() {
+        if (!("geolocation" in navigator)) {
+            setLocStatus("Location is not supported on this browser.");
             return;
         }
-        const ids = timeFiltered.map((s) => s.id).join(",");
-        const start = appliedDate && appliedTime ? new Date(`${appliedDate}T${appliedTime}`).toISOString() : "";
-        const end =
-            appliedDate && appliedTime
-                ? new Date(new Date(`${appliedDate}T${appliedTime}`).getTime() + appliedDuration * 60 * 1000).toISOString()
-                : "";
 
-        const qs = start && end ? `?ids=${encodeURIComponent(ids)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
-            : `?ids=${encodeURIComponent(ids)}`;
-
-        apiGet<{ counts: Record<string, number> }>(`/bookings/availability${qs}`)
-            .then((r) => setBookingCounts(r.counts ?? {}))
-            .catch(() => setBookingCounts({}));
-    }, [timeFiltered, appliedDate, appliedTime, appliedDuration]);
-
-    useEffect(() => {
-        if (!timeFiltered.length) {
-            setBookingWindows({});
-            return;
-        }
-        const ids = timeFiltered.map((s) => s.id).join(",");
-        const now = new Date();
-        const start = now.toISOString();
-        const end = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString();
-        const qs = `?ids=${encodeURIComponent(ids)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
-        apiGet<{ bookings: Record<string, Booking[]> }>(`/bookings/window${qs}`)
-            .then((r) => setBookingWindows(r.bookings ?? {}))
-            .catch(() => setBookingWindows({}));
-    }, [timeFiltered]);
-
-    const enriched = useMemo(() => {
-        const anchor =
-            userLoc ??
-            (timeFiltered[0]
-                ? { lat: timeFiltered[0].lat, lng: timeFiltered[0].lng }
-                : { lat: 51.5074, lng: -0.1278 });
-
-        return timeFiltered.map((s) => {
-            const distKm = userLoc
-                ? haversineKm(userLoc, { lat: s.lat, lng: s.lng })
-                : haversineKm(anchor, { lat: s.lat, lng: s.lng });
-
-            const price = toMoney((s as any).price_gbp);
-            const availLabel = availabilityLabel(s);
-            const estimatedTotal = estimateTotalForDuration(s, appliedDuration);
-            return { spot: s, distKm, price, availLabel, estimatedTotal };
-        });
-    }, [timeFiltered, userLoc, appliedDuration]);
-
-    const sorted = useMemo(() => {
-        const arr = enriched.slice();
-        arr.sort((a, b) => {
-            if (appliedSort === "distance") return a.distKm - b.distKm;
-            if (appliedSort === "price_low") return a.price - b.price;
-            return b.price - a.price;
-        });
-        return arr;
-    }, [enriched, appliedSort]);
-
-    const orderedResults = useMemo(() => {
-        const ranked = sorted.map((entry, index) => {
-            const spot = entry.spot;
-            const capacity = getSpotCapacity(spot);
-            const windowBookings = bookingWindows[spot.id] ?? [];
-            let bookedCount = bookingCounts[spot.id];
-
-            if (bookedCount == null && !appliedDate && !appliedTime) {
-                const nextWindow = getNextAvailableWindow(spot, windowBookings);
-                if (!nextWindow) {
-                    bookedCount = capacity;
-                } else {
-                    const sampleEnd = new Date(nextWindow.start.getTime() + 15 * 60 * 1000);
-                    bookedCount = countOverlappingBookings(windowBookings, nextWindow.start, sampleEnd);
-                }
+        setLocStatus("Enabling location...");
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                setUserLoc({ lat: position.coords.latitude, lng: position.coords.longitude });
+                setLocStatus("Location enabled.");
+            },
+            () => {
+                setLocStatus("Location was blocked.");
             }
-
-            const safeBookedCount = Math.max(
-                0,
-                Number.isFinite(Number(bookedCount ?? 0)) ? Number(bookedCount ?? 0) : 0
-            );
-            const fullyBooked = safeBookedCount >= capacity;
-            const auctionSoldOut = Boolean((spot as any).auction_sold_out);
-            const auctionEndMs = getAuctionEndMs(spot);
-            const auctionEnded = spot.mode === "auction" && auctionEndMs != null && auctionEndMs <= nowMs;
-            const listingExpiryMs = getListingExpiryMs(spot);
-            const listingExpired = listingExpiryMs != null && listingExpiryMs <= nowMs;
-            const listingEnded = fullyBooked || auctionSoldOut || auctionEnded || listingExpired;
-            return {
-                ...entry,
-                rankIndex: index,
-                bookedCount: safeBookedCount,
-                capacity,
-                fullyBooked,
-                auctionSoldOut,
-                auctionEnded,
-                listingExpired,
-                listingEnded,
-            };
-        });
-
-        ranked.sort((a, b) => {
-            if (a.listingEnded !== b.listingEnded) {
-                return a.listingEnded ? 1 : -1;
-            }
-            return a.rankIndex - b.rankIndex;
-        });
-        return ranked;
-    }, [sorted, bookingCounts, bookingWindows, appliedDate, appliedTime, nowMs]);
-
-    const visibleResults = useMemo(() => orderedResults.slice(0, 4), [orderedResults]);
-    const mapSpots = useMemo(
-        () =>
-            visibleResults.map(({ spot, bookedCount, capacity }) => ({
-                ...spot,
-                capacity_total: capacity,
-                capacity_available: Math.max(0, capacity - bookedCount),
-            })),
-        [visibleResults]
-    );
-
-    const mapCenter = useMemo(() => {
-        if (userLoc) return userLoc;
-        if (selectedId) {
-            const hit = visibleResults.find((x) => x.spot.id === selectedId);
-            if (hit) return { lat: hit.spot.lat, lng: hit.spot.lng };
-        }
-        if (visibleResults.length) return { lat: visibleResults[0].spot.lat, lng: visibleResults[0].spot.lng };
-        return { lat: 51.5074, lng: -0.1278 };
-    }, [userLoc, visibleResults, selectedId]);
-
-    function buildSpotDetailsPath(spotId: string) {
-        if (appliedDate && appliedTime) {
-            return `/spots/${spotId}?date=${encodeURIComponent(appliedDate)}&time=${encodeURIComponent(appliedTime)}&duration=${encodeURIComponent(String(appliedDuration))}`;
-        }
-        return `/spots/${spotId}`;
+        );
     }
 
-    const viewToggle = (
-        <div style={{ position: "relative" }}>
-            <button type="button" className="btn" onClick={() => setViewOpen((v) => !v)}>
-                Toggle view {viewOpen ? "▴" : "▾"}
-            </button>
-            {viewOpen && (
-                <div className="card sortCard" style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 1200 }}>
-                    <div className="stack">
-                        <button
-                            type="button"
-                            className={`btn ${viewMode === "split" ? "btn-primary" : ""}`}
-                            onClick={() => {
-                                setViewMode("split");
-                                setViewOpen(false);
-                            }}
-                        >
-                            Split view
-                        </button>
-                        <button
-                            type="button"
-                            className={`btn ${viewMode === "list" ? "btn-primary" : ""}`}
-                            onClick={() => {
-                                setViewMode("list");
-                                setViewOpen(false);
-                            }}
-                        >
-                            List view
-                        </button>
-                        <button
-                            type="button"
-                            className={`btn ${viewMode === "map" ? "btn-primary" : ""}`}
-                            onClick={() => {
-                                setViewMode("map");
-                                setViewOpen(false);
-                            }}
-                        >
-                            Map view
-                        </button>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
+    function goToSpots() {
+        spotsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function focusSpotOnMap(spotId: string, shouldScroll: boolean) {
+        setSelectedId(spotId);
+        setHoveredId(spotId);
+
+        if (shouldScroll) {
+            mapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+    }
+
+    function isSmallLayout() {
+        if (typeof window === "undefined") return false;
+        return window.matchMedia("(max-width: 1040px)").matches;
+    }
 
     return (
-        <div className={`home home--${viewMode}`}>
-            {/* LEFT */}
-            {viewMode !== "map" && (
-                <aside className="sidebar">
-                {/* Makes the WHOLE left column scrollable */}
-                <div className="sidebarScroll">
-                    {/* HERO */}
-           
+        <div className="home">
+            <section className="home-hero container">
+                <p className="home-kicker">ParkingBuddies</p>
+                <h1 className="home-title">Park on your own terms.</h1>
+                <p className="home-copy">
+                    Browse nearby spaces, compare options quickly, and book in seconds.
+                </p>
+                <div className="home-actions">
+                    <Link to="/create-listing" className="btn btn-primary">List your spot</Link>
+                    <button type="button" className="btn btn-ghost" onClick={goToSpots}>View spots</button>
+                </div>
+            </section>
 
-                    {/* CONTROLS */}
-                    <div className="card sidebarControls">
-                        <div className="rowInline" style={{ alignItems: "flex-end" }}>
-                            <label style={{ flex: 1 }}>
-                                <span>Search</span>
+            <section className="home-content container">
+                <aside className="home-left">
+                    <div className="card home-controls">
+                        <label className="field">
+                            <span className="field-label">Search</span>
+                            <div className="search-inline">
                                 <input
                                     className="input"
-                                    value={q}
-                                    onChange={(e) => setQ(e.target.value)}
-                                    placeholder="Try: Upper Street, garage, cheap…"
+                                    value={query}
+                                    onChange={(event) => setQuery(event.target.value)}
+                                    placeholder="Search by area, street, or landmark"
                                 />
+                                <button
+                                    type="button"
+                                    className={`btn ${locationButtonTone}`}
+                                    onClick={requestLocation}
+                                    disabled={isLocPending}
+                                >
+                                    {locationButtonLabel}
+                                </button>
+                            </div>
+                        </label>
+
+                        <div className="control-grid control-grid--compact">
+                            <label className="field">
+                                <span className="field-label">Sort</span>
+                                <select
+                                    className="input"
+                                    value={sort}
+                                    onChange={(event) => setSort(event.target.value as SortMode)}
+                                >
+                                    <option value="distance">Closest first</option>
+                                    <option value="price_low">Price: low to high</option>
+                                    <option value="price_high">Price: high to low</option>
+                                </select>
                             </label>
-                            <button className="btn btn-primary" onClick={requestLocation} type="button">
-                                Use my location
-                            </button>
-                        </div>
-                        <div className="tiny muted">{locStatus ?? (userLoc ? "Location active." : "Location off.")}</div>
-                        <div className="rowInline">
-                            <button type="button" className="btn" onClick={() => setSortOpen((p) => !p)}>
-                                Sort {sortOpen ? "▴" : "▾"}
-                            </button>
-                            <button type="button" className="btn" onClick={() => setTimeFilterOpen((p) => !p)}>
-                                Time filter {timeFilterOpen ? "▴" : "▾"}
-                            </button>
-                            <button type="button" className="btn" onClick={resetFilters}>
-                                Reset
-                            </button>
-                            {viewToggle}
+
+                            <button type="button" className="btn btn-ghost" onClick={resetFilters}>Reset</button>
                         </div>
 
-                        {sortOpen && (
-                            <div className="card sortCard" style={{ background: "rgba(255,255,255,0.02)" }}>
-                                <div className="row">
-                                    <label>
-                                        <span>Sort</span>
-                                        <select value={sort} onChange={(e) => setSort(e.target.value as SortMode)}>
-                                            <option value="distance">Closest</option>
-                                            <option value="price_low">Cheapest</option>
-                                            <option value="price_high">Most expensive</option>
-                                        </select>
-                                    </label>
-
-                                    <label>
-                                        <span>Max price (Rent)</span>
-                                        <input
-                                            className="input"
-                                            type="number"
-                                            min={0}
-                                            step={1}
-                                            value={maxPrice}
-                                            onChange={(e) => setMaxPrice(Number(e.target.value))}
-                                        />
-                                    </label>
-                                </div>
-
-                                <div className="chips">
-                                    <label className="chip">
-                                        <input type="checkbox" checked={onlyFree} onChange={(e) => setOnlyFree(e.target.checked)} />
-                                        Free only
-                                    </label>
-
-                                    <label className="chip">
-                                        <input
-                                            type="checkbox"
-                                            checked={modes.free}
-                                            onChange={(e) => setModes((p) => ({ ...p, free: e.target.checked }))}
-                                        />
-                                        Free
-                                    </label>
-
-                                    <label className="chip">
-                                        <input
-                                            type="checkbox"
-                                            checked={modes.rent}
-                                            onChange={(e) => setModes((p) => ({ ...p, rent: e.target.checked }))}
-                                        />
-                                        Rent
-                                    </label>
-
-                                    <label className="chip">
-                                        <input
-                                            type="checkbox"
-                                            checked={modes.auction}
-                                            onChange={(e) => setModes((p) => ({ ...p, auction: e.target.checked }))}
-                                        />
-                                        Auction
-                                    </label>
-                                </div>
-                            </div>
-                        )}
-
-                        {timeFilterOpen && (
-                            <div className="card timeFilterCard" style={{ background: "rgba(255,255,255,0.02)" }}>
-                                <div className="row" style={{ marginTop: 8 }}>
-                                    <label>
-                                        <span>Date</span>
-                                        <input
-                                            className="input"
-                                            type="date"
-                                            value={desiredDate}
-                                            onChange={(e) => setDesiredDate(e.target.value)}
-                                            disabled={!timeFilterOpen}
-                                        />
-                                    </label>
-                                    <label>
-                                        <span>Time</span>
-                                        <input
-                                            className="input"
-                                            type="time"
-                                            value={desiredTime}
-                                            onChange={(e) => setDesiredTime(e.target.value)}
-                                            disabled={!timeFilterOpen}
-                                        />
-                                    </label>
-                                </div>
-                                <label>
-                                    <span>Duration</span>
-                                    <select
-                                        value={desiredDuration}
-                                        onChange={(e) => setDesiredDuration(Number(e.target.value))}
-                                        disabled={!timeFilterOpen}
-                                    >
-                                        <option value={15}>15 minutes</option>
-                                        <option value={30}>30 minutes</option>
-                                        <option value={45}>45 minutes</option>
-                                        <option value={60}>1 hour</option>
-                                        <option value={90}>1 hour 30 minutes</option>
-                                        <option value={120}>2 hours</option>
-                                        <option value={180}>3 hours</option>
-                                    </select>
-                                </label>
-                            </div>
-                        )}
-
-                        <div className="tiny muted">
-                            {loading
-                                ? "Loading…"
-                                : error
-                                    ? "Error loading spots."
-                                    : `Showing ${visibleResults.length} of ${orderedResults.length} spot${orderedResults.length === 1 ? "" : "s"}`}
-                            {" · "}
-                            {userLoc ? "sorted based on your current location" : "enable location for better results"}
+                        <div className="mode-toggle" role="group" aria-label="Filter by listing type">
+                            {(["rent", "free", "auction"] as const).map((mode) => (
+                                <button
+                                    key={mode}
+                                    type="button"
+                                    className={`mode-toggle-btn${modeFilter[mode] ? " is-active" : ""}`}
+                                    onClick={() => toggleMode(mode)}
+                                >
+                                    {modeLabel(mode)}
+                                </button>
+                            ))}
                         </div>
+
+                        <p className="tiny muted">
+                            Showing {visible.length} of {ranked.length} spots
+                            {ranked.length !== spots.length ? ` (filtered from ${spots.length})` : ""}.
+                        </p>
                     </div>
 
-                    {/* RESULTS */}
-                    <div className="results">
-                        {loading && <div className="card" style={{ padding: 12 }}>Loading parking spots…</div>}
-                        {error && (
-                            <div className="card" style={{ padding: 12, borderColor: "rgba(255,80,80,0.35)" }}>
-                                {error}
+                    <div ref={spotsRef} className="result-grid" role="list" aria-label="Search results">
+                        {loading && <div className="card">Loading parking spots...</div>}
+                        {error && !loading && <div className="card">{error}</div>}
+                        {!loading && !error && !visible.length && (
+                            <div className="card">
+                                <h3 className="h3">No results</h3>
+                                <p className="muted">Try a broader search or reset your filters.</p>
                             </div>
                         )}
 
-                        {!loading && !error && visibleResults.length === 0 && (
-                            <div className="card" style={{ padding: 12 }}>
-                                <div className="h3">No results</div>
-                                <div className="muted" style={{ marginTop: 6 }}>
-                                    Try a different search, increase max price, or enable more modes.
-                                </div>
-                            </div>
-                        )}
-
-                        {!loading && !error && visibleResults.map(({ spot, distKm, price, availLabel, estimatedTotal, bookedCount, capacity, fullyBooked, auctionSoldOut, auctionEnded, listingExpired, listingEnded }) => {
-                            const active = spot.id === selectedId;
-                            const isHovered = spot.id === hoveredId;
-
-                            const startPrice = Number((spot as any).auction_start_price_gbp ?? 0);
-                            const auctionPriceLabel = `Min bid £${startPrice.toFixed(2)}`;
-
-                            const pill =
-                                spot.mode === "free" ? "Free"
-                                    : spot.mode === "rent" ? `£${price.toFixed(2)}`
-                                        : auctionPriceLabel;
-                            const nextWindow = getNextAvailableWindow(spot, bookingWindows[spot.id] ?? []);
-
-                            const auctionEndMs = spot.mode === "auction" ? getAuctionEndMs(spot) : null;
-                            const auctionTimeLeftMs =
-                                auctionEndMs != null
-                                    ? auctionEndMs - nowMs
-                                    : null;
-                            const auctionTimeLeftLabel =
-                                auctionTimeLeftMs == null
-                                    ? null
-                                    : auctionTimeLeftMs <= 0
-                                        ? "Auction ended"
-                                        : `Time left: ${formatCountdown(auctionTimeLeftMs)}`;
-                            const listingEndedLabel = fullyBooked
-                                ? "Sold out"
-                                : auctionSoldOut
-                                ? "Auction sold out"
-                                : auctionEnded
-                                    ? "Auction ended"
-                                    : listingExpired
-                                        ? "Listing expired"
-                                        : null;
-                            const detailsPath = buildSpotDetailsPath(spot.id);
-                            const modeLabel = formatModeLabel(spot.mode);
+                        {!loading && !error && visible.map((entry) => {
+                            const { spot, distKm } = entry;
+                            const active = selectedId === spot.id;
 
                             return (
                                 <article
                                     key={spot.id}
-                                    className={`resultCard${listingEnded ? " resultCard--ended" : ""}${active ? " active" : ""}${isHovered ? " resultCard--hover" : ""}`}
-                                    role="link"
+                                    role="listitem"
                                     tabIndex={0}
+                                    className={`spot-card${active ? " is-active" : ""}`}
+                                    onFocus={() => setSelectedId(spot.id)}
                                     onMouseEnter={() => {
                                         setHoveredId(spot.id);
-                                        setSelectedId(spot.id);
                                     }}
                                     onMouseLeave={() => setHoveredId((prev) => (prev === spot.id ? null : prev))}
-                                    onClick={() => navigate(detailsPath)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter" || e.key === " ") {
-                                            e.preventDefault();
-                                            navigate(detailsPath);
+                                    onClick={() => focusSpotOnMap(spot.id, isSmallLayout())}
+                                    onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                            event.preventDefault();
+                                            focusSpotOnMap(spot.id, isSmallLayout());
                                         }
                                     }}
                                 >
-                                    <div className={`resultTop${listingEnded ? " resultTop--ended" : ""}`}>
-                                        <div className="resultLeft">
-                                            <div className="thumb">
-                                                {spot.image_url ? (
-                                                    <img src={spot.image_url} alt={spot.title} loading="lazy" />
-                                                ) : (
-                                                    <img className="thumbLogo" src={logoImg} alt="ParkingBuddies logo" />
-                                                )}
-                                            </div>
-
-                                            <div className="resultText">
-                                                {listingEndedLabel && (
-                                                    <div className="resultEndedNotice">{listingEndedLabel}</div>
-                                                )}
-                                                <div className="resultTitle">{spot.title}</div>
-                                                <div className="muted tiny" style={{ marginTop: 6 }}>
-                                                    {spot.address_text}
-                                                </div>
-                                            </div>
+                                    <div className="spot-head">
+                                        <div>
+                                            <h3 className="h3">{spot.title}</h3>
+                                            <p className="tiny muted">{spot.address_text}</p>
                                         </div>
-                                        <div style={{ display: "grid", gap: 6, justifyItems: "end" }}>
-                                            <div className="pill pill--price">
-                                                {pill}
-                                            </div>
-                                        </div>
+                                        <span className="spot-price">{priceLabel(spot)}</span>
                                     </div>
 
-                                    <div className="meta">
-                                        <span className="badge">{modeLabel}</span>
-                                        <span className="badge">{availLabel}</span>
-                                        <span className="badge">{userLoc ? `${distKm.toFixed(1)} km` : "Enable location"}</span>
-                                        {fullyBooked && <span className="badge badge--rose">Fully booked</span>}
-                                        {spot.mode === "auction" && auctionTimeLeftLabel && (
-                                            <span className={`badge ${auctionTimeLeftMs != null && auctionTimeLeftMs <= 0 ? "badge--rose" : "badge--cool"}`}>
-                                                {auctionTimeLeftLabel}
-                                            </span>
-                                        )}
-                                        {spot.mode === "auction" && auctionSoldOut && (
-                                            <span className="badge badge--rose">Sold out</span>
-                                        )}
-                                        {listingExpired && (
-                                            <span className="badge badge--rose">Listing expired</span>
-                                        )}
-                                        {capacity > 1 && (
-                                            <span className="badge badge--cool">
-                                                {Math.max(0, capacity - bookedCount)}/{capacity} spots left
-                                            </span>
-                                        )}
-                                        {appliedDate && appliedTime && spot.mode !== "auction" && (
-                                            <span className="badge">
-                                                Est. £{estimatedTotal.toFixed(2)}
-                                            </span>
+                                    <p className="spot-copy">
+                                        {spot.description || "Quick access and clear arrival details."}
+                                    </p>
+
+                                    <div className="spot-meta">
+                                        <span className="badge">{modeLabel(spot.mode)}</span>
+                                        <span className="badge">{distKm.toFixed(1)} km</span>
+                                        {spot.allow_points && spot.points_cost > 0 && (
+                                            <span className="badge">{spot.points_cost} pts</span>
                                         )}
                                     </div>
 
-                                    {nextWindow && (
-                                        <div className="tiny muted" style={{ marginTop: 6 }}>
-                                            Next available: {formatWindow(nextWindow.start, nextWindow.end)}
-                                        </div>
-                                    )}
-
-                                    <div className="resultFooter" style={{ justifyContent: "space-between", gap: 12 }}>
-                                        <div className="rowInline" style={{ alignItems: "center", gap: 8 }}>
-                                            <Link
-                                                className="btn btn-accent"
-                                                to={detailsPath}
-                                                onClick={(e) => e.stopPropagation()}
-                                            >
-                                                View details
-                                            </Link>
-                                            {(spot as any).allow_points && Number((spot as any).points_cost ?? 0) > 0 && (
-                                                <span className="badge badge--purple">Available with points</span>
-                                            )}
-                                        </div>
-                                        <div style={{ display: "grid", gap: 6, justifyItems: "end" }}>
-                                            {(spot as any).allow_points && Number((spot as any).points_cost ?? 0) > 0 && (
-                                                <div className="pill pill--price pill--points" style={{ background: "transparent", border: "none", padding: 0 }}>
-                                                    Starts at {(spot as any).points_cost} points
-                                                </div>
-                                            )}
-                                        </div>
+                                    <div className="spot-actions">
+                                        <Link
+                                            to={`/spots/${spot.id}`}
+                                            className="btn btn-primary"
+                                            onClick={(event) => event.stopPropagation()}
+                                        >
+                                            View details
+                                        </Link>
                                     </div>
                                 </article>
                             );
                         })}
                     </div>
-                </div>
-            </aside>
-            )}
+                </aside>
 
-            {/* RIGHT */}
-            {viewMode !== "list" && (
-                <main className={`mapWrap ${viewMode === "map" ? "mapWrap--withTopBar" : ""}`}>
-                {viewMode === "map" && (
-                    <div className="mapTopBar">
-                        <div className="rowInline" style={{ alignItems: "flex-end" }}>
-                            <label style={{ flex: 1 }}>
-                                <span>Search</span>
-                                <input
-                                    className="input"
-                                    value={q}
-                                    onChange={(e) => setQ(e.target.value)}
-                                    placeholder="Try: Upper Street, garage, cheap…"
-                                />
-                            </label>
-                            <button className="btn btn-primary" onClick={requestLocation} type="button">
-                                Use my location
-                            </button>
-                        </div>
-                        <div className="tiny muted">{locStatus ?? (userLoc ? "Location active." : "Location off.")}</div>
-                        <div className="rowInline" style={{ justifyContent: "space-between" }}>
-                            <div className="rowInline">
-                                <button type="button" className="btn" onClick={() => setSortOpen((p) => !p)}>
-                                    Sort {sortOpen ? "▴" : "▾"}
-                                </button>
-                                <button type="button" className="btn" onClick={() => setTimeFilterOpen((p) => !p)}>
-                                    Time filter {timeFilterOpen ? "▴" : "▾"}
-                                </button>
-                                <button type="button" className="btn" onClick={resetFilters}>
-                                    Reset
-                                </button>
-                            </div>
-                            {viewToggle}
-                        </div>
-                    </div>
-                )}
-                <SpotsMap
-                    spots={mapSpots}
-                    center={mapCenter}
-                    selectedId={selectedId}
-                    hoveredId={hoveredId}
-                    onSelect={(id) => setSelectedId(id)}
-                    onHover={(id) => setHoveredId(id)}
-                />
-            </main>
-            )}
+                <section ref={mapRef} className="home-map card" aria-label="Map results">
+                    <SpotsMap
+                        spots={visible.map((entry) => entry.spot)}
+                        center={mapCenter}
+                        selectedId={selectedId}
+                        hoveredId={hoveredId}
+                        onSelect={(id) => setSelectedId(id)}
+                        onHover={(id) => setHoveredId(id)}
+                    />
+                </section>
+            </section>
         </div>
     );
 }
 
-function formatModeLabel(mode?: string) {
-    if (!mode) return "Unknown";
-    return mode.charAt(0).toUpperCase() + mode.slice(1);
-}
 
-function extractAvailabilityRules(spot: ParkingSpot) {
-    const rules: Array<{ dow: number; start: string; end: string }> = [];
-    const a: any = (spot as any).availability_json;
 
-    if (a?.type === "24_7") {
-        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: "00:00", end: "23:59" }));
-    }
-    if (a?.type === "same_everyday" && a.start && a.end) {
-        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: a.start, end: a.end }));
-    }
-    if (a?.type === "custom_weekly" && Array.isArray(a.rules)) {
-        return a.rules.slice();
-    }
 
-    if ((spot as any).availability_type === "24_7") {
-        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: "00:00", end: "23:59" }));
-    }
-    if ((spot as any).availability_type === "weekly" && Array.isArray((spot as any).available_days)) {
-        const ds = (spot as any).daily_start?.slice(0, 5) ?? "00:00";
-        const de = (spot as any).daily_end?.slice(0, 5) ?? "23:59";
-        return (spot as any).available_days.map((dow: number) => ({ dow, start: ds, end: de }));
-    }
 
-    return rules;
-}
 
-function isExplicitAllDay(
-    spot: ParkingSpot,
-    rules: Array<{ dow: number; start: string; end: string }>
-) {
-    const a: any = (spot as any).availability_json;
-    if (a?.type === "24_7") return true;
-    if (a?.type === "same_everyday" && a.start && a.end) {
-        return a.start === "00:00" && a.end === "23:59";
-    }
-    if (a?.type === "custom_weekly" && Array.isArray(a.rules)) {
-        return rules.length === 7 && rules.every((r) => r.start === "00:00" && r.end === "23:59");
-    }
-
-    if ((spot as any).availability_type === "24_7") return true;
-    if ((spot as any).availability_type === "weekly") {
-        const ds = (spot as any).daily_start?.slice(0, 5);
-        const de = (spot as any).daily_end?.slice(0, 5);
-        const days = (spot as any).available_days;
-        if (Array.isArray(days) && days.length === 7 && ds && de) {
-            return ds === "00:00" && de === "23:59";
-        }
-    }
-
-    return false;
-}
-
-function setTime(d: Date, hhmm: string) {
-    const [h, m] = hhmm.split(":").map((x) => Number(x));
-    const out = new Date(d);
-    out.setHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0);
-    return out;
-}
-
-function isSpotAvailableFor(spot: ParkingSpot, start: Date, end: Date) {
-    if (!(start < end)) return false;
-
-    const rules = extractAvailabilityRules(spot);
-    if (!rules.length) return true;
-
-    const a: any = (spot as any).availability_json;
-    const dateFrom = a?.date_from ? new Date(`${a.date_from}T00:00:00`) : null;
-    const dateTo = a?.date_to ? new Date(`${a.date_to}T23:59:59`) : null;
-    if (dateFrom && start < dateFrom) return false;
-    if (dateTo && end > dateTo) return false;
-
-    const dow = start.getDay();
-    const dayRules = rules.filter((r) => r.dow === dow);
-    if (!dayRules.length) return false;
-
-    const isAllDay =
-        rules.length === 7 &&
-        rules.every((r) => r.start === "00:00" && r.end === "23:59");
-
-    if (isAllDay) {
-        return true;
-    }
-
-    if (start.toDateString() !== end.toDateString()) return false;
-
-    for (const r of dayRules) {
-        const ruleStart = setTime(start, r.start);
-        const ruleEnd = setTime(start, r.end);
-        if (start >= ruleStart && end <= ruleEnd) return true;
-    }
-    return false;
-}
-
-function roundToNextQuarter(d: Date) {
-    const out = new Date(d);
-    const minutes = out.getMinutes();
-    const rounded = Math.ceil(minutes / 15) * 15;
-    out.setMinutes(rounded, 0, 0);
-    return out;
-}
-
-function formatWindow(start: Date, end: Date) {
-    const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][start.getDay()] ?? "Day";
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const date = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
-    const t1 = `${pad(start.getHours())}:${pad(start.getMinutes())}`;
-    const t2 = `${pad(end.getHours())}:${pad(end.getMinutes())}`;
-    return `${day} ${date} ${t1}-${t2}`;
-}
-
-function getNextAvailableWindow(spot: ParkingSpot, bookings: Booking[]) {
-    const windows = buildAvailabilityWindows(spot, 14);
-    const capacity = getSpotCapacity(spot);
-    const now = new Date();
-    const normalized = bookings
-        .filter((b) => b.start_time && b.end_time)
-        .map((b) => ({ start: new Date(b.start_time), end: new Date(b.end_time) }))
-        .sort((a, b) => a.start.getTime() - b.start.getTime());
-
-    for (const w of windows) {
-        const segments = subtractBookings(w, normalized, capacity);
-        for (const seg of segments) {
-            let start = seg.start;
-            if (start < now) start = roundToNextQuarter(now);
-            if (start < seg.end) return { start, end: seg.end };
-        }
-    }
-    return null;
-}
-
-function formatCountdown(ms: number) {
-    const total = Math.max(0, Math.floor(ms / 1000));
-    const days = Math.floor(total / 86400);
-    const hours = Math.floor((total % 86400) / 3600);
-    const minutes = Math.floor((total % 3600) / 60);
-    const seconds = total % 60;
-    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
-    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
-    if (minutes > 0) return `${minutes}m ${seconds}s`;
-    return `${seconds}s`;
-}
-
-function buildAvailabilityWindows(spot: ParkingSpot, daysForward: number) {
-    const rules = extractAvailabilityRules(spot);
-    if (!rules.length) return [];
-
-    const a: any = (spot as any).availability_json;
-    const dateFrom = a?.date_from ? new Date(`${a.date_from}T00:00:00`) : null;
-    const dateTo = a?.date_to ? new Date(`${a.date_to}T23:59:59`) : null;
-
-    const now = new Date();
-    const windows: Array<{ start: Date; end: Date }> = [];
-    for (let i = 0; i <= daysForward; i += 1) {
-        const day = new Date(now);
-        day.setDate(day.getDate() + i);
-        day.setHours(0, 0, 0, 0);
-
-        if (dateFrom && day < dateFrom) continue;
-        if (dateTo && day > dateTo) continue;
-
-        const dow = day.getDay();
-        const dayRules = rules.filter((r) => r.dow === dow);
-        for (const r of dayRules) {
-            const start = setTime(day, r.start);
-            const end = setTime(day, r.end);
-            if (end <= now) continue;
-            windows.push({ start, end });
-        }
-    }
-    return windows;
-}
-
-function subtractBookings(
-    window: { start: Date; end: Date },
-    bookings: Array<{ start: Date; end: Date }>,
-    capacity = 1
-) {
-    const safeCapacity = Math.max(1, Number.isFinite(capacity) ? Math.floor(capacity) : 1);
-
-    if (safeCapacity > 1) {
-        const events: Array<{ at: number; delta: number }> = [];
-        for (const b of bookings) {
-            if (b.end <= window.start || b.start >= window.end) continue;
-            const startMs = Math.max(window.start.getTime(), b.start.getTime());
-            const endMs = Math.min(window.end.getTime(), b.end.getTime());
-            if (endMs <= startMs) continue;
-            events.push({ at: startMs, delta: 1 });
-            events.push({ at: endMs, delta: -1 });
-        }
-        if (!events.length) return [{ ...window }];
-
-        events.sort((a, b) => (a.at === b.at ? a.delta - b.delta : a.at - b.at));
-        const blocked: Array<{ start: Date; end: Date }> = [];
-        let active = 0;
-        let blockedStart: number | null = null;
-
-        for (const event of events) {
-            const before = active;
-            active += event.delta;
-            if (before < safeCapacity && active >= safeCapacity) {
-                blockedStart = event.at;
-            }
-            if (before >= safeCapacity && active < safeCapacity && blockedStart != null && event.at > blockedStart) {
-                blocked.push({ start: new Date(blockedStart), end: new Date(event.at) });
-                blockedStart = null;
-            }
-        }
-
-        let segments: Array<{ start: Date; end: Date }> = [{ ...window }];
-        for (const b of blocked) {
-            const next: Array<{ start: Date; end: Date }> = [];
-            for (const seg of segments) {
-                if (b.end <= seg.start || b.start >= seg.end) {
-                    next.push(seg);
-                } else {
-                    if (b.start > seg.start) next.push({ start: seg.start, end: b.start });
-                    if (b.end < seg.end) next.push({ start: b.end, end: seg.end });
-                }
-            }
-            segments = next;
-        }
-        return segments;
-    }
-
-    let segments: Array<{ start: Date; end: Date }> = [{ ...window }];
-    for (const b of bookings) {
-        if (b.end <= window.start || b.start >= window.end) continue;
-        const next: Array<{ start: Date; end: Date }> = [];
-        for (const seg of segments) {
-            if (b.end <= seg.start || b.start >= seg.end) {
-                next.push(seg);
-            } else {
-                if (b.start > seg.start) next.push({ start: seg.start, end: b.start });
-                if (b.end < seg.end) next.push({ start: b.end, end: seg.end });
-            }
-        }
-        segments = next;
-    }
-    return segments;
-}

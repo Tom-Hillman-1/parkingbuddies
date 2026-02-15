@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, Link, useSearchParams, useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -48,11 +48,6 @@ type Booking = {
     end_time?: string;
 };
 
-type SlotOption = {
-    start: Date;
-    minutes: number;
-};
-
 function BidCardForm({
     clientSecret,
     onAuthorized,
@@ -85,7 +80,7 @@ function BidCardForm({
             setLocalBusy(false);
             return;
         }
-        setStatus("Card authorized ✅");
+        setStatus("Card authorized");
         onAuthorized();
         setLocalBusy(false);
     }
@@ -97,7 +92,7 @@ function BidCardForm({
                 <CardElement options={{ hidePostalCode: true }} />
             </div>
             <button className="btn btn-primary" style={{ marginTop: 10 }} onClick={confirm} disabled={busy || localBusy || !stripe}>
-                {busy || localBusy ? "Authorizing…" : "Authorize bid"}
+                {busy || localBusy ? "Authorizing..." : "Authorize bid"}
             </button>
             {status && <div className="tiny" style={{ marginTop: 8 }}>{status}</div>}
         </div>
@@ -132,7 +127,6 @@ export default function SpotDetailsPage() {
     const [bidPointsAmount, setBidPointsAmount] = useState("");
     const [bidMsg, setBidMsg] = useState<string | null>(null);
     const [bidBusy, setBidBusy] = useState(false);
-    const [nextSlotOptions, setNextSlotOptions] = useState<SlotOption[]>([]);
     const [nowMs, setNowMs] = useState(() => Date.now());
     const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()));
     const [auctionInfo, setAuctionInfo] = useState<{
@@ -261,10 +255,6 @@ export default function SpotDetailsPage() {
     }, [bidPayMethod]);
 
     useEffect(() => {
-        setNextSlotOptions([]);
-    }, [spot?.id]);
-
-    useEffect(() => {
         const id = setInterval(() => setNowMs(Date.now()), 1000);
         return () => clearInterval(id);
     }, []);
@@ -320,12 +310,12 @@ export default function SpotDetailsPage() {
 
     const price = useMemo(() => Number(spot?.price_gbp ?? 0), [spot]);
     const auctionStart = Number(spot?.auction_start_price_gbp ?? 0);
-    const auctionPriceLabel = `Min bid £${auctionStart.toFixed(2)}`;
+    const auctionPriceLabel = `Min bid GBP ${auctionStart.toFixed(2)}`;
     const priceLabel =
         spot?.mode === "auction"
             ? auctionPriceLabel
             : price > 0
-                ? `£${price.toFixed(2)}`
+                ? `GBP ${price.toFixed(2)}`
                 : "Free";
     const unit = (spot?.price_unit ?? "hour") as "hour" | "day" | "week";
     const latestMyBid = auctionMyBids[0] ?? null;
@@ -336,7 +326,6 @@ export default function SpotDetailsPage() {
     const canBook = !!token;
     const isOwner = !!user && !!spot && user.id === spot.owner_user_id;
     const auctionSoldOut = Boolean(auctionInfo?.sold_out);
-    const nextWindow = useMemo(() => (spot ? getNextAvailableWindow(spot, spotBookings) : null), [spot, spotBookings]);
 
     function estimateTotal(startIso: string, endIso: string) {
         if (!spot) return 0;
@@ -442,23 +431,6 @@ export default function SpotDetailsPage() {
     const capacity = Math.max(1, Number((spot as any)?.capacity_total ?? 1));
     const spotsRemaining = Math.max(0, capacity - conflicts.length);
     const fullyBooked = spotsRemaining <= 0;
-    const availabilitySegments = useMemo(
-        () => (spot ? getAvailabilitySegments(spot, spotBookings, 45) : []),
-        [spot, spotBookings]
-    );
-    const nearestLongestSlots = useMemo(
-        () => getNearestLongestSlotsFromSegments(availabilitySegments, 4),
-        [availabilitySegments]
-    );
-    const longestSlotsByDate = useMemo(
-        () => buildLongestSlotsByDate(availabilitySegments),
-        [availabilitySegments]
-    );
-    const hasAvailabilityRules = useMemo(
-        () => !!spot && extractAvailabilityRules(spot).length > 0,
-        [spot]
-    );
-    const selectedDateSlot = longestSlotsByDate[startDate] ?? null;
     const slotAllowed = useMemo(() => {
         if (!spot) return true;
         const s = new Date(start);
@@ -466,50 +438,33 @@ export default function SpotDetailsPage() {
         if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return false;
         return isSlotAllowed(spot, s, e);
     }, [spot, start, end]);
-    const slotStatus = hasAvailabilityRules && !selectedDateSlot
-        ? { ok: false, label: "Selected date has no available time left. Choose a green date." }
-        : !slotAllowed
-            ? { ok: false, label: "Requested slot is outside listing availability." }
-            : fullyBooked
-                ? { ok: false, label: capacity > 1 ? "All spots are booked for this slot." : "Slot is currently booked." }
-                : {
-                    ok: true,
-                    label: capacity > 1
-                        ? `${spotsRemaining} spot${spotsRemaining === 1 ? "" : "s"} left for this slot.`
-                        : "Slot is available.",
-                };
+    const slotStatus = !slotAllowed
+        ? { ok: false, label: "Requested slot is outside listing availability." }
+        : fullyBooked
+            ? { ok: false, label: capacity > 1 ? "All spots are booked for this slot." : "Slot is currently booked." }
+            : {
+                ok: true,
+                label: capacity > 1
+                    ? `${spotsRemaining} spot${spotsRemaining === 1 ? "" : "s"} left for this slot.`
+                    : "Slot is available.",
+            };
     const calendarDays = useMemo(() => buildCalendarGrid(calendarMonth), [calendarMonth]);
+    const availableDays = useMemo(() => {
+        if (!spot) return new Set<string>();
+        const set = new Set<string>();
+        for (const day of calendarDays) {
+            if (isCalendarDayAvailable(spot, day)) {
+                set.add(localDateStr(day));
+            }
+        }
+        return set;
+    }, [spot, calendarDays]);
 
     function toIso(date: string, time: string) {
         return new Date(`${date}T${time}`).toISOString();
     }
 
-    function publishSlotMessage(message: string) {
-        setActionMsg(message);
-        setBidMsg(message);
-    }
 
-    function setSlot(d: Date, minutes: number, msg?: string) {
-        const startD = new Date(d);
-        const safeMinutes = Math.max(15, Math.floor(minutes / 15) * 15);
-        setStartDate(localDateStr(startD));
-        setStartTime(localTimeStr(startD));
-        setDurationMinutes(safeMinutes);
-        const endD = addMinutes(startD, safeMinutes);
-        publishSlotMessage(msg ?? `Slot set: ${formatLocalDateTime(startD)} → ${formatLocalDateTime(endD)}.`);
-    }
-
-    function applyNearestLongestSlot(msg?: string) {
-        if (!nearestLongestSlots.length) {
-            publishSlotMessage("No available slot found. Try another date.");
-            setNextSlotOptions([]);
-            return false;
-        }
-        const primary = nearestLongestSlots[0];
-        setSlot(primary.start, primary.minutes, msg ?? "Next available slot applied.");
-        setNextSlotOptions(nearestLongestSlots);
-        return true;
-    }
 
     function handleDateChange(nextDate: string) {
         setStartDate(nextDate);
@@ -517,14 +472,6 @@ export default function SpotDetailsPage() {
         if (parsedDate) {
             setCalendarMonth(startOfMonth(parsedDate));
         }
-        const dayOptions = getSlotsForDateFromSegments(availabilitySegments, nextDate, 4);
-        if (!dayOptions.length) {
-            publishSlotMessage("Selected date has no availability left. Pick a green date.");
-            setNextSlotOptions([]);
-            return;
-        }
-        setSlot(dayOptions[0].start, dayOptions[0].minutes, "Longest available slot for the selected day applied.");
-        setNextSlotOptions(dayOptions);
     }
 
     function handleCalendarDayPick(day: Date) {
@@ -533,22 +480,7 @@ export default function SpotDetailsPage() {
         handleDateChange(dayKey);
     }
 
-    const findNextSlots = () => {
-        if (!spot) return;
-        const slots = getNextSlots(spot, spotBookings, durationMinutes, 3);
-        if (!slots.length) {
-            publishSlotMessage("No available slot found. Try another time or duration.");
-            return;
-        }
-        const options = slots.map((slotStart) => ({ start: slotStart, minutes: durationMinutes }));
-        setSlot(options[0].start, options[0].minutes, "Next available slot applied.");
-        setNextSlotOptions(options);
-    };
 
-    const findNextAvailableSlots = () => {
-        if (!spot) return;
-        applyNearestLongestSlot("Next available slot applied.");
-    };
 
     async function createBooking() {
         if (!token) {
@@ -676,7 +608,7 @@ export default function SpotDetailsPage() {
                 return;
             }
             if (minBidPerHour > 0 && perHour < minBidPerHour) {
-                setBidMsg(`Minimum bid per hour is £${minBidPerHour.toFixed(2)}.`);
+                setBidMsg(`Minimum bid per hour is GBP ${minBidPerHour.toFixed(2)}.`);
                 return;
             }
         }
@@ -801,11 +733,10 @@ export default function SpotDetailsPage() {
 
     const pill =
         spot.mode === "free" ? "Free"
-            : spot.mode === "rent" ? `£${price.toFixed(2)}` : auctionPriceLabel;
+            : spot.mode === "rent" ? `GBP ${price.toFixed(2)}` : auctionPriceLabel;
 
     const availabilityLabel = formatAvailability(spot);
 
-    const approvedBids = auctionInfo?.approved_bids ?? [];
     const pendingBids = auctionInfo?.pending_bids ?? [];
 
     const myBidStatusCards = auctionMyBids.length > 0 ? (
@@ -814,11 +745,11 @@ export default function SpotDetailsPage() {
                 const status = bid.status ?? "";
                 const statusLabel =
                     status === "pending"
-                        ? "Pending — awaiting owner approval"
+                        ? "Pending - awaiting owner approval"
                         : status === "accepted"
-                            ? "Accepted — booking confirmed"
+                            ? "Accepted - booking confirmed"
                             : status === "won"
-                                ? "Won — awaiting owner approval"
+                                ? "Won - awaiting owner approval"
                                 : status === "declined" || status === "rejected"
                                     ? "Declined"
                                     : status;
@@ -848,7 +779,7 @@ export default function SpotDetailsPage() {
                             </div>
                         ) : bid.amount_gbp != null ? (
                             <div className="tiny muted" style={{ marginTop: 6 }}>
-                                £{Number(bid.amount_gbp).toFixed(2)}
+                                GBP {Number(bid.amount_gbp).toFixed(2)}
                             </div>
                         ) : null}
                         {bid.start_time && bid.end_time && (
@@ -862,89 +793,41 @@ export default function SpotDetailsPage() {
         </div>
     ) : null;
 
-    const bidsFooterSection = spot.mode === "auction" ? (
+    const ownerPendingBidsSection = spot.mode === "auction" && isOwner && pendingBids.length ? (
         <div className="card spotBook" style={{ marginTop: 14 }}>
             <div className="spotBookHeader">
-                <div className="h3">Other bids</div>
-                <div className="muted tiny">Latest activity for this auction.</div>
+                <div className="h3">Incoming bids</div>
+                <div className="muted tiny">Approve bids for this listing.</div>
             </div>
-
-            {approvedBids.length > 0 && (
-                <div className="stack">
-                    <div className="tiny muted">Recent approved bids</div>
-                    {approvedBids.map((b) => (
-                        <div key={b.id} className="card spotBookingCard">
-                            <div className="rowInline">
-                                <span className="badge badge--green">
-                                    {b.pay_method === "points" || b.amount_points != null
-                                        ? `${Number(b.amount_points ?? 0)} pts`
-                                        : `£${Number(b.amount_gbp).toFixed(2)}`}
-                                </span>
-                                <span className="badge">Approved</span>
-                            </div>
-                            <div className="tiny muted" style={{ marginTop: 6 }}>
-                                {formatBidWindow(b.start_time, b.end_time)}
-                            </div>
+            <div className="stack">
+                {pendingBids.map((b) => (
+                    <div key={b.id} className="card spotBookingCard">
+                        <div className="rowInline">
+                            <span className="badge">
+                                {b.pay_method === "points" || b.amount_points != null
+                                    ? `${Number(b.amount_points ?? 0)} pts`
+                                    : `GBP ${Number(b.amount_gbp).toFixed(2)}`}
+                            </span>
+                            <span className="badge">{b.status}</span>
                         </div>
-                    ))}
-                </div>
-            )}
-
-            {isOwner && pendingBids.length ? (
-                <div className="stack">
-                    <div className="tiny muted">Incoming bids</div>
-                    {pendingBids.map((b) => (
-                        <div key={b.id} className="card spotBookingCard">
-                            <div className="rowInline">
-                                <span className="badge">
-                                    {b.pay_method === "points" || b.amount_points != null
-                                        ? `${Number(b.amount_points ?? 0)} pts`
-                                        : `£${Number(b.amount_gbp).toFixed(2)}`}
-                                </span>
-                                <span className="badge">{b.status}</span>
-                            </div>
-                            <div className="tiny muted" style={{ marginTop: 6 }}>
-                                {b.bidder_name ?? b.bidder_email ?? "Bidder"}
-                            </div>
-                            <div className="tiny muted" style={{ marginTop: 6 }}>
-                                {formatBidWindow(b.start_time, b.end_time)}
-                            </div>
-                            <div className="rowInline" style={{ marginTop: 10 }}>
-                                <button
-                                    onClick={() => acceptBid(b.id)}
-                                    disabled={bidBusy}
-                                    className="btn btn-primary"
-                                >
-                                    Accept
-                                </button>
-                            </div>
+                        <div className="tiny muted" style={{ marginTop: 6 }}>
+                            {b.bidder_name ?? b.bidder_email ?? "Bidder"}
                         </div>
-                    ))}
-                </div>
-            ) : pendingBids.length > 0 ? (
-                <div className="stack">
-                    <div className="tiny muted">Current bids</div>
-                    {pendingBids.slice(0, 5).map((b) => (
-                        <div key={b.id} className="card spotBookingCard">
-                            <div className="rowInline">
-                                <span className="badge">
-                                    {b.pay_method === "points" || b.amount_points != null
-                                        ? `${Number(b.amount_points ?? 0)} pts`
-                                        : `£${Number(b.amount_gbp).toFixed(2)}`}
-                                </span>
-                                <span className="badge">{b.status}</span>
-                            </div>
-                            <div className="tiny muted" style={{ marginTop: 6 }}>
-                                {formatBidWindow(b.start_time, b.end_time)}
-                            </div>
+                        <div className="tiny muted" style={{ marginTop: 6 }}>
+                            {formatBidWindow(b.start_time, b.end_time)}
                         </div>
-                    ))}
-                </div>
-            ) : null}
-
-            {approvedBids.length === 0 && pendingBids.length === 0 && (
-                <div className="muted tiny">No bids yet.</div>
-            )}
+                        <div className="rowInline" style={{ marginTop: 10 }}>
+                            <button
+                                onClick={() => acceptBid(b.id)}
+                                disabled={bidBusy}
+                                className="btn btn-primary"
+                            >
+                                Accept
+                            </button>
+                        </div>
+                    </div>
+                ))}
+            </div>
         </div>
     ) : null;
 
@@ -973,7 +856,7 @@ export default function SpotDetailsPage() {
                         onClick={() => setCalendarMonth(addMonths(calendarMonth, -1))}
                         disabled={calendarInteractionDisabled}
                     >
-                        ← Prev
+                        {"<- Prev"}
                     </button>
                     <button
                         type="button"
@@ -981,7 +864,7 @@ export default function SpotDetailsPage() {
                         onClick={() => setCalendarMonth(addMonths(calendarMonth, 1))}
                         disabled={calendarInteractionDisabled}
                     >
-                        Next →
+                        {"Next ->"}
                     </button>
                 </div>
             </div>
@@ -993,8 +876,7 @@ export default function SpotDetailsPage() {
             <div className="calendarGrid calendarGrid--days">
                 {calendarDays.map((day) => {
                     const dayKey = localDateStr(day);
-                    const slot = longestSlotsByDate[dayKey] ?? null;
-                    const available = !!slot;
+                    const available = availableDays.has(dayKey);
                     const inMonth = day.getMonth() === calendarMonth.getMonth() && day.getFullYear() === calendarMonth.getFullYear();
                     const selected = dayKey === startDate;
                     return (
@@ -1003,10 +885,10 @@ export default function SpotDetailsPage() {
                             type="button"
                             className={`calendarDay ${available ? "calendarDay--available" : "calendarDay--unavailable"} ${selected ? "calendarDay--selected" : ""} ${inMonth ? "" : "calendarDay--otherMonth"}`}
                             onClick={() => handleCalendarDayPick(day)}
-                            disabled={calendarInteractionDisabled}
+                            disabled={calendarInteractionDisabled || !available}
                         >
                             <span className="calendarDayNum">{day.getDate()}</span>
-                            <span className="calendarDayMeta">{available ? formatCompactDuration(slot.minutes) : "No slot"}</span>
+                            <span className="calendarDayMeta">{available ? "Available" : "Unavailable"}</span>
                         </button>
                     );
                 })}
@@ -1014,7 +896,7 @@ export default function SpotDetailsPage() {
             <div className="calendarLegend">
                 <span className="calendarLegendChip calendarLegendChip--available">Available</span>
                 <span className="calendarLegendChip calendarLegendChip--unavailable">Unavailable</span>
-                <span className="tiny muted">Tap any day to apply the best slot for that date.</span>
+                <span className="tiny muted">Tap a day to set your start date.</span>
             </div>
         </div>
     );
@@ -1023,7 +905,7 @@ export default function SpotDetailsPage() {
         <div className="card spotBook">
             <div className="spotBookHeader">
                 <div className="h3">Reserve this space</div>
-                <div className="muted tiny">Pick a start time and duration. We’ll calculate the end time for you.</div>
+                <div className="muted tiny">Pick a start time and duration. We'll calculate the end time for you.</div>
             </div>
 
             {!canBook && (
@@ -1034,33 +916,7 @@ export default function SpotDetailsPage() {
 
             {isOwner && (
                 <div className="spotAlert">
-                    You can’t book your own spot.
-                </div>
-            )}
-
-            <div className="rowInline">
-                <button
-                    type="button"
-                    className="btn"
-                    onClick={findNextSlots}
-                    disabled={!canBook || isOwner || busy}
-                >
-                    Find next available slot
-                </button>
-            </div>
-            {nextSlotOptions.length > 1 && (
-                <div className="rowInline" style={{ marginTop: 6, flexWrap: "wrap" }}>
-                    {nextSlotOptions.slice(1).map((slot, i) => (
-                        <button
-                            key={`${slot.start.toISOString()}-${slot.minutes}-${i}`}
-                            type="button"
-                            className="btn"
-                            onClick={() => setSlot(slot.start, slot.minutes, "Alternate slot applied.")}
-                            disabled={!canBook || isOwner || busy}
-                        >
-                            {formatSlotLabel(slot.start, slot.minutes)}
-                        </button>
-                    ))}
+                    You can't book your own spot.
                 </div>
             )}
 
@@ -1102,7 +958,6 @@ export default function SpotDetailsPage() {
                         if (!Number.isFinite(hours) || hours <= 0) return;
                         const minutes = Math.max(15, Math.round((hours * 60) / 15) * 15);
                         setDurationMinutes(minutes);
-                        setNextSlotOptions([]);
                     }}
                     disabled={!canBook || isOwner || busy}
                 />
@@ -1115,7 +970,7 @@ export default function SpotDetailsPage() {
             <div className="rowInline">
                 <span className="tiny muted">Estimated total</span>
                 <span className="badge">
-                    {estimatedTotal > 0 ? `£${estimatedTotal.toFixed(2)}` : "Free"}
+                    {estimatedTotal > 0 ? `GBP ${estimatedTotal.toFixed(2)}` : "Free"}
                 </span>
             </div>
             <div className={`slotStatus ${slotStatus.ok ? "slotStatus--ok" : "slotStatus--bad"}`}>
@@ -1279,12 +1134,6 @@ export default function SpotDetailsPage() {
                                 <div className="spotInfoLabel">Availability</div>
                                 <div className="spotInfoValue">{availabilityLabel}</div>
                             </div>
-                            {nextWindow && (
-                                <div className="spotInfoCard spotInfoCard--primary">
-                                    <div className="spotInfoLabel">Next available</div>
-                                    <div className="spotInfoValue">{formatWindow(nextWindow.start, nextWindow.end)}</div>
-                                </div>
-                            )}
                         </div>
                         <div className="spotInfoCards spotInfoCards--secondary">
                             <div className="spotInfoCard spotInfoCard--secondary">
@@ -1325,7 +1174,7 @@ export default function SpotDetailsPage() {
 
                             {isOwner && (
                                 <div className="spotAlert">
-                                    You’re the owner of this listing.
+                                    You're the owner of this listing.
                                 </div>
                             )}
                             {auctionSoldOut && (
@@ -1342,33 +1191,6 @@ export default function SpotDetailsPage() {
 
                             {!isOwner && (
                                 <>
-                                    <div className="rowInline" style={{ marginBottom: 6 }}>
-                                        <button
-                                            type="button"
-                                            className="btn"
-                                            onClick={findNextAvailableSlots}
-                                            disabled={!canBook || busy || bidBusy || auctionSoldOut}
-                                        >
-                                            Next available slot
-                                        </button>
-                                        <div className="tiny muted">We’ll apply the nearest slot with the longest available duration.</div>
-                                    </div>
-                                    {nextSlotOptions.length > 1 && (
-                                        <div className="rowInline" style={{ marginTop: 6, flexWrap: "wrap" }}>
-                                            {nextSlotOptions.slice(1, 4).map((slot, i) => (
-                                                <button
-                                                    key={`${slot.start.toISOString()}-${slot.minutes}-${i}`}
-                                                    type="button"
-                                                    className="btn"
-                                                    onClick={() => setSlot(slot.start, slot.minutes, "Alternate available slot applied.")}
-                                                    disabled={!canBook || busy || bidBusy || auctionSoldOut}
-                                                >
-                                                    {formatSlotLabel(slot.start, slot.minutes)}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-
                                     <div className="row">
                                         <label>
                                             <span>Start date</span>
@@ -1399,7 +1221,6 @@ export default function SpotDetailsPage() {
                                             value={durationMinutes}
                                             onChange={(e) => {
                                                 setDurationMinutes(Number(e.target.value));
-                                                setNextSlotOptions([]);
                                             }}
                                             disabled={!canBook || busy || bidBusy || auctionSoldOut}
                                         >
@@ -1445,7 +1266,7 @@ export default function SpotDetailsPage() {
                                     {bidPayMethod === "money" && (
                                         <>
                                             <label>
-                                                <span>Your bid (£ per hour)</span>
+                                                <span>Your bid (GBP per hour)</span>
                                                 <div className="rowInline" style={{ alignItems: "stretch" }}>
                                                     <input
                                                         className="input"
@@ -1472,14 +1293,14 @@ export default function SpotDetailsPage() {
                                                                 background: "rgba(255,255,255,0.06)",
                                                             }}
                                                         >
-                                                            {bidTotalMoney > 0 ? `£${bidTotalMoney.toFixed(2)}` : "—"}
+                                                            {bidTotalMoney > 0 ? `GBP ${bidTotalMoney.toFixed(2)}` : "-"}
                                                         </div>
                                                     </div>
                                                 </div>
                                             </label>
                                             {bidTotalMoney > 0 && (
                                                 <div className="tiny muted" style={{ marginTop: 4 }}>
-                                                    £{Number(bidAmount || 0).toFixed(2)} x {bidUnits.toFixed(2)} hours = £{bidTotalMoney.toFixed(2)}
+                                                    GBP {Number(bidAmount || 0).toFixed(2)} x {bidUnits.toFixed(2)} hours = GBP {bidTotalMoney.toFixed(2)}
                                                 </div>
                                             )}
 
@@ -1527,7 +1348,7 @@ export default function SpotDetailsPage() {
                                                                 background: "rgba(255,255,255,0.06)",
                                                             }}
                                                         >
-                                                            {bidTotalPoints > 0 ? `${bidTotalPoints} pts` : "—"}
+                                                            {bidTotalPoints > 0 ? `${bidTotalPoints} pts` : "-"}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -1557,7 +1378,7 @@ export default function SpotDetailsPage() {
                         bookingPanel
                     )}
 
-                    {bidsFooterSection}
+                    {ownerPendingBidsSection}
 
                 </main>
             </div>
@@ -1571,10 +1392,10 @@ function formatAvailability(spot: ParkingSpot) {
         ? ` (${formatYmdToDmy(a?.date_from)} to ${formatYmdToDmy(a?.date_to)})`
         : "";
     if (a?.type === "24_7") return `24/7${dateRange}`;
-    if (a?.type === "same_everyday" && a.start && a.end) return `Daily ${a.start}–${a.end}${dateRange}`;
+    if (a?.type === "same_everyday" && a.start && a.end) return `Daily ${a.start}-${a.end}${dateRange}`;
     if (a?.type === "custom_weekly" && Array.isArray(a.rules)) {
         const labels = a.rules
-            .map((r) => `${dowLabel(r.dow)} ${r.start}–${r.end}`)
+            .map((r) => `${dowLabel(r.dow)} ${r.start}-${r.end}`)
             .join(", ");
         return labels ? `${labels}${dateRange}` : "Custom weekly";
     }
@@ -1585,7 +1406,7 @@ function formatAvailability(spot: ParkingSpot) {
         const ds = spot.daily_start?.slice(0, 5);
         const de = spot.daily_end?.slice(0, 5);
         const days = spot.available_days.map(dowLabel).join(", ");
-        if (ds && de) return `${days} ${ds}–${de}`;
+        if (ds && de) return `${days} ${ds}-${de}`;
         return `${days} (weekly)`;
     }
 
@@ -1653,7 +1474,7 @@ function formatDateDMY(d: Date) {
 }
 
 function formatYmdToDmy(ymd?: string | null) {
-    if (!ymd) return "…";
+    if (!ymd) return "...";
     const parts = ymd.split("-");
     if (parts.length === 3 && parts[0].length === 4) {
         const [y, m, d] = parts;
@@ -1692,13 +1513,6 @@ function formatLocalDateTime(d: Date) {
     }
 }
 
-function roundToNextQuarter(d: Date) {
-    const out = new Date(d);
-    const minutes = out.getMinutes();
-    const rounded = Math.ceil(minutes / 15) * 15;
-    out.setMinutes(rounded, 0, 0);
-    return out;
-}
 
 function parseYmd(ymd: string) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
@@ -1739,27 +1553,12 @@ function buildCalendarGrid(monthStart: Date) {
     return days;
 }
 
-function formatWindow(start: Date, end: Date) {
-    return `${dowLabel(start.getDay())} ${formatDateDMY(start)} ${localTimeStr(start)}–${localTimeStr(end)}`;
-}
 
-function formatSlotLabel(start: Date, minutes: number) {
-    const end = addMinutes(start, minutes);
-    return `${dowLabel(start.getDay())} ${localTimeStr(start)}–${localTimeStr(end)}`;
-}
 
-function formatCompactDuration(minutes: number) {
-    const mins = Math.max(0, Math.floor(minutes));
-    const days = Math.floor(mins / (24 * 60));
-    const hours = Math.floor((mins % (24 * 60)) / 60);
-    if (days > 0) return `${days}d ${hours}h`;
-    if (hours > 0) return `${hours}h`;
-    return `${mins}m`;
-}
 
 function formatBidWindow(start?: string, end?: string) {
     if (!start || !end) return "Time not set";
-    return `${formatLocalDateTime(new Date(start))} → ${formatLocalDateTime(new Date(end))}`;
+    return `${formatLocalDateTime(new Date(start))} -> ${formatLocalDateTime(new Date(end))}`;
 }
 
 function isSlotAllowed(spot: ParkingSpot, start: Date, end: Date) {
@@ -1784,6 +1583,17 @@ function isSlotAllowed(spot: ParkingSpot, start: Date, end: Date) {
         if (start >= ruleStart && end <= ruleEnd) return true;
     }
     return false;
+}
+
+function isCalendarDayAvailable(spot: ParkingSpot, day: Date) {
+    const rules = extractAvailabilityRules(spot);
+    if (!rules.length) return true;
+    const a = spot.availability_json;
+    const dayKey = localDateStr(day);
+    if (a?.date_from && dayKey < a.date_from) return false;
+    if (a?.date_to && dayKey > a.date_to) return false;
+    const dow = day.getDay();
+    return rules.some((r) => r.dow === dow);
 }
 
 function formatCountdown(ms: number) {
@@ -1850,198 +1660,13 @@ function getMaxDurationMinutes(spot: ParkingSpot, startDate: string, startTime: 
     return Math.max(0, maxMinutes);
 }
 
-function getNextAvailableWindow(spot: ParkingSpot, bookings: Booking[]) {
-    const segments = getAvailabilitySegments(spot, bookings, 30);
-    if (segments.length > 0) {
-        return { start: segments[0].start, end: segments[0].end };
-    }
-    return null;
-}
 
-function getNextSlots(spot: ParkingSpot, bookings: Booking[], minutes: number, count = 3) {
-    const segments = getAvailabilitySegments(spot, bookings, 30);
-    const results: Date[] = [];
-    for (const seg of segments) {
-        let cursor = new Date(seg.start);
-        while (addMinutes(cursor, minutes) <= seg.end) {
-            results.push(new Date(cursor));
-            if (results.length >= count) return results;
-            cursor = addMinutes(cursor, 15);
-        }
-    }
-    return results;
-}
 
-function getAvailabilitySegments(spot: ParkingSpot, bookings: Booking[], daysForward = 30) {
-    const windows = buildAvailabilityWindows(spot, daysForward);
-    const capacity = Math.max(1, Number((spot as any)?.capacity_total ?? 1));
-    const now = roundToNextQuarter(new Date());
-    const normalized = bookings
-        .filter((b) => b.start_time && b.end_time)
-        .map((b) => ({ start: new Date(b.start_time as string), end: new Date(b.end_time as string) }))
-        .sort((a, b) => a.start.getTime() - b.start.getTime());
 
-    const segments: Array<{ start: Date; end: Date }> = [];
-    for (const window of windows) {
-        const freeSegments = subtractBookings(window, normalized, capacity);
-        for (const seg of freeSegments) {
-            const roundedStart = roundToNextQuarter(seg.start < now ? now : seg.start);
-            if (roundedStart < seg.end) {
-                segments.push({ start: roundedStart, end: seg.end });
-            }
-        }
-    }
-    return segments.sort((a, b) => a.start.getTime() - b.start.getTime());
-}
 
-function toSlotOption(segment: { start: Date; end: Date }): SlotOption | null {
-    const minutesRaw = Math.floor((segment.end.getTime() - segment.start.getTime()) / 60000);
-    const roundedMinutes = Math.floor(minutesRaw / 15) * 15;
-    if (roundedMinutes < 15) return null;
-    return { start: segment.start, minutes: roundedMinutes };
-}
 
-function getNearestLongestSlotsFromSegments(segments: Array<{ start: Date; end: Date }>, count = 4) {
-    const options: SlotOption[] = [];
-    for (const segment of segments) {
-        const option = toSlotOption(segment);
-        if (!option) continue;
-        options.push(option);
-        if (options.length >= count) break;
-    }
-    return options;
-}
 
-function buildLongestSlotsByDate(segments: Array<{ start: Date; end: Date }>) {
-    const map: Record<string, SlotOption> = {};
-    for (const segment of segments) {
-        const option = toSlotOption(segment);
-        if (!option) continue;
-        const key = localDateStr(option.start);
-        const existing = map[key];
-        if (!existing || option.minutes > existing.minutes) {
-            map[key] = option;
-        }
-    }
-    return map;
-}
 
-function getSlotsForDateFromSegments(
-    segments: Array<{ start: Date; end: Date }>,
-    dateKey: string,
-    count = 4
-) {
-    const options: SlotOption[] = [];
-    for (const segment of segments) {
-        const option = toSlotOption(segment);
-        if (!option) continue;
-        if (localDateStr(option.start) !== dateKey) continue;
-        options.push(option);
-    }
-    options.sort((a, b) => a.start.getTime() - b.start.getTime());
-    return options.slice(0, count);
-}
 
-function buildAvailabilityWindows(spot: ParkingSpot, daysForward: number) {
-    const rules = extractAvailabilityRules(spot);
-    if (!rules.length) return [];
 
-    const a: any = (spot as any).availability_json;
-    const dateFrom = a?.date_from ? new Date(`${a.date_from}T00:00:00`) : null;
-    const dateTo = a?.date_to ? new Date(`${a.date_to}T23:59:59`) : null;
 
-    const now = new Date();
-    const startDay = dateFrom && dateFrom > now ? new Date(dateFrom) : new Date(now);
-    startDay.setHours(0, 0, 0, 0);
-    const endCap = new Date(startDay);
-    endCap.setDate(endCap.getDate() + daysForward);
-    const endDay = dateTo && dateTo < endCap ? new Date(dateTo) : endCap;
-    endDay.setHours(23, 59, 59, 999);
-
-    const windows: Array<{ start: Date; end: Date }> = [];
-    for (let day = new Date(startDay); day <= endDay; day.setDate(day.getDate() + 1)) {
-        const d = new Date(day);
-        if (dateFrom && d < dateFrom) continue;
-        if (dateTo && d > dateTo) continue;
-
-        const dow = d.getDay();
-        const dayRules = rules.filter((r) => r.dow === dow);
-        for (const r of dayRules) {
-            const start = setTime(d, r.start);
-            const end = setTime(d, r.end);
-            if (end <= now) continue;
-            windows.push({ start, end });
-        }
-    }
-    return windows;
-}
-
-function subtractBookings(
-    window: { start: Date; end: Date },
-    bookings: Array<{ start: Date; end: Date }>,
-    capacity = 1
-) {
-    const safeCapacity = Math.max(1, Number.isFinite(capacity) ? Math.floor(capacity) : 1);
-
-    if (safeCapacity > 1) {
-        const events: Array<{ at: number; delta: number }> = [];
-        for (const b of bookings) {
-            if (b.end <= window.start || b.start >= window.end) continue;
-            const startMs = Math.max(window.start.getTime(), b.start.getTime());
-            const endMs = Math.min(window.end.getTime(), b.end.getTime());
-            if (endMs <= startMs) continue;
-            events.push({ at: startMs, delta: 1 });
-            events.push({ at: endMs, delta: -1 });
-        }
-
-        if (!events.length) return [{ ...window }];
-
-        events.sort((a, b) => (a.at === b.at ? a.delta - b.delta : a.at - b.at));
-        const blocked: Array<{ start: Date; end: Date }> = [];
-        let active = 0;
-        let blockedStart: number | null = null;
-
-        for (const event of events) {
-            const before = active;
-            active += event.delta;
-            if (before < safeCapacity && active >= safeCapacity) {
-                blockedStart = event.at;
-            }
-            if (before >= safeCapacity && active < safeCapacity && blockedStart != null && event.at > blockedStart) {
-                blocked.push({ start: new Date(blockedStart), end: new Date(event.at) });
-                blockedStart = null;
-            }
-        }
-
-        let segments: Array<{ start: Date; end: Date }> = [{ ...window }];
-        for (const b of blocked) {
-            const next: Array<{ start: Date; end: Date }> = [];
-            for (const seg of segments) {
-                if (b.end <= seg.start || b.start >= seg.end) {
-                    next.push(seg);
-                } else {
-                    if (b.start > seg.start) next.push({ start: seg.start, end: b.start });
-                    if (b.end < seg.end) next.push({ start: b.end, end: seg.end });
-                }
-            }
-            segments = next;
-        }
-        return segments;
-    }
-
-    let segments: Array<{ start: Date; end: Date }> = [{ ...window }];
-    for (const b of bookings) {
-        if (b.end <= window.start || b.start >= window.end) continue;
-        const next: Array<{ start: Date; end: Date }> = [];
-        for (const seg of segments) {
-            if (b.end <= seg.start || b.start >= seg.end) {
-                next.push(seg);
-            } else {
-                if (b.start > seg.start) next.push({ start: seg.start, end: b.start });
-                if (b.end < seg.end) next.push({ start: b.end, end: seg.end });
-            }
-        }
-        segments = next;
-    }
-    return segments;
-}

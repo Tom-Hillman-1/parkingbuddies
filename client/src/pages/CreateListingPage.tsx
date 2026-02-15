@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import L from "leaflet";
 import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from "react-leaflet";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { ParkingSpot } from "../types";
@@ -154,6 +154,7 @@ export default function CreateListingPage() {
     const { token, user } = useAuth();
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
+    const location = useLocation();
 
     const editId = searchParams.get("edit");
     const isEdit = Boolean(editId);
@@ -788,27 +789,8 @@ export default function CreateListingPage() {
     }
 
     if (!token) {
-        return (
-            <div className="container">
-                <div className="formNarrow">
-                    <div className="pageHeader">
-                        <div className="heroKicker">LISTINGS</div>
-                        <div className="heroTitle">Sign in to create a listing</div>
-                        <div className="heroSub muted">You need an account before publishing listings.</div>
-                    </div>
-                    <div className="card formSection">
-                        <div className="rowInline">
-                            <Link to="/login" className="btn btn-primary">
-                                Log in
-                            </Link>
-                            <Link to="/signup" className="btn">
-                                Sign up
-                            </Link>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
+        const next = `${location.pathname}${location.search}`;
+        return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
     }
 
     return (

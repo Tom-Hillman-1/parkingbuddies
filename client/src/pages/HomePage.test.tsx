@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { vi, type MockedFunction } from "vitest";
 import HomePage from "./HomePage";
@@ -6,6 +6,10 @@ import { apiGet } from "../lib/api";
 
 vi.mock("../components/SpotsMap", () => ({
     default: () => <div data-testid="spots-map" />,
+}));
+
+vi.mock("lottie-react", () => ({
+    default: () => <div data-testid="hero-lottie" />,
 }));
 
 vi.mock("../lib/api", () => ({
@@ -47,7 +51,7 @@ describe("HomePage", () => {
         vi.clearAllMocks();
     });
 
-    it("shows listings even when price exceeds the old default max filter", async () => {
+    it("shows listings and price label", async () => {
         (apiGet as MockedFunction<typeof apiGet>).mockResolvedValue({
             ok: true,
             parking_spots: [baseSpot],
@@ -56,7 +60,7 @@ describe("HomePage", () => {
         renderHome();
 
         expect(await screen.findByText("Alpha Garage")).toBeInTheDocument();
-        expect(screen.getByText("£120.00")).toBeInTheDocument();
+        expect(screen.getByText("£120.00 / hour")).toBeInTheDocument();
     });
 
     it("filters listings by search text", async () => {
@@ -72,17 +76,11 @@ describe("HomePage", () => {
         await screen.findByText("Alpha Garage");
         await screen.findByText("Beta Lot");
 
-        vi.useFakeTimers();
-        const input = screen.getAllByPlaceholderText("Try: Upper Street, garage, cheap…")[0];
-        await act(async () => {
-            fireEvent.change(input, { target: { value: "beta" } });
-            vi.advanceTimersByTime(300);
-        });
+        const input = screen.getByPlaceholderText("Search by area, street, or landmark");
+        fireEvent.change(input, { target: { value: "beta" } });
 
         expect(screen.getByText("Beta Lot")).toBeInTheDocument();
         expect(screen.queryByText("Alpha Garage")).not.toBeInTheDocument();
-
-        vi.useRealTimers();
     });
 
     it("shows only the top 4 search results", async () => {
@@ -107,3 +105,4 @@ describe("HomePage", () => {
         expect(screen.getByText(/Showing 4 of 5 spots/)).toBeInTheDocument();
     });
 });
+

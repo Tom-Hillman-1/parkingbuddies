@@ -1,89 +1,178 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
+const HELP_EMAIL = "parkingbuddiesproject@gmail.com";
+
 export default function AboutPage() {
+    const [name, setName] = useState("");
+    const [email, setEmail] = useState("");
+    const [topic, setTopic] = useState("General question");
+    const [message, setMessage] = useState("");
+    const [sending, setSending] = useState(false);
+    const [sent, setSent] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    async function submitHelp(e: React.FormEvent<HTMLFormElement>) {
+        e.preventDefault();
+        setSending(true);
+        setSent(false);
+        setError(null);
+
+        const formData = new FormData();
+        formData.append("name", name.trim());
+        formData.append("email", email.trim());
+        formData.append("topic", topic);
+        formData.append("message", message.trim());
+        formData.append("_subject", `ParkingBuddies help request: ${topic}`);
+        formData.append("_captcha", "false");
+        formData.append("_template", "table");
+
+        try {
+            const res = await fetch(`https://formsubmit.co/ajax/${HELP_EMAIL}`, {
+                method: "POST",
+                headers: { Accept: "application/json" },
+                body: formData,
+            });
+
+            if (!res.ok) throw new Error("Could not send your message right now.");
+
+            setSent(true);
+            setName("");
+            setEmail("");
+            setTopic("General question");
+            setMessage("");
+        } catch {
+            setError("Message failed to send. Please try again or use direct email.");
+        } finally {
+            setSending(false);
+        }
+    }
+
     return (
-        <div className="container">
-            <div className="pageHeader">
-                <div className="heroKicker">ABOUT</div>
-                <div className="heroTitle">What is ParkingBuddies?</div>
-                <div className="heroSub muted">
-                    A community-driven platform for finding, sharing, and renting parking spaces — built to make city
-                    parking simpler, fairer, and more efficient.
-                </div>
-            </div>
-
-            <div className="aboutGrid">
-                <div className="card aboutCard aboutCard--mint">
-                    <div className="aboutKicker">THE IDEA</div>
-                    <div className="aboutTitle">Parking, without the stress</div>
-                    <div className="aboutBody">
-                        ParkingBuddies connects drivers with owners who have under‑used parking spaces. Instead of relying
-                        only on large commercial car parks, the platform unlocks local, community‑shared options that are
-                        often cheaper and closer to your destination.
-                    </div>
-                    <div className="aboutFoot">Fewer loops. Less congestion. More options.</div>
-                </div>
-
-                <div className="card aboutCard aboutCard--sun">
-                    <div className="aboutKicker">HOW IT WORKS</div>
-                    <div className="aboutTitle">Three roles, one platform</div>
-                    <div className="aboutBody">
-                        Drivers search by location, price, and time. Owners list private or public spaces with availability.
-                        For high‑demand spots, auctions let drivers bid fairly for a slot.
-                    </div>
-                    <div className="aboutList">
-                        <span className="badge badge--accent">Drivers</span>
-                        <span className="badge badge--cool">Owners</span>
-                        <span className="badge badge--warm">Auctions</span>
-                    </div>
-                </div>
-            </div>
-
-            <div className="aboutGrid" style={{ marginTop: 14 }}>
-                <div className="card aboutCard aboutCard--sky">
-                    <div className="aboutKicker">WHAT YOU CAN DO</div>
-                    <div className="aboutTitle">Plan, book, track</div>
-                    <div className="aboutBody">
-                        Browse live listings, book in minutes, pay with money or points, and monitor everything from your dashboard.
-                        Settings keeps your profile and password up to date.
-                    </div>
-                    <div className="aboutList">
-                        <span className="badge">Map + list views</span>
-                        <span className="badge">Rewards & points</span>
-                        <span className="badge">Booking history</span>
-                    </div>
-                </div>
-
-                <div className="card aboutCard aboutCard--rose">
-                    <div className="aboutKicker">TRUST & CLARITY</div>
-                    <div className="aboutTitle">Transparent by design</div>
-                    <div className="aboutBody">
-                        Listings show availability windows, pricing, and photos. Owners confirm bookings or bids so both
-                        sides stay in control, and drivers always know the time slot they’ve secured.
-                    </div>
-                    <div className="aboutFoot">Clear listings. Clear outcomes.</div>
-                </div>
-            </div>
-
-            <div className="card aboutCard aboutCard--nav" style={{ marginTop: 14 }}>
-                <div className="aboutKicker">NAVIGATION</div>
-                <div className="aboutTitle">Quick guide</div>
-                <div className="aboutBody">
-                    Home is where you search and compare. Dashboard is where you manage bookings, listings, and rewards.
-                    Settings lets you update profile details and password.
-                </div>
-                <div className="rowInline" style={{ marginTop: 10 }}>
+        <div className="container aboutPage">
+            <section className="card aboutHero aboutPanel">
+                <div className="aboutKicker">ABOUT THE PROJECT</div>
+                <h1 className="aboutTitle">Built to help drivers book parking in minutes.</h1>
+                <p className="aboutBody aboutLead">
+                    ParkingBuddies was developed by Tom Hillman as a third-year BSc Computer Science dissertation project.
+                    If you are here to book a space, this page gives the short version of how the platform works and why it exists.
+                </p>
+                <div className="aboutHeroActions">
                     <Link to="/" className="btn btn-primary">Browse spots</Link>
-                    <Link to="/create-listing" className="btn">Create a listing</Link>
+                    <Link to="/create-listing" className="btn btn-ghost">Create a listing</Link>
                 </div>
-            </div>
-            <div className="card aboutCard aboutCard--mint" style={{ marginTop: 12 }}>
-                <div className="aboutKicker">SUPPORT</div>
-                <div className="aboutTitle">Need help?</div>
-                <div className="aboutBody">
-                    Drop us a line at <a href="mailto:parkingbuddiesproject@gmail.com">parkingbuddiesproject@gmail.com</a> with questions about listings, payouts, or payments.
-                </div>
-            </div>
+            </section>
+
+            <section className="aboutSectionGrid">
+                <article className="card aboutPanel">
+                    <div className="aboutKicker">FOR DRIVERS</div>
+                    <h2 className="aboutCardTitle">How booking works</h2>
+                    <p className="aboutCardCopy">
+                        The flow is designed to be simple and quick:
+                    </p>
+                    <ol className="aboutStepList">
+                        <li>Search by area and compare nearby options on map or list.</li>
+                        <li>Check availability, price, and listing details before you decide.</li>
+                        <li>Book directly, or bid if the space is in auction mode.</li>
+                    </ol>
+                </article>
+
+                <article className="card aboutPanel">
+                    <div className="aboutKicker">FOR OWNERS</div>
+                    <h2 className="aboutCardTitle">How listings and auctions work</h2>
+                    <p className="aboutCardCopy">
+                        Owners publish spaces with clear availability and a pricing model. Listings can run as standard
+                        booking or as auctions for higher-demand slots.
+                    </p>
+                    <ul className="aboutListStack">
+                        <li>Standard listing: drivers reserve instantly.</li>
+                        <li>Auction listing: drivers place bids in a timed window.</li>
+                        <li>At close, the highest valid bid wins.</li>
+                    </ul>
+                </article>
+
+                <article className="card aboutPanel aboutPanel--wide">
+                    <div className="aboutKicker">HOW IT CAME TO BE</div>
+                    <h2 className="aboutCardTitle">A dissertation project built around a real daily problem</h2>
+                    <p className="aboutCardCopy">
+                        Parking is a common source of wasted time and stress in urban areas. This project explores how a
+                        focused full-stack platform can reduce that friction for everyday users.
+                    </p>
+                    <p className="aboutCardCopy">
+                        The wider goal is community connection: drivers find reliable local spaces, and owners gain value
+                        from spare capacity they already have.
+                    </p>
+                </article>
+            </section>
+
+            <section className="card aboutPanel aboutHelpCard">
+                <div className="aboutKicker">CONTACT</div>
+                <h2 className="aboutCardTitle">Questions about booking, listings, or auctions?</h2>
+                <p className="aboutBody">
+                    Send a message below. If the form fails, email directly at
+                    <a href={`mailto:${HELP_EMAIL}`}> {HELP_EMAIL}</a>.
+                </p>
+
+                <form className="aboutHelpForm" onSubmit={submitHelp} noValidate>
+                    <div className="aboutHelpRow">
+                        <label className="field">
+                            <span>Full name</span>
+                            <input
+                                className="input"
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                placeholder="Your name"
+                                required
+                            />
+                        </label>
+
+                        <label className="field">
+                            <span>Email</span>
+                            <input
+                                className="input"
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                placeholder="you@example.com"
+                                required
+                            />
+                        </label>
+                    </div>
+
+                    <label className="field">
+                        <span>Topic</span>
+                        <select className="input" value={topic} onChange={(e) => setTopic(e.target.value)}>
+                            <option>General question</option>
+                            <option>Booking support</option>
+                            <option>Listing support</option>
+                            <option>Account issue</option>
+                            <option>Payments and rewards</option>
+                        </select>
+                    </label>
+
+                    <label className="field">
+                        <span>Message</span>
+                        <textarea
+                            className="input aboutHelpTextarea"
+                            value={message}
+                            onChange={(e) => setMessage(e.target.value)}
+                            placeholder="Tell us what you need help with"
+                            rows={6}
+                            required
+                        />
+                    </label>
+
+                    <div className="aboutHelpActions">
+                        <button type="submit" className="btn btn-primary" disabled={sending}>
+                            {sending ? "Sending..." : "Send message"}
+                        </button>
+                        <a className="btn btn-ghost" href={`mailto:${HELP_EMAIL}`}>Email directly</a>
+                    </div>
+
+                    {sent && <p className="aboutHelpNotice aboutHelpNotice--ok">Thanks, your message has been sent.</p>}
+                    {error && <p className="aboutHelpNotice aboutHelpNotice--err">{error}</p>}
+                </form>
+            </section>
         </div>
     );
 }
