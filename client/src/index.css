@@ -947,6 +947,153 @@ label > span:first-child {
     cursor: pointer;
 }
 
+.dashboardTopActions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin: 0.5rem 0 1rem;
+}
+
+.dashboardLayout {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    align-items: start;
+    gap: 1.1rem;
+}
+
+.dashboardRail {
+    display: grid;
+    gap: 0.55rem;
+    align-content: start;
+    position: sticky;
+    top: 6.4rem;
+}
+
+.dashboardNavBtn {
+    width: 100%;
+    min-height: 112px;
+    border-radius: 14px;
+    border: 1px solid #d6e2f4;
+    background: #fff;
+    color: #1f3350;
+    font-weight: 700;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.55rem;
+    padding: 0.9rem 0.85rem;
+    cursor: pointer;
+    transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.dashboardNavBtn:hover {
+    border-color: #c1d6f6;
+    background: #f7fbff;
+}
+
+.dashboardNavBtn.is-active {
+    border-color: #8fb7f3;
+    background: #edf4ff;
+    color: #134ea3;
+}
+
+.dashboardNavBtn--driver {
+    border-left: 4px solid #56a8ff;
+}
+
+.dashboardNavBtn--owner {
+    border-left: 4px solid #3f7ee8;
+}
+
+.dashboardNavBtn--payments {
+    border-left: 4px solid #7f95b8;
+}
+
+.dashboardNavText {
+    display: grid;
+    gap: 0.08rem;
+}
+
+.dashboardNavTitle {
+    font-size: 1.02rem;
+    font-weight: 800;
+    line-height: 1.15;
+}
+
+.dashboardNavSub {
+    font-size: 0.88rem;
+    color: #607089;
+    line-height: 1.2;
+}
+
+.dashboardPanel {
+    display: grid;
+    gap: 0.9rem;
+}
+
+.dashboardPanel .card.formSection {
+    border: 0;
+    box-shadow: none;
+}
+
+.dashboardPanel button.sectionHeader {
+    border-top: 0;
+    border-right: 0;
+    border-bottom: 0;
+    background: transparent;
+}
+
+.dashboardPanel .dashGrid,
+.dashboardPanel .dashGrid--withinGroup {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.1rem;
+}
+
+.dashboardPanel .dashItem {
+    padding: 0.88rem;
+    border-radius: 12px;
+    border: 1px solid #c8d8ee;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+    background: #fff;
+}
+
+.dashboardPanel .thumb {
+    width: 68px;
+    height: 68px;
+    border-radius: 10px;
+}
+
+.dashboardPanel .dashItemTitle {
+    font-size: 0.98rem;
+}
+
+.dashboardPanel .dashItemSubtitle {
+    font-size: 0.8rem;
+}
+
+.dashboardPanel .dashItemPrice,
+.dashboardPanel .dashAmount {
+    font-size: 0.92rem;
+}
+
+.dashboardPanel .dashItemGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.78rem;
+}
+
+.dashboardPanel .dashItemGrid .dashItem {
+    height: 100%;
+}
+
+.dashboardPanel .dashMetaRow {
+    margin-top: 0.56rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
 .dashboardGroup,
 .dashGrid,
 .dashGrid--withinGroup {
@@ -1738,6 +1885,42 @@ label > span:first-child {
     .spotMapWrap .leafletMap {
         height: 300px;
     }
+
+    .dashboardLayout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .dashboardRail {
+        position: static;
+        top: auto;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .dashboardNavBtn {
+        min-height: 84px;
+        padding: 0.68rem 0.66rem;
+    }
+
+    .dashboardNavTitle {
+        font-size: 0.92rem;
+    }
+
+    .dashboardNavSub {
+        font-size: 0.8rem;
+    }
+
+    .dashboardPanel .dashItemGrid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .dashboardPanel .dashItem {
+        padding: 0.82rem;
+    }
+
+    .dashboardPanel .thumb {
+        width: 64px;
+        height: 64px;
+    }
 }
 
 @media (max-width: 920px) {
@@ -1841,6 +2024,10 @@ label > span:first-child {
     .aboutHeroActions .btn,
     .aboutHelpActions .btn {
         width: 100%;
+    }
+
+    .dashboardRail {
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 

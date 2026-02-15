@@ -106,6 +106,8 @@ type ConnectStatus = {
     demo_available: boolean;
 };
 
+type DashboardSection = "manageBookings" | "manageListings" | "transactions";
+
 function toMoney(x: any) {
     const n = Number(x ?? 0);
     return Number.isFinite(n) ? n : 0;
@@ -231,10 +233,8 @@ export default function DashboardPage() {
     const [connectBusy, setConnectBusy] = useState(false);
     const [seenCounts, setSeenCounts] = useState(DEFAULT_SEEN_COUNTS);
     const [seenHydrated, setSeenHydrated] = useState(false);
+    const [activeSection, setActiveSection] = useState<DashboardSection>("manageBookings");
     const [open, setOpen] = useState({
-        manageBookings: false,
-        manageListings: false,
-        transactions: false,
         ownerConfirmed: false,
         ownerPending: false,
         payouts: false,
@@ -317,6 +317,11 @@ export default function DashboardPage() {
         });
     }
 
+    function showSection(section: DashboardSection) {
+        setActiveSection(section);
+        markSectionSeen(section);
+    }
+
     async function loadAll() {
         if (!token) return;
         setLoading(true);
@@ -365,11 +370,24 @@ export default function DashboardPage() {
     useEffect(() => {
         const tab = searchParams.get("tab");
         if (!tab) return;
+        const tabToSection: Record<string, DashboardSection> = {
+            myBookings: "manageBookings",
+            myAuctionBids: "manageBookings",
+            driverUpcoming: "manageBookings",
+            myListings: "manageListings",
+            ownerConfirmed: "manageListings",
+            ownerPending: "manageListings",
+            ownerUpcoming: "manageListings",
+            rewards: "transactions",
+            payments: "transactions",
+            payouts: "transactions",
+        };
+        const nextSection = tabToSection[tab];
+        if (nextSection) {
+            setActiveSection(nextSection);
+        }
         setOpen((p) => ({
             ...p,
-            manageBookings: tab === "myBookings" || tab === "myAuctionBids" || tab === "driverUpcoming" ? true : p.manageBookings,
-            manageListings: tab === "myListings" || tab === "ownerConfirmed" || tab === "ownerPending" || tab === "ownerUpcoming" ? true : p.manageListings,
-            transactions: tab === "rewards" || tab === "payments" || tab === "payouts" ? true : p.transactions,
             myBookings: tab === "myBookings" ? true : p.myBookings,
             myAuctionBids: tab === "myAuctionBids" ? true : p.myAuctionBids,
             ownerPending: tab === "ownerPending" ? true : p.ownerPending,
@@ -405,7 +423,6 @@ export default function DashboardPage() {
     const pendingOwnerCount = useMemo(() => {
         return auctionBids.filter((b) => String(b.status ?? "").toLowerCase() === "pending").length;
     }, [auctionBids]);
-    const hasPendingOwnerActions = pendingOwnerCount > 0;
 
     const confirmedOwnerBookings = useMemo(() => {
         return ownerBookings.filter((b) => b.status === "confirmed");
@@ -520,6 +537,16 @@ export default function DashboardPage() {
         manageListings: tabHasNew.myListings || tabHasNew.ownerConfirmed || tabHasNew.ownerUpcoming || tabHasNew.ownerPending,
         transactions: tabHasNew.rewards || tabHasNew.payments || tabHasNew.payouts,
     };
+    const navSections: Array<{
+        key: DashboardSection;
+        title: string;
+        subtitle: string;
+        tone: "driver" | "owner" | "payments";
+    }> = [
+        { key: "manageBookings", title: "Manage bookings", subtitle: "Driver activity", tone: "driver" },
+        { key: "manageListings", title: "Manage listings", subtitle: "Owner activity", tone: "owner" },
+        { key: "transactions", title: "Transactions", subtitle: "Payments and rewards", tone: "payments" },
+    ];
 
     async function cancelBooking(id: string) {
         if (!token) return;
@@ -627,7 +654,12 @@ export default function DashboardPage() {
     }
 
     function focusStripePayoutsCard() {
-        setOpen((prev) => ({ ...prev, payouts: true }));
+        setActiveSection("transactions");
+        markSectionSeen("transactions");
+        setOpen((prev) => ({
+            ...prev,
+            payouts: true,
+        }));
         window.setTimeout(() => {
             payoutsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
         }, 80);
@@ -691,7 +723,7 @@ export default function DashboardPage() {
                     <div className="heroSub muted">Manage bookings, listings, and rewards.</div>
                 </div>
             </div>
-            <div className="rowInline" style={{ gap: 12, flexWrap: "wrap" , marginBottom: 12 }}>
+            <div className="dashboardTopActions">
                 <button
                     className="btn btn-primary"
                     onClick={handleTopStripeDashboard}
@@ -705,27 +737,30 @@ export default function DashboardPage() {
             {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
             {msg && <div className="card formSection">{msg}</div>}
 
-            <div className="card formSection dashboardGroup dashboardGroup--bookings">
-                <button
-                    type="button"
-                    className="sectionHeader sectionHeader--driver collapsibleHeader dashboardGroupHeader"
-                    onClick={() => {
-                        const nextOpen = !open.manageBookings;
-                        if (nextOpen) markSectionSeen("manageBookings");
-                        setOpen((p) => ({ ...p, manageBookings: nextOpen }));
-                    }}
-                >
-                    <div className="sectionHeaderTitle">
-                        <span className="sectionDot" />
-                        <div>
-                            <div className="heroKicker">MANAGE MY BOOKINGS</div>
-                            <div className="h2">Driver activity</div>
-                        </div>
-                    </div>
-                </button>
-                <div className="sectionSub muted">My bookings, my pending bids, and upcoming schedule as a driver.</div>
-                {open.manageBookings && (
-                    <div className="dashGrid dashGrid--withinGroup" style={{ marginTop: 8 }}>
+            <div className="dashboardLayout">
+                <aside className="dashboardRail" aria-label="Dashboard sections">
+                    {navSections.map((section) => (
+                        <button
+                            key={section.key}
+                            type="button"
+                            className={`dashboardNavBtn dashboardNavBtn--${section.tone}${
+                                activeSection === section.key ? " is-active" : ""
+                            }`}
+                            onClick={() => showSection(section.key)}
+                        >
+                            <div className="dashboardNavText">
+                                <span className="dashboardNavTitle">{section.title}</span>
+                                <span className="dashboardNavSub">{section.subtitle}</span>
+                            </div>
+                            {sectionHasNew[section.key] && <span className="badge badge--cool">New</span>}
+                        </button>
+                    ))}
+                </aside>
+
+                <div className="dashboardPanel">
+            {activeSection === "manageBookings" && (
+            <div className="dashboardGroup dashboardGroup--bookings">
+                    <div className="dashGrid dashGrid--withinGroup">
                 <div className="card formSection">
                     <button
                         type="button"
@@ -745,7 +780,7 @@ export default function DashboardPage() {
                     {open.myBookings && (myBookings.length === 0 ? (
                         <div className="muted">No bookings yet.</div>
                     ) : (
-                        <div className="stack">
+                        <div className="dashItemGrid">
                             {myBookings
                                 .slice()
                                 .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
@@ -832,7 +867,7 @@ export default function DashboardPage() {
                     {open.myAuctionBids && (myAuctionBids.length === 0 ? (
                         <div className="muted">No pending bids.</div>
                     ) : (
-                        <div className="stack">
+                        <div className="dashItemGrid">
                             {myAuctionBids
                                 .slice()
                                 .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
@@ -893,7 +928,7 @@ export default function DashboardPage() {
                     {open.driverUpcoming && (driverUpcoming.length === 0 ? (
                         <div className="muted">No upcoming driver bookings.</div>
                     ) : (
-                        <div className="stack">
+                        <div className="dashItemGrid">
                             {driverUpcoming.map((b) => {
                                 const spot = spotById.get(b.parking_spot_id);
                                 const title = spot?.title ?? "Parking spot";
@@ -935,30 +970,12 @@ export default function DashboardPage() {
                     ))}
                 </div>
                     </div>
-                )}
             </div>
+            )}
 
-            <div className="card formSection dashboardGroup dashboardGroup--listings" style={{ marginTop: 14 }}>
-                <button
-                    type="button"
-                    className="sectionHeader sectionHeader--owner collapsibleHeader dashboardGroupHeader"
-                    onClick={() => {
-                        const nextOpen = !open.manageListings;
-                        if (nextOpen) markSectionSeen("manageListings");
-                        setOpen((p) => ({ ...p, manageListings: nextOpen }));
-                    }}
-                >
-                    <div className="sectionHeaderTitle">
-                        <span className="sectionDot" />
-                        <div>
-                            <div className="heroKicker">MANAGE MY LISTINGS</div>
-                            <div className="h2">Owner activity</div>
-                        </div>
-                    </div>
-                </button>
-                <div className="sectionSub muted">My listings, booked slots, owner schedule, and bids awaiting approval.</div>
-                {open.manageListings && (
-                    <div className="dashGrid dashGrid--withinGroup" style={{ marginTop: 14 }}>
+            {activeSection === "manageListings" && (
+            <div className="dashboardGroup dashboardGroup--listings">
+                    <div className="dashGrid dashGrid--withinGroup">
                         <div className="card formSection">
                     <button
                         type="button"
@@ -980,7 +997,7 @@ export default function DashboardPage() {
                             No listings yet. <Link to="/create-listing">Create one</Link>.
                         </div>
                     ) : (
-                        <div className="stack">
+                        <div className="dashItemGrid">
                             {myListings
                                 .slice()
                                 .sort((a, b) => ((a.created_at ?? "") < (b.created_at ?? "") ? 1 : -1))
@@ -1051,7 +1068,7 @@ export default function DashboardPage() {
                     {open.ownerConfirmed && (confirmedOwnerBookings.length === 0 ? (
                         <div className="muted">No confirmed bookings yet.</div>
                     ) : (
-                        <div className="stack">
+                        <div className="dashItemGrid">
                             {confirmedOwnerBookings.map((b) => {
                                     const spot = spotById.get(b.parking_spot_id);
                                     const title = spot?.title ?? "Parking spot";
@@ -1109,7 +1126,7 @@ export default function DashboardPage() {
                     </div>
 
                     {open.ownerPending && (
-                        <div className="stack" style={{ marginTop: 10 }}>
+                        <div className="dashItemGrid" style={{ marginTop: 10 }}>
                             <div className="tiny muted">Auction bids</div>
                             {auctionBids.filter((b) => {
                                 const s = String(b.status ?? "").toLowerCase();
@@ -1171,7 +1188,8 @@ export default function DashboardPage() {
                             )}
                         </div>
                     )}
-                </div><div className="card formSection">
+                </div>
+                <div className="card formSection">
                         <button
                             type="button"
                             className="sectionHeader sectionHeader--owner collapsibleHeader"
@@ -1190,7 +1208,7 @@ export default function DashboardPage() {
                         {open.ownerUpcoming && (ownerUpcoming.length === 0 ? (
                             <div className="muted">No upcoming owner bookings.</div>
                         ) : (
-                            <div className="stack">
+                            <div className="dashItemGrid">
                                 {ownerUpcoming.map((b) => {
                                     const spot = spotById.get(b.parking_spot_id);
                                     const title = spot?.title ?? "Parking spot";
@@ -1229,31 +1247,12 @@ export default function DashboardPage() {
                         ))}
                     </div>
                     </div>
-                )}
             </div>
+            )}
 
-            <div className="card formSection dashboardGroup dashboardGroup--transactions" style={{ marginTop: 14 }}>
-                <button
-                    type="button"
-                    className="sectionHeader sectionHeader--payments collapsibleHeader dashboardGroupHeader"
-                    onClick={() => {
-                        const nextOpen = !open.transactions;
-                        if (nextOpen) markSectionSeen("transactions");
-                        setOpen((p) => ({ ...p, transactions: nextOpen }));
-                    }}
-                >
-                    <div className="sectionHeaderTitle">
-                        <span className="sectionDot" />
-                        <div>
-                            <div className="heroKicker">TRANSACTIONS</div>
-                            <div className="h2">Payments and rewards</div>
-                        </div>
-                    </div>
-                </button>
-                <div className="sectionSub muted">Stripe payouts, payment history, and rewards activity.</div>
-                {open.transactions && (
-                    <>
-                        <div className="dashGrid dashGrid--withinGroup" style={{ marginTop: 14 }}>
+            {activeSection === "transactions" && (
+            <div className="dashboardGroup dashboardGroup--transactions">
+                        <div className="dashGrid dashGrid--withinGroup">
                             <div className="card formSection">
                                 <button
                                     type="button"
@@ -1273,7 +1272,7 @@ export default function DashboardPage() {
                                 {open.rewards && (rewards.length === 0 ? (
                                     <div className="muted">No reward activity yet.</div>
                                 ) : (
-                                    <div className="stack">
+                                    <div className="dashItemGrid">
                                         {rewards
                                             .slice()
                                             .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
@@ -1339,7 +1338,7 @@ export default function DashboardPage() {
                                 {open.payments && (payments.length === 0 ? (
                                     <div className="muted">No payments yet.</div>
                                 ) : (
-                                    <div className="stack">
+                                    <div className="dashItemGrid">
                                         {payments.map((p) => {
                                             const flow = moneyFlowView(p.direction);
                                             const spot = p.spot_title ? spotByTitle.get(p.spot_title) : undefined;
@@ -1404,7 +1403,7 @@ export default function DashboardPage() {
                         </div>
 
                         <div className="dashGrid" style={{ marginTop: 2 }}>
-                            <div className="card formSection">
+                            <div ref={payoutsRef} className="card formSection">
                                 <button
                                     type="button"
                                     className="sectionHeader sectionHeader--payments collapsibleHeader"
@@ -1484,8 +1483,9 @@ export default function DashboardPage() {
                                 )}
                             </div>
                         </div>
-                    </>
-                )}
+            </div>
+            )}
+                </div>
             </div>
 
             {/* Owner-side bookings now use /bookings/owner */}
