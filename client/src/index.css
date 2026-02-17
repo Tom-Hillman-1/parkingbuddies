@@ -2228,6 +2228,28 @@ label > span:first-child {
     transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
 }
 
+.wizardTileSelect {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    align-content: start;
+    gap: 0.36rem;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+}
+
+.wizardTileSelect:focus-visible {
+    outline: 2px solid rgba(34, 92, 168, 0.72);
+    outline-offset: 3px;
+    border-radius: 16px;
+}
+
 .wizardTile::before {
     content: "";
     position: absolute;
@@ -2311,10 +2333,27 @@ label > span:first-child {
     transform: translateY(0);
 }
 
-.wizardIntroSelected {
-    color: #334b67;
-    font-size: 0.87rem;
+.wizardTileSpotsRow {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.74);
+    padding-top: 0.5rem;
+}
+
+.wizardTileSpotsValue {
+    color: rgba(20, 39, 66, 0.84);
+    font-size: 0.78rem;
     font-weight: 700;
+}
+
+.wizardTileSpotsBtn {
+    min-height: 34px;
+    padding: 0.28rem 0.7rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
 }
 
 .wizardSplit {

@@ -2,7 +2,7 @@
 import type { ChangeEvent, ReactNode } from "react";
 import L from "leaflet";
 import { MapContainer, Marker, TileLayer, useMapEvents } from "react-leaflet";
-import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useBeforeUnload, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { ParkingSpot } from "../types";
@@ -31,6 +31,26 @@ type AvailabilitySlot = {
     end: string;
 };
 
+type DraftSnapshot = {
+    mode: Mode;
+    title: string;
+    description: string;
+    capacityTotal: string;
+    priceUnit: PriceUnit;
+    price: string;
+    auctionStartPrice: string;
+    allowPoints: boolean;
+    pointsCost: string;
+    availabilityPreset: AvailabilityPreset;
+    dateFrom: string;
+    dateTo: string;
+    customSlots: AvailabilitySlot[];
+    addressText: string;
+    lat: string;
+    lng: string;
+    imageUrl: string;
+};
+
 const STEP_COUNT = 6;
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DEFAULT_CENTER: [number, number] = [51.5074, -0.1278];
@@ -39,6 +59,7 @@ const MIN_AUCTION_START_PRICE_GBP = 0.1;
 const MIN_POINTS_COST = 1;
 const DEFAULT_AUCTION_START_PRICE = String(MIN_AUCTION_START_PRICE_GBP);
 const DEFAULT_POINTS_COST = String(MIN_POINTS_COST);
+const LEAVE_DRAFT_MESSAGE = "Are you sure you want to leave? Changes will not be saved.";
 
 const SPACE_CHOICES: Array<{ id: SpaceChoice; label: string; value: number }> = [
     { id: "1", label: "1 space", value: 1 },
@@ -195,17 +216,37 @@ function modeLabel(mode: Mode) {
     return "Free";
 }
 
-function modeSummary(mode: Mode) {
-    if (mode === "rent") return "Fixed-price booking";
-    if (mode === "auction") return "Owner-approved offers";
-    return "No payment required";
-}
-
 function availabilityLabel(preset: AvailabilityPreset) {
     if (preset === "always") return "24/7";
     if (preset === "weekdays") return "Weekdays";
     if (preset === "weekends") return "Weekends";
     return "Custom";
+}
+
+function draftSignature(snapshot: DraftSnapshot) {
+    return JSON.stringify({
+        mode: snapshot.mode,
+        title: snapshot.title.trim(),
+        description: snapshot.description.trim(),
+        capacityTotal: String(Math.max(1, Math.floor(Number(snapshot.capacityTotal) || 1))),
+        priceUnit: snapshot.priceUnit,
+        price: Number(snapshot.price || 0),
+        auctionStartPrice: Number(snapshot.auctionStartPrice || 0),
+        allowPoints: Boolean(snapshot.allowPoints),
+        pointsCost: Number(snapshot.pointsCost || 0),
+        availabilityPreset: snapshot.availabilityPreset,
+        dateFrom: snapshot.dateFrom || "",
+        dateTo: snapshot.dateTo || "",
+        customSlots: snapshot.customSlots.map((slot) => ({
+            dow: Number(slot.dow),
+            start: slot.start,
+            end: slot.end,
+        })),
+        addressText: snapshot.addressText.trim(),
+        lat: String(snapshot.lat),
+        lng: String(snapshot.lng),
+        imageUrl: snapshot.imageUrl.trim(),
+    });
 }
 
 function parseAvailabilityRules(rawRules: any): AvailabilitySlot[] {
@@ -275,6 +316,8 @@ function SelectionTile({
     tone,
     active,
     onClick,
+    spacesLabel,
+    onEditSpaces,
 }: {
     title: string;
     copy: string;
@@ -282,29 +325,37 @@ function SelectionTile({
     tone: Tone;
     active: boolean;
     onClick: () => void;
+    spacesLabel?: string;
+    onEditSpaces?: () => void;
 }) {
     return (
-        <article
-            className={`wizardTile wizardTile--${tone}${active ? " is-active" : ""}`}
-            onClick={onClick}
-            onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onClick();
-                }
-            }}
-            role="button"
-            tabIndex={0}
-            aria-pressed={active}
-        >
-            <div className="wizardTileHead">
-                <Tooltip label={`${title} mode help`} text={help} />
-            </div>
-            <span className="wizardTileTitle">{title}</span>
-            <span className="wizardTileCopy">{copy}</span>
-            <span className="wizardTileCheck" aria-hidden="true">
-                Selected
-            </span>
+        <article className={`wizardTile wizardTile--${tone}${active ? " is-active" : ""}`}>
+            <button type="button" className="wizardTileSelect" onClick={onClick} aria-pressed={active}>
+                <div className="wizardTileHead">
+                    <Tooltip label={`${title} mode help`} text={help} />
+                </div>
+                <span className="wizardTileTitle">{title}</span>
+                <span className="wizardTileCopy">{copy}</span>
+                <span className="wizardTileCheck" aria-hidden="true">
+                    Selected
+                </span>
+            </button>
+
+            {active && onEditSpaces && spacesLabel && (
+                <div className="wizardTileSpotsRow">
+                    <span className="wizardTileSpotsValue">{spacesLabel}</span>
+                    <button
+                        type="button"
+                        className="btn wizardTileSpotsBtn"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onEditSpaces();
+                        }}
+                    >
+                        Edit spots
+                    </button>
+                </div>
+            )}
         </article>
     );
 }
@@ -466,12 +517,127 @@ export default function CreateListingPage() {
     const [loadingExisting, setLoadingExisting] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
+    const [baselineSignature, setBaselineSignature] = useState("");
+    const suppressNextPopGuardRef = useRef(false);
 
     const imageInputRef = useRef<HTMLInputElement | null>(null);
 
     const parsedCoords = useMemo(() => parseCoordinates(lat, lng), [lat, lng]);
     const mapCenter: [number, number] = parsedCoords ? [parsedCoords.lat, parsedCoords.lng] : DEFAULT_CENTER;
     const markerPosition: [number, number] | null = parsedCoords ? [parsedCoords.lat, parsedCoords.lng] : null;
+    const currentSignature = useMemo(
+        () =>
+            draftSignature({
+                mode,
+                title,
+                description,
+                capacityTotal,
+                priceUnit,
+                price,
+                auctionStartPrice,
+                allowPoints,
+                pointsCost,
+                availabilityPreset,
+                dateFrom,
+                dateTo,
+                customSlots,
+                addressText,
+                lat,
+                lng,
+                imageUrl,
+            }),
+        [
+            mode,
+            title,
+            description,
+            capacityTotal,
+            priceUnit,
+            price,
+            auctionStartPrice,
+            allowPoints,
+            pointsCost,
+            availabilityPreset,
+            dateFrom,
+            dateTo,
+            customSlots,
+            addressText,
+            lat,
+            lng,
+            imageUrl,
+        ]
+    );
+    const hasUnsavedChanges = baselineSignature !== "" && currentSignature !== baselineSignature;
+
+    useBeforeUnload(
+        (event) => {
+            if (!hasUnsavedChanges || saving) return;
+            event.preventDefault();
+            event.returnValue = "";
+        },
+        { capture: true }
+    );
+
+    useEffect(() => {
+        if (!hasUnsavedChanges || saving) return;
+
+        const onDocumentClick = (event: MouseEvent) => {
+            if (event.defaultPrevented) return;
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+            const source = event.target as Element | null;
+            const anchor = source?.closest?.("a[href]") as HTMLAnchorElement | null;
+            if (!anchor) return;
+            if (anchor.target && anchor.target !== "_self") return;
+            if (anchor.hasAttribute("download")) return;
+
+            const href = anchor.getAttribute("href");
+            if (!href || href.startsWith("#") || href.startsWith("javascript:")) return;
+
+            let nextUrl: URL;
+            try {
+                nextUrl = new URL(anchor.href, window.location.href);
+            } catch {
+                return;
+            }
+
+            if (nextUrl.origin !== window.location.origin) return;
+
+            const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+            const nextPath = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+            if (currentPath === nextPath) return;
+
+            if (!window.confirm(LEAVE_DRAFT_MESSAGE)) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        };
+
+        const onPopState = () => {
+            if (suppressNextPopGuardRef.current) {
+                suppressNextPopGuardRef.current = false;
+                return;
+            }
+            if (window.confirm(LEAVE_DRAFT_MESSAGE)) return;
+            suppressNextPopGuardRef.current = true;
+            window.history.go(1);
+        };
+
+        document.addEventListener("click", onDocumentClick, true);
+        window.addEventListener("popstate", onPopState);
+        return () => {
+            document.removeEventListener("click", onDocumentClick, true);
+            window.removeEventListener("popstate", onPopState);
+        };
+    }, [hasUnsavedChanges, saving]);
+
+    useEffect(() => {
+        setBaselineSignature("");
+    }, [editId]);
+
+    useEffect(() => {
+        if (isEdit || loadingExisting || baselineSignature) return;
+        setBaselineSignature(currentSignature);
+    }, [isEdit, loadingExisting, baselineSignature, currentSignature]);
 
     useEffect(() => {
         if (!isEdit || !token || !editId) return;
@@ -485,51 +651,77 @@ export default function CreateListingPage() {
                 if (!active) return;
                 const listing = res.parking_spot;
                 const av = (listing.availability_json ?? null) as any;
-
-                setMode((listing.mode as Mode) ?? "rent");
-                setTitle(listing.title ?? "");
-                setDescription(listing.description ?? "");
-                setPrice(listing.mode === "rent" ? String(listing.price_gbp ?? "") : "");
-                setPriceUnit((listing.price_unit as PriceUnit) ?? "hour");
-                setAllowPoints(Boolean(listing.allow_points));
-                setPointsCost(String(listing.points_cost ?? DEFAULT_POINTS_COST));
-                setAuctionStartPrice(
+                const nextMode = (listing.mode as Mode) ?? "rent";
+                const nextTitle = listing.title ?? "";
+                const nextDescription = listing.description ?? "";
+                const nextPrice = listing.mode === "rent" ? String(listing.price_gbp ?? "") : "";
+                const nextPriceUnit = (listing.price_unit as PriceUnit) ?? "hour";
+                const nextAllowPoints = Boolean(listing.allow_points);
+                const nextPointsCost = String(listing.points_cost ?? DEFAULT_POINTS_COST);
+                const nextAuctionStartPrice =
                     listing.auction_start_price_gbp == null
                         ? DEFAULT_AUCTION_START_PRICE
-                        : String(listing.auction_start_price_gbp)
-                );
-                setCapacityTotal(String(listing.capacity_total ?? 1));
-                setAddressText(listing.address_text ?? "");
-                setLat(String(listing.lat ?? ""));
-                setLng(String(listing.lng ?? ""));
-                setImageUrl(listing.image_url ?? "");
+                        : String(listing.auction_start_price_gbp);
+                const nextCapacityTotal = String(listing.capacity_total ?? 1);
+                const nextAddressText = listing.address_text ?? "";
+                const nextLat = String(listing.lat ?? "");
+                const nextLng = String(listing.lng ?? "");
+                const nextImageUrl = listing.image_url ?? "";
+                const nextDateFrom = typeof av?.date_from === "string" ? av.date_from : dateFromToday(0);
+                const nextDateTo = typeof av?.date_to === "string" ? av.date_to : dateFromToday(3);
 
-                setDateFrom(typeof av?.date_from === "string" ? av.date_from : dateFromToday(0));
-                setDateTo(typeof av?.date_to === "string" ? av.date_to : dateFromToday(3));
-
-                if (av?.type === "24_7") {
-                    setAvailabilityPreset("always");
-                    setCustomSlots([createSlot()]);
-                    return;
-                }
+                let nextAvailabilityPreset: AvailabilityPreset = "always";
+                let nextCustomSlots: AvailabilitySlot[] = [createSlot()];
 
                 if (av?.type === "custom_weekly") {
-                    const nextSlots = parseAvailabilityRules(av?.rules);
-                    setAvailabilityPreset("custom");
-                    setCustomSlots(nextSlots);
-                    return;
-                }
-
-                if (av?.type === "same_everyday") {
+                    nextAvailabilityPreset = "custom";
+                    nextCustomSlots = parseAvailabilityRules(av?.rules);
+                } else if (av?.type === "same_everyday") {
                     const start = typeof av?.start === "string" && isTime(av.start) ? av.start : "09:00";
                     const end = typeof av?.end === "string" && isTime(av.end) ? av.end : "17:00";
-                    setAvailabilityPreset("custom");
-                    setCustomSlots([0, 1, 2, 3, 4, 5, 6].map((dow) => createSlot({ dow, start, end })));
-                    return;
+                    nextAvailabilityPreset = "custom";
+                    nextCustomSlots = [0, 1, 2, 3, 4, 5, 6].map((dow) => createSlot({ dow, start, end }));
                 }
 
-                setAvailabilityPreset("always");
-                setCustomSlots([createSlot()]);
+                setMode(nextMode);
+                setTitle(nextTitle);
+                setDescription(nextDescription);
+                setPrice(nextPrice);
+                setPriceUnit(nextPriceUnit);
+                setAllowPoints(nextAllowPoints);
+                setPointsCost(nextPointsCost);
+                setAuctionStartPrice(nextAuctionStartPrice);
+                setCapacityTotal(nextCapacityTotal);
+                setAddressText(nextAddressText);
+                setLat(nextLat);
+                setLng(nextLng);
+                setImageUrl(nextImageUrl);
+                setDateFrom(nextDateFrom);
+                setDateTo(nextDateTo);
+                setAvailabilityPreset(nextAvailabilityPreset);
+                setCustomSlots(nextCustomSlots);
+
+                setBaselineSignature(
+                    draftSignature({
+                        mode: nextMode,
+                        title: nextTitle,
+                        description: nextDescription,
+                        capacityTotal: nextCapacityTotal,
+                        priceUnit: nextPriceUnit,
+                        price: nextPrice,
+                        auctionStartPrice: nextAuctionStartPrice,
+                        allowPoints: nextAllowPoints,
+                        pointsCost: nextPointsCost,
+                        availabilityPreset: nextAvailabilityPreset,
+                        dateFrom: nextDateFrom,
+                        dateTo: nextDateTo,
+                        customSlots: nextCustomSlots,
+                        addressText: nextAddressText,
+                        lat: nextLat,
+                        lng: nextLng,
+                        imageUrl: nextImageUrl,
+                    })
+                );
             })
             .catch((e: any) => {
                 if (!active) return;
@@ -863,6 +1055,7 @@ export default function CreateListingPage() {
             setSaving(true);
             try {
                 await apiPatch<{ parking_spot: ParkingSpot }>(`/parking-spots/${editId}`, payload, token);
+                setBaselineSignature(currentSignature);
                 setConfirmSheetOpen(false);
                 navigate("/", { replace: true });
             } catch (e: any) {
@@ -876,6 +1069,7 @@ export default function CreateListingPage() {
         setSaving(true);
         try {
             await apiPost<{ parking_spot: ParkingSpot }>("/parking-spots", payload, token);
+            setBaselineSignature(currentSignature);
             setConfirmSheetOpen(false);
             navigate("/", { replace: true });
         } catch (e: any) {
@@ -1299,24 +1493,10 @@ export default function CreateListingPage() {
                                             tone={choice.tone}
                                             active={mode === choice.mode}
                                             onClick={() => setMode(choice.mode)}
+                                            spacesLabel={`${setupCapacity || 1} ${setupCapacity === 1 ? "space" : "spaces"}`}
+                                            onEditSpaces={openSpacesSheet}
                                         />
                                     ))}
-                                </div>
-
-                                <div className="wizardIntroSelected">
-                                    Selected: {modeLabel(mode)} - {modeSummary(mode)}
-                                </div>
-
-                                <div className="wizardInlineRow wizardInlineRow--intro">
-                                    <div>
-                                        <div className="wizardInlineTitle">Spaces available</div>
-                                        <div className="wizardInlineValue">
-                                            {setupCapacity || 1} {setupCapacity === 1 ? "space" : "spaces"}
-                                        </div>
-                                    </div>
-                                    <button type="button" className="btn" onClick={openSpacesSheet}>
-                                        Choose spaces
-                                    </button>
                                 </div>
 
                                 <div className="wizardActions wizardActions--intro">
