@@ -33,7 +33,10 @@ export type ParkingSpot = {
     // NEW unified availability (from your newer server logic)
     availability_json?: {
         type: "24_7" | "same_everyday" | "custom_weekly";
-        same_everyday?: { start: string; end: string }; // "HH:MM"
+        date_from?: string;
+        date_to?: string;
+        start?: string; // "HH:MM"
+        end?: string; // "HH:MM"
         rules?: Array<{ dow: number; start: string; end: string }>; // dow: 0-6
     } | null;
 

@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, FormEvent } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import L from "leaflet";
-import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { MapContainer, Marker, TileLayer, useMapEvents } from "react-leaflet";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
+import { apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { ParkingSpot } from "../types";
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
@@ -12,14 +12,18 @@ import markerShadow from "leaflet/dist/images/marker-shadow.png";
 
 type Mode = "free" | "rent" | "auction";
 type PriceUnit = "hour" | "day" | "week";
-type ParkingType = "private" | "public";
-type AvailabilityType = "24_7" | "same_everyday" | "custom_weekly";
+type AvailabilityPreset = "always" | "weekdays" | "weekends" | "custom";
+type WizardStep = 1 | 2 | 3 | 4 | 5 | 6;
+type FlowStep = Exclude<WizardStep, 1>;
+type SpaceChoice = "1" | "2" | "3" | "4plus";
+type Tone = "blue" | "lilac" | "mint" | "cream" | "sky" | "sage";
+
 type GeocodeSuggestion = {
-    place_id: number;
     display_name: string;
     lat: string;
     lon: string;
 };
+
 type AvailabilitySlot = {
     id: string;
     dow: number;
@@ -27,6 +31,7 @@ type AvailabilitySlot = {
     end: string;
 };
 
+const STEP_COUNT = 6;
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DEFAULT_CENTER: [number, number] = [51.5074, -0.1278];
 const LONDON_VIEWBOX = "-0.5103,51.6919,0.3340,51.2868";
@@ -34,6 +39,93 @@ const MIN_AUCTION_START_PRICE_GBP = 0.1;
 const MIN_POINTS_COST = 1;
 const DEFAULT_AUCTION_START_PRICE = String(MIN_AUCTION_START_PRICE_GBP);
 const DEFAULT_POINTS_COST = String(MIN_POINTS_COST);
+
+const SPACE_CHOICES: Array<{ id: SpaceChoice; label: string; value: number }> = [
+    { id: "1", label: "1 space", value: 1 },
+    { id: "2", label: "2 spaces", value: 2 },
+    { id: "3", label: "3 spaces", value: 3 },
+    { id: "4plus", label: "4+ spaces", value: 4 },
+];
+
+const MODEL_CHOICES: Array<{ mode: Mode; title: string; copy: string; tone: Tone; help: string }> = [
+    {
+        mode: "rent",
+        title: "Rent",
+        copy: "Fixed pricing for instant bookings.",
+        tone: "blue",
+        help: "Drivers can book instantly at the rate you set.",
+    },
+    {
+        mode: "auction",
+        title: "Auction",
+        copy: "Drivers submit offers. You approve what works.",
+        tone: "lilac",
+        help: "Drivers send offers and you decide which bid to accept.",
+    },
+    {
+        mode: "free",
+        title: "Free",
+        copy: "No payment required for this listing.",
+        tone: "mint",
+        help: "Bookings are free to drivers and no payment is collected.",
+    },
+];
+
+const STEP_META: Record<FlowStep, { panelTitle: string; panelCopy: string; panelTone: Tone; title: string; subtitle: string }> = {
+    2: {
+        panelTitle: "Basics",
+        panelCopy: "Set the core details so drivers quickly understand your space.",
+        panelTone: "blue",
+        title: "Listing basics",
+        subtitle: "Keep this short, clear, and practical.",
+    },
+    3: {
+        panelTitle: "Pricing",
+        panelCopy: "Choose a simple pricing setup that matches your listing model.",
+        panelTone: "lilac",
+        title: "Pricing",
+        subtitle: "Set how drivers pay for this listing.",
+    },
+    4: {
+        panelTitle: "Availability",
+        panelCopy: "Define when drivers can request or book this space.",
+        panelTone: "mint",
+        title: "Availability",
+        subtitle: "Choose quick presets or custom day and time windows.",
+    },
+    5: {
+        panelTitle: "Location",
+        panelCopy: "Add a searchable address and confirm the exact map pin.",
+        panelTone: "cream",
+        title: "Location",
+        subtitle: "Search once, then fine-tune by tapping on the map.",
+    },
+    6: {
+        panelTitle: "Images",
+        panelCopy: "A clear image improves trust and click-through for drivers.",
+        panelTone: "sky",
+        title: "Images",
+        subtitle: "Optional, but strongly recommended.",
+    },
+};
+
+const AVAILABILITY_CHOICES: Array<{
+    id: AvailabilityPreset;
+    title: string;
+    copy: string;
+    tone: "blue" | "lilac" | "mint" | "cream";
+}> = [
+    { id: "always", title: "24/7", copy: "Always available", tone: "blue" },
+    { id: "weekdays", title: "Weekdays", copy: "Mon-Fri", tone: "lilac" },
+    { id: "weekends", title: "Weekends", copy: "Sat-Sun", tone: "mint" },
+    { id: "custom", title: "Custom", copy: "Choose days and times", tone: "cream" },
+];
+
+const PRICE_UNIT_CHOICES: Array<{ id: PriceUnit; label: string }> = [
+    { id: "hour", label: "Hourly" },
+    { id: "day", label: "Daily" },
+    { id: "week", label: "Weekly" },
+];
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -43,20 +135,6 @@ L.Icon.Default.mergeOptions({
 });
 
 const defaultIcon = new L.Icon.Default();
-
-function toLocalDateTimeInput(iso: string | null | undefined) {
-    if (!iso) return "";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "";
-    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-    return local.toISOString().slice(0, 16);
-}
-
-function toIsoFromLocalInput(local: string) {
-    const d = new Date(local);
-    if (Number.isNaN(d.getTime())) return null;
-    return d.toISOString();
-}
 
 function isTime(value: string) {
     return /^\d{2}:\d{2}$/.test(value);
@@ -83,10 +161,6 @@ function toLocalDateInput(date: Date) {
     return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
-function toLocalDateTimeValue(date: Date) {
-    return `${toLocalDateInput(date)}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
-}
-
 function dateFromToday(daysAhead: number) {
     const next = new Date();
     next.setHours(0, 0, 0, 0);
@@ -94,13 +168,7 @@ function dateFromToday(daysAhead: number) {
     return toLocalDateInput(next);
 }
 
-function dateTimeMonthsFromNow(monthsAhead: number) {
-    const next = new Date();
-    next.setMonth(next.getMonth() + monthsAhead);
-    return toLocalDateTimeValue(next);
-}
-
-function createAvailabilitySlot(partial?: Partial<Omit<AvailabilitySlot, "id">>): AvailabilitySlot {
+function createSlot(partial?: Partial<Omit<AvailabilitySlot, "id">>): AvailabilitySlot {
     return {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         dow: partial?.dow ?? 1,
@@ -109,13 +177,65 @@ function createAvailabilitySlot(partial?: Partial<Omit<AvailabilitySlot, "id">>)
     };
 }
 
-function MapRecenter({ center }: { center: [number, number] }) {
-    const map = useMap();
-    useEffect(() => {
-        const zoom = map.getZoom();
-        map.setView(center, zoom, { animate: true });
-    }, [center[0], center[1], map]);
-    return null;
+function areSlotsValid(slots: AvailabilitySlot[]) {
+    return slots.every(
+        (slot) =>
+            Number.isInteger(Number(slot.dow)) &&
+            Number(slot.dow) >= 0 &&
+            Number(slot.dow) <= 6 &&
+            isTime(slot.start) &&
+            isTime(slot.end) &&
+            minutes(slot.start) < minutes(slot.end)
+    );
+}
+
+function modeLabel(mode: Mode) {
+    if (mode === "rent") return "Rent";
+    if (mode === "auction") return "Auction";
+    return "Free";
+}
+
+function modeSummary(mode: Mode) {
+    if (mode === "rent") return "Fixed-price booking";
+    if (mode === "auction") return "Owner-approved offers";
+    return "No payment required";
+}
+
+function availabilityLabel(preset: AvailabilityPreset) {
+    if (preset === "always") return "24/7";
+    if (preset === "weekdays") return "Weekdays";
+    if (preset === "weekends") return "Weekends";
+    return "Custom";
+}
+
+function parseAvailabilityRules(rawRules: any): AvailabilitySlot[] {
+    if (!Array.isArray(rawRules)) return [createSlot()];
+
+    const parsed = rawRules
+        .map((rule) => ({
+            dow: Number(rule?.dow),
+            start: typeof rule?.start === "string" ? rule.start : "",
+            end: typeof rule?.end === "string" ? rule.end : "",
+        }))
+        .filter(
+            (rule) =>
+                Number.isInteger(rule.dow) &&
+                rule.dow >= 0 &&
+                rule.dow <= 6 &&
+                isTime(rule.start) &&
+                isTime(rule.end) &&
+                minutes(rule.start) < minutes(rule.end)
+        )
+        .map((rule) => createSlot(rule));
+
+    return parsed.length > 0 ? parsed : [createSlot()];
+}
+
+function quickPresetRules(preset: AvailabilityPreset) {
+    if (preset === "weekdays") {
+        return [1, 2, 3, 4, 5].map((dow) => ({ dow, start: "00:00", end: "23:59" }));
+    }
+    return [0, 6].map((dow) => ({ dow, start: "00:00", end: "23:59" }));
 }
 
 function MapPickerPin({
@@ -135,6 +255,172 @@ function MapPickerPin({
     return <Marker position={position} icon={defaultIcon} />;
 }
 
+function Tooltip({ label, text }: { label: string; text: string }) {
+    return (
+        <span className="wizardTooltip">
+            <button type="button" className="wizardTooltipBtn" aria-label={label} title={text}>
+                ?
+            </button>
+            <span role="tooltip" className="wizardTooltipBubble">
+                {text}
+            </span>
+        </span>
+    );
+}
+
+function SelectionTile({
+    title,
+    copy,
+    help,
+    tone,
+    active,
+    onClick,
+}: {
+    title: string;
+    copy: string;
+    help: string;
+    tone: Tone;
+    active: boolean;
+    onClick: () => void;
+}) {
+    return (
+        <article
+            className={`wizardTile wizardTile--${tone}${active ? " is-active" : ""}`}
+            onClick={onClick}
+            onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onClick();
+                }
+            }}
+            role="button"
+            tabIndex={0}
+            aria-pressed={active}
+        >
+            <div className="wizardTileHead">
+                <Tooltip label={`${title} mode help`} text={help} />
+            </div>
+            <span className="wizardTileTitle">{title}</span>
+            <span className="wizardTileCopy">{copy}</span>
+            <span className="wizardTileCheck" aria-hidden="true">
+                Selected
+            </span>
+        </article>
+    );
+}
+
+function StepShell({
+    step,
+    panel,
+    title,
+    subtitle,
+    footer,
+    children,
+}: {
+    step: FlowStep;
+    panel: { panelTitle: string; panelCopy: string; panelTone: Tone };
+    title: string;
+    subtitle: string;
+    footer: ReactNode;
+    children: ReactNode;
+}) {
+    return (
+        <section className="wizardSplit" key={`step-${step}`}>
+            <aside className={`wizardLeft wizardLeft--${panel.panelTone}`}>
+                <div className="wizardLeftLogo">ParkingBuddies</div>
+                <div className="wizardLeftStep">
+                    Step {step} of {STEP_COUNT}
+                </div>
+                <h2 className="wizardLeftTitle">{panel.panelTitle}</h2>
+                <p className="wizardLeftCopy">{panel.panelCopy}</p>
+            </aside>
+
+            <section className="wizardRight">
+                <div className="wizardCard">
+                    <header className="wizardCardHead">
+                        <h3 className="h2 wizardCardTitle">{title}</h3>
+                        <p className="wizardCardSub">{subtitle}</p>
+                    </header>
+
+                    <div className="wizardCardBody">{children}</div>
+                    <footer className="wizardCardFoot">{footer}</footer>
+                </div>
+            </section>
+        </section>
+    );
+}
+
+function StepNavigation({
+    onBack,
+    onNext,
+    nextLabel = "Next",
+    nextDisabled = false,
+    backDisabled = false,
+    hint = "",
+}: {
+    onBack: () => void;
+    onNext: () => void;
+    nextLabel?: string;
+    nextDisabled?: boolean;
+    backDisabled?: boolean;
+    hint?: string;
+}) {
+    return (
+        <div className="wizardActions">
+            <button type="button" className="btn" onClick={onBack} disabled={backDisabled}>
+                Back
+            </button>
+            <div className="wizardActionHint">{hint}</div>
+            <button type="button" className="btn btn-primary" onClick={onNext} disabled={nextDisabled}>
+                {nextLabel}
+            </button>
+        </div>
+    );
+}
+
+function WizardSheet({
+    open,
+    title,
+    subtitle,
+    onClose,
+    children,
+    wide = false,
+}: {
+    open: boolean;
+    title: string;
+    subtitle: string;
+    onClose: () => void;
+    children: ReactNode;
+    wide?: boolean;
+}) {
+    if (!open) return null;
+
+    return (
+        <div className="createSheetBackdrop" role="presentation" onClick={onClose}>
+            <section
+                className={`createSheet${wide ? " createSheet--wide" : ""}`}
+                role="dialog"
+                aria-modal="true"
+                aria-label={title}
+                onClick={(event) => event.stopPropagation()}
+            >
+                <div className="createSheetHead">
+                    <div>
+                        <div className="heroKicker">SETUP</div>
+                        <div className="h3">{title}</div>
+                        <div className="createFieldHint">{subtitle}</div>
+                    </div>
+                    <button type="button" className="btn" onClick={onClose}>
+                        Close
+                    </button>
+                </div>
+
+                {children}
+            </section>
+        </div>
+    );
+}
+
 export default function CreateListingPage() {
     const { token, user } = useAuth();
     const [searchParams] = useSearchParams();
@@ -144,48 +430,44 @@ export default function CreateListingPage() {
     const editId = searchParams.get("edit");
     const isEdit = Boolean(editId);
 
+    const [activeStep, setActiveStep] = useState<WizardStep>(1);
+
+    const [mode, setMode] = useState<Mode>("rent");
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
-    const [mode, setMode] = useState<Mode>("rent");
-    const [price, setPrice] = useState("5");
+    const [capacityTotal, setCapacityTotal] = useState("1");
+
     const [priceUnit, setPriceUnit] = useState<PriceUnit>("hour");
+    const [price, setPrice] = useState("5");
+    const [auctionStartPrice, setAuctionStartPrice] = useState(DEFAULT_AUCTION_START_PRICE);
     const [allowPoints, setAllowPoints] = useState(false);
     const [pointsCost, setPointsCost] = useState(DEFAULT_POINTS_COST);
-    const [addressText, setAddressText] = useState("");
-    const [addressSuggestions, setAddressSuggestions] = useState<GeocodeSuggestion[]>([]);
-    const [addressSearchBusy, setAddressSearchBusy] = useState(false);
-    const [addressSearchMessage, setAddressSearchMessage] = useState("");
-    const [addressDropdownOpen, setAddressDropdownOpen] = useState(false);
-    const [reverseLookupBusy, setReverseLookupBusy] = useState(false);
-    const [lat, setLat] = useState(String(DEFAULT_CENTER[0]));
-    const [lng, setLng] = useState(String(DEFAULT_CENTER[1]));
-    const [imageUrl, setImageUrl] = useState("");
-    const [selectedImageName, setSelectedImageName] = useState("");
-    const [parkingType, setParkingType] = useState<ParkingType>("private");
-    const [capacityTotal, setCapacityTotal] = useState("1");
-    const [capacityAvailable, setCapacityAvailable] = useState("1");
 
-    const [availabilityType, setAvailabilityType] = useState<AvailabilityType>("24_7");
+    const [availabilityPreset, setAvailabilityPreset] = useState<AvailabilityPreset>("always");
     const [dateFrom, setDateFrom] = useState(() => dateFromToday(0));
     const [dateTo, setDateTo] = useState(() => dateFromToday(3));
-    const [sameStart, setSameStart] = useState("09:00");
-    const [sameEnd, setSameEnd] = useState("17:00");
-    const [customWeeklySlots, setCustomWeeklySlots] = useState<AvailabilitySlot[]>([createAvailabilitySlot()]);
+    const [customSlots, setCustomSlots] = useState<AvailabilitySlot[]>([createSlot()]);
 
-    const [auctionStartPrice, setAuctionStartPrice] = useState(DEFAULT_AUCTION_START_PRICE);
-    const [auctionEndLocal, setAuctionEndLocal] = useState(() => dateTimeMonthsFromNow(1));
+    const [addressText, setAddressText] = useState("");
+    const [addressSearchBusy, setAddressSearchBusy] = useState(false);
+    const [addressSearchMessage, setAddressSearchMessage] = useState("");
+    const [lat, setLat] = useState(String(DEFAULT_CENTER[0]));
+    const [lng, setLng] = useState(String(DEFAULT_CENTER[1]));
+
+    const [imageUrl, setImageUrl] = useState("");
+    const [spacesSheetOpen, setSpacesSheetOpen] = useState(false);
+    const [pendingSpacesChoice, setPendingSpacesChoice] = useState<SpaceChoice>("1");
+    const [pendingSpacesCustom, setPendingSpacesCustom] = useState("4");
+
+    const [customSheetOpen, setCustomSheetOpen] = useState(false);
+
+    const [confirmSheetOpen, setConfirmSheetOpen] = useState(false);
 
     const [loadingExisting, setLoadingExisting] = useState(false);
     const [saving, setSaving] = useState(false);
-    const [deleting, setDeleting] = useState(false);
-
     const [error, setError] = useState("");
-    const [success, setSuccess] = useState("");
+
     const imageInputRef = useRef<HTMLInputElement | null>(null);
-    const addressLookupRef = useRef<HTMLDivElement | null>(null);
-    const addressSearchAbortRef = useRef<AbortController | null>(null);
-    const reverseLookupAbortRef = useRef<AbortController | null>(null);
-    const suppressSuggestRef = useRef(false);
 
     const parsedCoords = useMemo(() => parseCoordinates(lat, lng), [lat, lng]);
     const mapCenter: [number, number] = parsedCoords ? [parsedCoords.lat, parsedCoords.lng] : DEFAULT_CENTER;
@@ -193,6 +475,7 @@ export default function CreateListingPage() {
 
     useEffect(() => {
         if (!isEdit || !token || !editId) return;
+
         let active = true;
         setLoadingExisting(true);
         setError("");
@@ -200,54 +483,53 @@ export default function CreateListingPage() {
         apiGet<{ parking_spot: ParkingSpot }>(`/parking-spots/${editId}`, token)
             .then((res) => {
                 if (!active) return;
-                const s = res.parking_spot;
-                const av = (s.availability_json ?? null) as any;
+                const listing = res.parking_spot;
+                const av = (listing.availability_json ?? null) as any;
 
-                setTitle(s.title ?? "");
-                setDescription(s.description ?? "");
-                setMode((s.mode as Mode) ?? "rent");
-                setPrice(s.mode === "rent" ? String(s.price_gbp ?? "") : "");
-                setPriceUnit((s.price_unit as PriceUnit) ?? "hour");
-                setAllowPoints(Boolean(s.allow_points));
-                setPointsCost(String(s.points_cost ?? ""));
-                suppressSuggestRef.current = true;
-                setAddressText(s.address_text ?? "");
-                setLat(String(s.lat ?? ""));
-                setLng(String(s.lng ?? ""));
-                setImageUrl(s.image_url ?? "");
-                setSelectedImageName(s.image_url ? "Current listing image" : "");
-                const nextParkingType = (s.parking_type as ParkingType) ?? "private";
-                const nextCapacity = String(s.capacity_total ?? 1);
-                setParkingType(nextParkingType);
-                setCapacityTotal(nextCapacity);
-                setCapacityAvailable(String(s.capacity_available ?? s.capacity_total ?? 1));
+                setMode((listing.mode as Mode) ?? "rent");
+                setTitle(listing.title ?? "");
+                setDescription(listing.description ?? "");
+                setPrice(listing.mode === "rent" ? String(listing.price_gbp ?? "") : "");
+                setPriceUnit((listing.price_unit as PriceUnit) ?? "hour");
+                setAllowPoints(Boolean(listing.allow_points));
+                setPointsCost(String(listing.points_cost ?? DEFAULT_POINTS_COST));
+                setAuctionStartPrice(
+                    listing.auction_start_price_gbp == null
+                        ? DEFAULT_AUCTION_START_PRICE
+                        : String(listing.auction_start_price_gbp)
+                );
+                setCapacityTotal(String(listing.capacity_total ?? 1));
+                setAddressText(listing.address_text ?? "");
+                setLat(String(listing.lat ?? ""));
+                setLng(String(listing.lng ?? ""));
+                setImageUrl(listing.image_url ?? "");
 
                 setDateFrom(typeof av?.date_from === "string" ? av.date_from : dateFromToday(0));
                 setDateTo(typeof av?.date_to === "string" ? av.date_to : dateFromToday(3));
-                if (av?.type === "same_everyday") {
-                    setAvailabilityType("same_everyday");
-                    setSameStart(typeof av?.start === "string" ? av.start : "09:00");
-                    setSameEnd(typeof av?.end === "string" ? av.end : "17:00");
-                } else if (av?.type === "custom_weekly" && Array.isArray(av?.rules)) {
-                    setAvailabilityType("custom_weekly");
-                    const nextSlots = av.rules
-                        .map((r: any) => ({
-                            dow: Number(r?.dow),
-                            start: typeof r?.start === "string" ? r.start : "",
-                            end: typeof r?.end === "string" ? r.end : "",
-                        }))
-                        .filter((r: any) => Number.isInteger(r.dow) && r.dow >= 0 && r.dow <= 6 && isTime(r.start) && isTime(r.end))
-                        .map((r: any) => createAvailabilitySlot({ dow: r.dow, start: r.start, end: r.end }));
-                    setCustomWeeklySlots(nextSlots.length > 0 ? nextSlots : [createAvailabilitySlot()]);
-                } else {
-                    setAvailabilityType("24_7");
-                    setCustomWeeklySlots([createAvailabilitySlot()]);
+
+                if (av?.type === "24_7") {
+                    setAvailabilityPreset("always");
+                    setCustomSlots([createSlot()]);
+                    return;
                 }
 
-                setAuctionStartPrice(
-                    s.auction_start_price_gbp == null ? DEFAULT_AUCTION_START_PRICE : String(s.auction_start_price_gbp)
-                );
-                setAuctionEndLocal(toLocalDateTimeInput(s.auction_end) || dateTimeMonthsFromNow(1));
+                if (av?.type === "custom_weekly") {
+                    const nextSlots = parseAvailabilityRules(av?.rules);
+                    setAvailabilityPreset("custom");
+                    setCustomSlots(nextSlots);
+                    return;
+                }
+
+                if (av?.type === "same_everyday") {
+                    const start = typeof av?.start === "string" && isTime(av.start) ? av.start : "09:00";
+                    const end = typeof av?.end === "string" && isTime(av.end) ? av.end : "17:00";
+                    setAvailabilityPreset("custom");
+                    setCustomSlots([0, 1, 2, 3, 4, 5, 6].map((dow) => createSlot({ dow, start, end })));
+                    return;
+                }
+
+                setAvailabilityPreset("always");
+                setCustomSlots([createSlot()]);
             })
             .catch((e: any) => {
                 if (!active) return;
@@ -263,23 +545,33 @@ export default function CreateListingPage() {
     }, [isEdit, editId, token]);
 
     useEffect(() => {
+        const spaces = Math.max(1, Math.floor(Number(capacityTotal) || 1));
+        if (spaces >= 4) {
+            setPendingSpacesChoice("4plus");
+            setPendingSpacesCustom(String(spaces));
+            return;
+        }
+        setPendingSpacesChoice(String(spaces) as SpaceChoice);
+        setPendingSpacesCustom("4");
+    }, [capacityTotal]);
+
+    useEffect(() => {
         if (mode === "free") {
             setAllowPoints(false);
             setPrice("0");
+            return;
         }
         if (mode === "auction") {
             setPrice("0");
             if (!auctionStartPrice || Number(auctionStartPrice) < MIN_AUCTION_START_PRICE_GBP) {
                 setAuctionStartPrice(DEFAULT_AUCTION_START_PRICE);
             }
-            if (!auctionEndLocal) {
-                setAuctionEndLocal(dateTimeMonthsFromNow(1));
-            }
+            return;
         }
-        if (mode === "rent" && (!price || Number(price) <= 0)) {
+        if (!price || Number(price) <= 0) {
             setPrice("5");
         }
-    }, [mode, price, auctionStartPrice, auctionEndLocal]);
+    }, [mode]);
 
     useEffect(() => {
         if (allowPoints && (!pointsCost || Number(pointsCost) < MIN_POINTS_COST)) {
@@ -287,31 +579,38 @@ export default function CreateListingPage() {
         }
     }, [allowPoints, pointsCost]);
 
-    async function searchAddressSuggestions(rawQuery: string, manualSearch = false) {
-        const query = rawQuery.trim();
+    useEffect(() => {
+        if (!spacesSheetOpen && !customSheetOpen && !confirmSheetOpen) return;
+        const onEscape = (event: KeyboardEvent) => {
+            if (event.key !== "Escape") return;
+            setSpacesSheetOpen(false);
+            setCustomSheetOpen(false);
+            setConfirmSheetOpen(false);
+        };
+        window.addEventListener("keydown", onEscape);
+        return () => window.removeEventListener("keydown", onEscape);
+    }, [spacesSheetOpen, customSheetOpen, confirmSheetOpen]);
+
+    function applyPickedLocation(nextLat: number, nextLng: number, nextAddress?: string) {
+        setLat(nextLat.toFixed(6));
+        setLng(nextLng.toFixed(6));
+        if (nextAddress) setAddressText(nextAddress);
+    }
+
+    async function onAddressSearchClick() {
+        const query = addressText.trim();
         if (query.length < 3) {
-            setAddressSuggestions([]);
-            setAddressDropdownOpen(false);
-            setAddressSearchBusy(false);
-            addressSearchAbortRef.current?.abort();
-            if (manualSearch) {
-                setAddressSearchMessage("Enter at least 3 characters to search.");
-            } else {
-                setAddressSearchMessage("");
-            }
+            setAddressSearchMessage("Enter at least 3 characters to search.");
             return;
         }
 
-        addressSearchAbortRef.current?.abort();
-        const controller = new AbortController();
-        addressSearchAbortRef.current = controller;
         setAddressSearchBusy(true);
         setAddressSearchMessage("");
 
         try {
             const params = new URLSearchParams({
                 format: "jsonv2",
-                limit: "12",
+                limit: "6",
                 addressdetails: "1",
                 countrycodes: "gb",
                 viewbox: LONDON_VIEWBOX,
@@ -319,254 +618,196 @@ export default function CreateListingPage() {
             });
             const lookup = await apiGet<{ suggestions: GeocodeSuggestion[] }>(
                 `/parking-spots/geocode/search?${params.toString()}`,
-                token || undefined,
-                { signal: controller.signal }
+                token || undefined
             );
-            const raw = lookup.suggestions ?? [];
-            const next = Array.isArray(raw)
-                ? raw
-                      .filter((item, index, arr) => arr.findIndex((x) => x.display_name === item.display_name) === index)
-                      .slice(0, 5)
-                : [];
-            setAddressSuggestions(next);
-            setAddressDropdownOpen(next.length > 0);
-            if (manualSearch && next.length === 0) {
+            const matches = Array.isArray(lookup.suggestions) ? lookup.suggestions : [];
+            const first = matches[0];
+
+            if (!first) {
                 setAddressSearchMessage("No close matches found. Try adding a postcode or city.");
+                return;
             }
-        } catch (e: any) {
-            if (e?.name !== "AbortError") {
-                setAddressSuggestions([]);
-                setAddressDropdownOpen(false);
-                if (manualSearch) {
-                    setAddressSearchMessage("Address search is unavailable right now. Please try again.");
-                }
-            }
-        } finally {
-            if (addressSearchAbortRef.current === controller) {
-                setAddressSearchBusy(false);
-            }
-        }
-    }
 
-    useEffect(() => {
-        const query = addressText.trim();
-        if (suppressSuggestRef.current) {
-            suppressSuggestRef.current = false;
-            return;
-        }
-        if (query.length < 3) {
-            setAddressSuggestions([]);
-            setAddressDropdownOpen(false);
+            const nextLat = Number(first.lat);
+            const nextLng = Number(first.lon);
+            if (!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) {
+                setAddressSearchMessage("Could not parse location coordinates.");
+                return;
+            }
+
+            applyPickedLocation(nextLat, nextLng, first.display_name);
+            setAddressSearchMessage(`${matches.length} match${matches.length === 1 ? "" : "es"} found. Showing the closest result.`);
+        } catch (e: any) {
+            setAddressSearchMessage(e?.message || "Address search is unavailable right now.");
+        } finally {
             setAddressSearchBusy(false);
-            setAddressSearchMessage("");
-            addressSearchAbortRef.current?.abort();
-            return;
-        }
-
-        const timeoutId = window.setTimeout(() => {
-            void searchAddressSuggestions(query, false);
-        }, 280);
-
-        return () => window.clearTimeout(timeoutId);
-    }, [addressText]);
-
-    useEffect(() => {
-        const onPointerDown = (event: MouseEvent) => {
-            if (!addressLookupRef.current) return;
-            if (!addressLookupRef.current.contains(event.target as Node)) {
-                setAddressDropdownOpen(false);
-            }
-        };
-        document.addEventListener("mousedown", onPointerDown);
-        return () => document.removeEventListener("mousedown", onPointerDown);
-    }, []);
-
-    useEffect(() => {
-        return () => {
-            addressSearchAbortRef.current?.abort();
-            reverseLookupAbortRef.current?.abort();
-        };
-    }, []);
-
-    function updateCustomSlot(slotId: string, patch: Partial<Omit<AvailabilitySlot, "id">>) {
-        setCustomWeeklySlots((prev) => prev.map((slot) => (slot.id === slotId ? { ...slot, ...patch } : slot)));
-    }
-
-    function addCustomSlot() {
-        const last = customWeeklySlots[customWeeklySlots.length - 1];
-        setCustomWeeklySlots((prev) => [
-            ...prev,
-            createAvailabilitySlot({ dow: last?.dow ?? 1, start: last?.start ?? "09:00", end: last?.end ?? "17:00" }),
-        ]);
-    }
-
-    function removeCustomSlot(slotId: string) {
-        setCustomWeeklySlots((prev) => {
-            const next = prev.filter((slot) => slot.id !== slotId);
-            return next.length > 0 ? next : [createAvailabilitySlot()];
-        });
-    }
-
-    function applyPickedLocation(nextLat: number, nextLng: number, nextAddress?: string) {
-        setLat(nextLat.toFixed(6));
-        setLng(nextLng.toFixed(6));
-        if (nextAddress) {
-            suppressSuggestRef.current = true;
-            setAddressText(nextAddress);
-        }
-        setAddressSuggestions([]);
-        setAddressDropdownOpen(false);
-        setAddressSearchMessage("");
-    }
-
-    async function reverseLookupAddress(nextLat: number, nextLng: number) {
-        reverseLookupAbortRef.current?.abort();
-        const controller = new AbortController();
-        reverseLookupAbortRef.current = controller;
-        setReverseLookupBusy(true);
-        try {
-            const params = new URLSearchParams({
-                lat: String(nextLat),
-                lng: String(nextLng),
-            });
-            const data = await apiGet<{ display_name?: string }>(
-                `/parking-spots/geocode/reverse?${params.toString()}`,
-                token || undefined,
-                { signal: controller.signal }
-            );
-            if (data?.display_name) {
-                suppressSuggestRef.current = true;
-                setAddressText(data.display_name);
-                setAddressSuggestions([]);
-                setAddressDropdownOpen(false);
-            }
-        } catch (e: any) {
-            if (e?.name !== "AbortError") {
-                // Keep coordinates even if reverse lookup fails
-            }
-        } finally {
-            if (reverseLookupAbortRef.current === controller) {
-                setReverseLookupBusy(false);
-            }
         }
     }
 
     function onMapPick(nextLat: number, nextLng: number) {
         applyPickedLocation(nextLat, nextLng);
-        void reverseLookupAddress(nextLat, nextLng);
+        setAddressSearchMessage("Pin updated from map.");
     }
 
-    function onSelectAddressSuggestion(suggestion: GeocodeSuggestion) {
-        const nextLat = Number(suggestion.lat);
-        const nextLng = Number(suggestion.lon);
-        if (!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) return;
-        applyPickedLocation(nextLat, nextLng, suggestion.display_name);
+    function openSpacesSheet() {
+        const spaces = Math.max(1, Math.floor(Number(capacityTotal) || 1));
+        if (spaces >= 4) {
+            setPendingSpacesChoice("4plus");
+            setPendingSpacesCustom(String(spaces));
+        } else {
+            setPendingSpacesChoice(String(spaces) as SpaceChoice);
+            setPendingSpacesCustom("4");
+        }
+        setSpacesSheetOpen(true);
     }
 
-    function onAddressSearchClick() {
-        void searchAddressSuggestions(addressText, true);
+    function applySpacesSheet() {
+        const selectedSpaces =
+            pendingSpacesChoice === "4plus"
+                ? Math.max(4, Math.floor(Number(pendingSpacesCustom) || 4))
+                : Number(pendingSpacesChoice);
+
+        setCapacityTotal(String(selectedSpaces));
+        setSpacesSheetOpen(false);
+    }
+
+    function openCustomSheet() {
+        if (customSlots.length === 0) {
+            setCustomSlots([createSlot()]);
+        }
+        setCustomSheetOpen(true);
+    }
+
+    function updateCustomSlot(slotId: string, patch: Partial<Omit<AvailabilitySlot, "id">>) {
+        setCustomSlots((prev) => prev.map((slot) => (slot.id === slotId ? { ...slot, ...patch } : slot)));
+    }
+
+    function addCustomSlot() {
+        const last = customSlots[customSlots.length - 1];
+        setCustomSlots((prev) => [
+            ...prev,
+            createSlot({ dow: last?.dow ?? 1, start: last?.start ?? "09:00", end: last?.end ?? "17:00" }),
+        ]);
+    }
+
+    function removeCustomSlot(slotId: string) {
+        setCustomSlots((prev) => {
+            const next = prev.filter((slot) => slot.id !== slotId);
+            return next.length > 0 ? next : [createSlot()];
+        });
+    }
+
+    function applyCustomSheet() {
+        if (!areSlotsValid(customSlots)) {
+            setError("Each custom row needs a valid day and time range.");
+            return;
+        }
+        setError("");
+        setCustomSheetOpen(false);
+    }
+
+    function openImagePicker() {
+        imageInputRef.current?.click();
     }
 
     function onImageFileChange(event: ChangeEvent<HTMLInputElement>) {
         const file = event.target.files?.[0];
         if (!file) return;
-        if (file.size > 4 * 1024 * 1024) {
-            setError("Image is too large. Please use a file under 4MB.");
-            event.target.value = "";
+        if (!file.type.startsWith("image/")) {
+            setError("Please choose an image file.");
             return;
         }
-        setError("");
-        setSelectedImageName(file.name);
+
         const reader = new FileReader();
-        reader.onload = () => setImageUrl(typeof reader.result === "string" ? reader.result : "");
-        reader.onerror = () => setError("Could not read image file.");
+        reader.onload = () => {
+            const result = typeof reader.result === "string" ? reader.result : "";
+            if (!result) return;
+            setImageUrl(result);
+            setError("");
+        };
+        reader.onerror = () => setError("Could not read that image file.");
         reader.readAsDataURL(file);
     }
 
     function clearImage() {
         setImageUrl("");
-        setSelectedImageName("");
-        if (imageInputRef.current) imageInputRef.current.value = "";
+        if (imageInputRef.current) {
+            imageInputRef.current.value = "";
+        }
     }
 
     function buildAvailabilityPayload() {
         const dateFields = dateFrom || dateTo ? { date_from: dateFrom || undefined, date_to: dateTo || undefined } : {};
 
-        if (availabilityType === "24_7") {
+        if (availabilityPreset === "always") {
             return { type: "24_7", ...dateFields };
         }
 
-        if (availabilityType === "same_everyday") {
-            if (!isTime(sameStart) || !isTime(sameEnd) || minutes(sameStart) >= minutes(sameEnd)) {
-                throw new Error("Same-everyday availability needs valid start and end times.");
-            }
-            return { type: "same_everyday", start: sameStart, end: sameEnd, ...dateFields };
+        if (availabilityPreset === "weekdays" || availabilityPreset === "weekends") {
+            return { type: "custom_weekly", rules: quickPresetRules(availabilityPreset), ...dateFields };
         }
 
-        const selectedDays = customWeeklySlots.map((slot) => ({
-            dow: Number(slot.dow),
-            start: slot.start,
-            end: slot.end,
-        }));
-        if (selectedDays.length === 0) {
-            throw new Error("Add at least one custom day/time slot.");
+        if (!areSlotsValid(customSlots)) {
+            throw new Error("Each custom row needs a valid day and time range.");
         }
-        for (const slot of selectedDays) {
-            if (!Number.isInteger(slot.dow) || slot.dow < 0 || slot.dow > 6) {
-                throw new Error("Each custom availability row needs a valid day.");
-            }
-            if (!isTime(slot.start) || !isTime(slot.end) || minutes(slot.start) >= minutes(slot.end)) {
-                throw new Error("Each custom availability row needs valid start and end times.");
-            }
-        }
-        return { type: "custom_weekly", rules: selectedDays, ...dateFields };
+
+        const rules = customSlots.map((slot) => ({ dow: Number(slot.dow), start: slot.start, end: slot.end }));
+        return { type: "custom_weekly", rules, ...dateFields };
     }
 
     function buildSubmitPayload() {
         const coords = parseCoordinates(lat, lng);
+        const normalizedTitle = title.trim();
+        const normalizedDescription = description.trim();
+        const normalizedAddress = addressText.trim();
+
         const priceNum = Number(price || 0);
         const pointsNum = Number(pointsCost || 0);
+        const auctionStartNum = Number(auctionStartPrice || 0);
         const capacityTotalNum = Math.floor(Number(capacityTotal || 1));
-        const capacityAvailableNum = Math.floor(Number(capacityAvailable || 1));
 
-        if (!title.trim() || title.trim().length < 3) {
-            setError("Title must be at least 3 characters.");
+        if (normalizedTitle.length < 3) {
+            setError("Listing name must be at least 3 characters.");
             return null;
         }
-        if (!description.trim() || description.trim().length < 5) {
-            setError("Description must be at least 5 characters.");
+
+        if (normalizedDescription.length > 0 && normalizedDescription.length < 5) {
+            setError("Description should be at least 5 characters, or leave it empty.");
             return null;
         }
-        if (!addressText.trim() || addressText.trim().length < 5) {
+
+        if (!coords) {
+            setError("Pick a valid map point for latitude and longitude.");
+            return null;
+        }
+
+        if (normalizedAddress.length < 5) {
             setError("Address must be at least 5 characters.");
             return null;
         }
-        if (!coords) {
-            setError("Pick a valid location using address search or by clicking on the map.");
+
+        if (!Number.isInteger(capacityTotalNum) || capacityTotalNum <= 0) {
+            setError("Spaces must be at least 1.");
             return null;
         }
+
         if (mode === "rent" && (!Number.isFinite(priceNum) || priceNum <= 0)) {
             setError("Rent listings need a price above 0.");
             return null;
         }
+
+        if (mode === "auction" && (!Number.isFinite(auctionStartNum) || auctionStartNum < MIN_AUCTION_START_PRICE_GBP)) {
+            setError("Auction start price must be at least GBP 0.10.");
+            return null;
+        }
+
         if (allowPoints && (!Number.isFinite(pointsNum) || pointsNum < MIN_POINTS_COST)) {
             setError("Points cost must be at least 1 when enabled.");
             return null;
         }
-        if (!Number.isInteger(capacityTotalNum) || capacityTotalNum <= 0) {
-            setError("Capacity total must be at least 1.");
-            return null;
-        }
-        if (!Number.isInteger(capacityAvailableNum) || capacityAvailableNum < 0) {
-            setError("Capacity available must be 0 or higher.");
-            return null;
-        }
-        if (capacityAvailableNum > capacityTotalNum) {
-            setError("Capacity available cannot exceed total.");
-            return null;
-        }
+
         if (dateFrom && dateTo && dateFrom > dateTo) {
-            setError("Availability start date must be before end date.");
+            setError("Availability end date must be after start date.");
             return null;
         }
 
@@ -579,54 +820,42 @@ export default function CreateListingPage() {
         }
 
         const payload: Record<string, any> = {
-            title: title.trim(),
-            description: description.trim(),
+            title: normalizedTitle,
+            description: normalizedDescription || "No description provided.",
             mode,
             price_gbp: mode === "rent" ? priceNum : 0,
             price_unit: priceUnit,
             allow_points: mode === "free" ? false : allowPoints,
             points_cost: mode === "free" ? 0 : allowPoints ? pointsNum : 0,
-            address_text: addressText.trim(),
+            address_text: normalizedAddress,
             lat: coords.lat,
             lng: coords.lng,
             image_url: imageUrl.trim() || null,
             availability,
-            parking_type: parkingType,
+            parking_type: "private",
             capacity_total: capacityTotalNum,
-            capacity_available: capacityAvailableNum,
+            capacity_available: capacityTotalNum,
         };
 
         if (mode === "auction") {
-            const auctionStartNum = Number(auctionStartPrice || 0);
-            const auctionEndIso = toIsoFromLocalInput(auctionEndLocal);
-            if (!Number.isFinite(auctionStartNum) || auctionStartNum < MIN_AUCTION_START_PRICE_GBP) {
-                setError("Auction start price must be at least GBP 0.10.");
-                return null;
-            }
-            if (!auctionEndIso) {
-                setError("Auction end date/time is required.");
-                return null;
-            }
             if (!dateFrom || !dateTo) {
                 setError("Auction listings need availability start and end dates.");
                 return null;
             }
             payload.auction_start_price_gbp = auctionStartNum;
-            payload.auction_end = auctionEndIso;
         }
 
         return payload;
     }
 
-    async function onSubmit(event: FormEvent<HTMLFormElement>) {
-        event.preventDefault();
+    async function submitListing() {
         if (!token) {
             setError("Please sign in to continue.");
             return;
         }
 
         setError("");
-        setSuccess("");
+
         const payload = buildSubmitPayload();
         if (!payload) return;
 
@@ -634,7 +863,8 @@ export default function CreateListingPage() {
             setSaving(true);
             try {
                 await apiPatch<{ parking_spot: ParkingSpot }>(`/parking-spots/${editId}`, payload, token);
-                setSuccess("Listing updated.");
+                setConfirmSheetOpen(false);
+                navigate("/", { replace: true });
             } catch (e: any) {
                 setError(e?.message || "Failed to save listing.");
             } finally {
@@ -644,10 +874,10 @@ export default function CreateListingPage() {
         }
 
         setSaving(true);
-        setError("");
         try {
-            const res = await apiPost<{ parking_spot: ParkingSpot }>("/parking-spots", payload, token);
-            navigate(`/spots/${res.parking_spot.id}`, { replace: true });
+            await apiPost<{ parking_spot: ParkingSpot }>("/parking-spots", payload, token);
+            setConfirmSheetOpen(false);
+            navigate("/", { replace: true });
         } catch (e: any) {
             setError(e?.message || "Failed to publish listing.");
         } finally {
@@ -655,484 +885,639 @@ export default function CreateListingPage() {
         }
     }
 
-    async function onDeleteListing() {
-        if (!token || !editId) return;
-        const confirmed = window.confirm("Delete this listing permanently?");
-        if (!confirmed) return;
-        setDeleting(true);
-        setError("");
-        try {
-            await apiDelete<{ deleted: boolean }>(`/parking-spots/${editId}`, token);
-            navigate("/dashboard", { replace: true });
-        } catch (e: any) {
-            setError(e?.message || "Failed to delete listing.");
-        } finally {
-            setDeleting(false);
+    const setupCapacity = Math.max(0, Math.floor(Number(capacityTotal) || 0));
+    const titleValid = title.trim().length >= 3;
+    const descriptionValid = description.trim().length === 0 || description.trim().length >= 5;
+    const capacityValid = setupCapacity >= 1;
+
+    const rentPriceValid = mode !== "rent" || Number(price) > 0;
+    const auctionPriceValid = mode !== "auction" || Number(auctionStartPrice) >= MIN_AUCTION_START_PRICE_GBP;
+    const pointsValid = !allowPoints || Number(pointsCost) >= MIN_POINTS_COST;
+    const pricingValid = rentPriceValid && auctionPriceValid && pointsValid;
+
+    const dateRangeValid = !dateFrom || !dateTo || dateFrom <= dateTo;
+    const customSlotsValid = availabilityPreset !== "custom" || areSlotsValid(customSlots);
+    const availabilityValid = dateRangeValid && customSlotsValid;
+
+    const addressValid = addressText.trim().length >= 5;
+    const hasCoordinates = Boolean(parsedCoords);
+    const locationValid = addressValid && hasCoordinates;
+    const publishReady = titleValid && descriptionValid && pricingValid && availabilityValid && locationValid;
+
+    const stepReady: Record<WizardStep, boolean> = {
+        1: capacityValid,
+        2: titleValid && descriptionValid,
+        3: pricingValid,
+        4: availabilityValid,
+        5: locationValid,
+        6: publishReady,
+    };
+
+    const pricingIssue = !rentPriceValid
+        ? "Rent listings need a valid price above 0."
+        : !auctionPriceValid
+            ? "Auction start price must be at least GBP 0.10."
+            : !pointsValid
+                ? "Points cost must be at least 1."
+                : "";
+
+    const availabilityIssue = !dateRangeValid
+        ? "End date must be after start date."
+        : !customSlotsValid
+            ? "Each custom row needs a valid day and time range."
+            : "";
+
+    const stepHint =
+        activeStep === 2
+            ? !titleValid
+                ? "Add a listing name with at least 3 characters."
+                : !descriptionValid
+                    ? "Description should be at least 5 characters, or leave it empty."
+                    : ""
+            : activeStep === 3
+                ? pricingIssue
+                : activeStep === 4
+                    ? availabilityIssue
+                    : activeStep === 5
+                        ? !addressValid
+                            ? "Add an address with at least 5 characters."
+                            : !hasCoordinates
+                                ? "Set a map pin so drivers can find your listing."
+                                : ""
+                        : "";
+
+    const currentStepReady = stepReady[activeStep];
+
+    const priceSummary =
+        mode === "rent"
+            ? `GBP ${Number(price || 0).toFixed(2)} / ${priceUnit}`
+            : mode === "auction"
+                ? `Bid from GBP ${Number(auctionStartPrice || 0).toFixed(2)} / hour`
+                : "Free listing";
+    const customSummary = customSlots
+        .map((slot) => `${DAY_LABELS[slot.dow]} ${slot.start}-${slot.end}`)
+        .slice(0, 2)
+        .join(" | ");
+
+    function goNext() {
+        if (!currentStepReady) return;
+        if (activeStep === 6) {
+            setError("");
+            setConfirmSheetOpen(true);
+            return;
         }
+        if (activeStep >= STEP_COUNT) return;
+        setError("");
+        setActiveStep((prev) => Math.min(STEP_COUNT, prev + 1) as WizardStep);
     }
+
+    function goBack() {
+        if (activeStep <= 1) return;
+        setError("");
+        setActiveStep((prev) => Math.max(1, prev - 1) as WizardStep);
+    }
+
+    function renderStepBody(step: FlowStep) {
+        if (step === 2) {
+            return (
+                <div className="stack">
+                    <label>
+                        <span>Listing name</span>
+                        <input
+                            className="input"
+                            value={title}
+                            onChange={(event) => setTitle(event.target.value)}
+                            placeholder="Example: Secure driveway near station"
+                        />
+                        <div className="createFieldHint">Use a clear name drivers can scan quickly.</div>
+                        {!titleValid && title.length > 0 && <div className="createInlineError">Use at least 3 characters.</div>}
+                    </label>
+
+                    <label>
+                        <span>Description (optional)</span>
+                        <textarea
+                            className="input"
+                            rows={5}
+                            value={description}
+                            onChange={(event) => setDescription(event.target.value)}
+                            placeholder="Access notes, gate details, size limits, and nearby landmarks."
+                        />
+                        <div className="createFieldHint">Leave blank, or write at least 5 characters.</div>
+                        {!descriptionValid && description.length > 0 && (
+                            <div className="createInlineError">Use at least 5 characters, or leave blank.</div>
+                        )}
+                    </label>
+                </div>
+            );
+        }
+
+        if (step === 3) {
+            return (
+                <div className="wizardSection">
+                    <div className="wizardSectionHead">
+                        <div className="wizardSubTitle">Pricing setup</div>
+                        <Tooltip
+                            label="Pricing help"
+                            text="Rent uses fixed prices. Auction accepts driver offers that you approve."
+                        />
+                    </div>
+
+                    {mode === "rent" && (
+                        <div className="wizardFieldGrid wizardFieldGrid--compact">
+                            <label>
+                                <span>Price unit</span>
+                                <div className="createSegmented" role="radiogroup" aria-label="Price unit">
+                                    {PRICE_UNIT_CHOICES.map((unit) => (
+                                        <button
+                                            key={unit.id}
+                                            type="button"
+                                            className={`createSegmentedBtn createSegmentedBtn--${unit.id}${priceUnit === unit.id ? " is-active" : ""}`}
+                                            aria-pressed={priceUnit === unit.id}
+                                            onClick={() => setPriceUnit(unit.id)}
+                                        >
+                                            {unit.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </label>
+
+                            <label>
+                                <span>Price (GBP)</span>
+                                <input
+                                    className="input"
+                                    type="number"
+                                    min="0"
+                                    step="0.5"
+                                    value={price}
+                                    onChange={(event) => setPrice(event.target.value)}
+                                />
+                            </label>
+                        </div>
+                    )}
+
+                    {mode === "auction" && (
+                        <label>
+                            <span>Starting bid per hour (GBP)</span>
+                            <input
+                                className="input"
+                                type="number"
+                                min="0.1"
+                                step="0.1"
+                                value={auctionStartPrice}
+                                onChange={(event) => setAuctionStartPrice(event.target.value)}
+                            />
+                            <div className="createFieldHint">Auction closes when the listing end date is reached.</div>
+                        </label>
+                    )}
+
+                    {mode === "free" && <div className="wizardInlineText">Free listing selected, so no money price is required.</div>}
+
+                    <div className="wizardPointsRow">
+                        <label className={`createSwitch${mode === "free" ? " is-disabled" : ""}`}>
+                            <input
+                                type="checkbox"
+                                checked={allowPoints}
+                                onChange={(event) => setAllowPoints(event.target.checked)}
+                                disabled={mode === "free"}
+                            />
+                            <span className="createSwitchTrack" aria-hidden="true" />
+                            <span className="createSwitchLabel">Allow points payment</span>
+                        </label>
+
+                        {allowPoints && mode !== "free" && (
+                            <label className="wizardPointsInput">
+                                <span>Points cost</span>
+                                <input
+                                    className="input"
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    value={pointsCost}
+                                    onChange={(event) => setPointsCost(event.target.value)}
+                                />
+                            </label>
+                        )}
+                    </div>
+
+                    {pricingIssue && <div className="createInlineError">{pricingIssue}</div>}
+                </div>
+            );
+        }
+
+        if (step === 4) {
+            return (
+                <div className="wizardSection">
+                    <div className="wizardSectionHead">
+                        <div className="wizardSubTitle">Availability style</div>
+                        <Tooltip
+                            label="Availability help"
+                            text="Pick a quick preset or choose custom day and time windows."
+                        />
+                    </div>
+
+                    <div className="wizardQuickGrid">
+                        {AVAILABILITY_CHOICES.map((choice) => (
+                            <button
+                                key={choice.id}
+                                type="button"
+                                className={`wizardQuickCard wizardQuickCard--${choice.tone}${availabilityPreset === choice.id ? " is-active" : ""}`}
+                                onClick={() => setAvailabilityPreset(choice.id)}
+                                aria-pressed={availabilityPreset === choice.id}
+                            >
+                                <span className="wizardQuickTitle">{choice.title}</span>
+                                <span className="wizardQuickCopy">{choice.copy}</span>
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="wizardFieldGrid wizardFieldGrid--compact">
+                        <label>
+                            <span>Start date</span>
+                            <input className="input" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+                        </label>
+
+                        <label>
+                            <span>End date</span>
+                            <input className="input" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+                        </label>
+                    </div>
+
+                    {availabilityPreset === "custom" && (
+                        <div className="wizardInlineRow">
+                            <div>
+                                <div className="wizardInlineTitle">Custom schedule</div>
+                                <div className="wizardInlineValue">{customSummary || "No custom slots set yet"}</div>
+                            </div>
+                            <button type="button" className="btn" onClick={openCustomSheet}>
+                                Edit custom times
+                            </button>
+                        </div>
+                    )}
+
+                    {availabilityIssue && <div className="createInlineError">{availabilityIssue}</div>}
+                </div>
+            );
+        }
+
+        if (step === 5) {
+            return (
+                <>
+                    <div className="addressLookupWrap">
+                        <label>
+                            <span>Address</span>
+                            <div className="addressInputRow">
+                                <input
+                                    className="input"
+                                    value={addressText}
+                                    onChange={(event) => {
+                                        setAddressText(event.target.value);
+                                        setAddressSearchMessage("");
+                                    }}
+                                    onKeyDown={(event) => {
+                                        if (event.key !== "Enter") return;
+                                        event.preventDefault();
+                                        void onAddressSearchClick();
+                                    }}
+                                    placeholder="Start typing an address (for example 295 Upper Street)"
+                                    autoComplete="off"
+                                />
+                                <button
+                                    type="button"
+                                    className="btn btn-primary addressSearchBtn"
+                                    disabled={addressSearchBusy}
+                                    onClick={() => void onAddressSearchClick()}
+                                >
+                                    {addressSearchBusy ? "Searching..." : "Search"}
+                                </button>
+                            </div>
+                            <div className="createFieldHint">Search to set a pin, then click map to adjust precisely.</div>
+                        </label>
+
+                        {addressSearchMessage && <div className="addressLookupStatus">{addressSearchMessage}</div>}
+                    </div>
+
+                    <div className="mapWrap mapWrap--pin wizardMap">
+                        <div className="leafletShell">
+                            <MapContainer key={`${mapCenter[0]}-${mapCenter[1]}`} center={mapCenter} zoom={13} className="leafletMap">
+                                <TileLayer
+                                    attribution="&copy; OpenStreetMap contributors"
+                                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                />
+                                <MapPickerPin position={markerPosition} onPick={onMapPick} />
+                            </MapContainer>
+                        </div>
+                    </div>
+
+                    {(!addressValid || !hasCoordinates) && (
+                        <div className="createInlineError">Add a valid address and map pin before publishing.</div>
+                    )}
+                </>
+            );
+        }
+
+        if (step === 6) {
+            return (
+                <>
+                    <input
+                        ref={imageInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="wizardHiddenFileInput"
+                        onChange={onImageFileChange}
+                    />
+
+                    <div className="wizardImageActions">
+                        <button type="button" className="btn btn-primary" onClick={openImagePicker}>
+                            {imageUrl.trim() ? "Change image" : "Choose image"}
+                        </button>
+                        {imageUrl.trim() && (
+                            <button type="button" className="btn" onClick={clearImage}>
+                                Remove image
+                            </button>
+                        )}
+                    </div>
+
+                    <div className="createFieldHint">Upload a clear photo that matches the space drivers will see.</div>
+
+                    {imageUrl.trim() && (
+                        <div className="wizardImagePreview">
+                            <img src={imageUrl} alt="Listing preview" />
+                        </div>
+                    )}
+                </>
+            );
+        }
+
+        return null;
+    }
+
+    const actionHint = error || (!currentStepReady && stepHint ? stepHint : "");
+
+    const stepNavigation = (
+        <StepNavigation
+            onBack={goBack}
+            onNext={goNext}
+            backDisabled={activeStep <= 1 || saving}
+            nextDisabled={!currentStepReady || saving}
+            nextLabel={activeStep === 6 ? "Publish" : "Next"}
+            hint={actionHint}
+        />
+    );
 
     if (!token) {
         const next = `${location.pathname}${location.search}`;
         return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
     }
 
+    const flowStep = activeStep as FlowStep;
+
     return (
-        <div className="container createListingPage">
-            <div className="formNarrow">
-                <div className="pageHeader">
-                    <div className="heroKicker">{isEdit ? "EDIT LISTING" : "CREATE LISTING"}</div>
-                    <div className="heroTitle">{isEdit ? "Update your listing" : "Publish a new listing"}</div>
-                    <div className="heroSub muted">Signed in as {user?.name ?? "member"}.</div>
+        <div className="container createWizardPage">
+            {loadingExisting ? (
+                <div className="card formSection createFlowLocked">
+                    <div className="h3">Loading listing details...</div>
+                    <div className="muted">Pulling your saved information and availability settings.</div>
                 </div>
+            ) : (
+                <form className="wizardFlow" onSubmit={(event) => event.preventDefault()}>
+                    {activeStep === 1 && (
+                        <section className="wizardIntro" key="wizard-step-1">
+                            <div className="wizardIntroCard">
+                                <div className="wizardIntroKicker">{isEdit ? "EDIT LISTING" : "CREATE LISTING"}</div>
+                                <h1 className="wizardIntroTitle">What kind of listing are you creating?</h1>
+                                <p className="wizardIntroSub">
+                                    Pick your model first, then complete the setup in guided steps. Creating for {user?.name ?? "you"}.
+                                </p>
 
-                {loadingExisting ? (
-                    <div className="card formSection">
-                        <div className="muted">Loading listing details...</div>
-                    </div>
-                ) : (
-                    <form className="formGrid createListingForm" onSubmit={onSubmit}>
-                        <div className="card formSection formSection--intro">
-                            <div className="sectionHeader">
-                                <div className="h3">1. Name and description</div>
-                                {isEdit && <span className="badge badge--warm">Editing</span>}
-                            </div>
-                            <label>
-                                <span>Listing name</span>
-                                <input
-                                    className="input"
-                                    value={title}
-                                    onChange={(e) => setTitle(e.target.value)}
-                                    placeholder="Example: Secure driveway near station"
-                                />
-                            </label>
-                            <label>
-                                <span>Description</span>
-                                <textarea
-                                    className="input"
-                                    rows={4}
-                                    value={description}
-                                    onChange={(e) => setDescription(e.target.value)}
-                                    placeholder="Describe access, entry notes, size limits, and anything drivers should know."
-                                />
-                            </label>
-                        </div>
-
-                        <div className="card formSection formSection--type">
-                            <div className="h3">2. Listing type</div>
-                            <div className="listingTypeGrid">
-                                <button
-                                    type="button"
-                                    className={`listingTypeCard listingTypeCard--rent${mode === "rent" ? " is-active" : ""}`}
-                                    onClick={() => setMode("rent")}
-                                >
-                                    <div className="listingTypeTitle">Rent</div>
-                                    <div className="listingTypeCopy">Paid listing with fixed price.</div>
-                                </button>
-                                <button
-                                    type="button"
-                                    className={`listingTypeCard listingTypeCard--auction${mode === "auction" ? " is-active" : ""}`}
-                                    onClick={() => setMode("auction")}
-                                >
-                                    <div className="listingTypeTitle">Auction</div>
-                                    <div className="listingTypeCopy">Highest bid wins before the end time.</div>
-                                </button>
-                                <button
-                                    type="button"
-                                    className={`listingTypeCard listingTypeCard--free${mode === "free" ? " is-active" : ""}`}
-                                    onClick={() => setMode("free")}
-                                >
-                                    <div className="listingTypeTitle">Free</div>
-                                    <div className="listingTypeCopy">No payment required.</div>
-                                </button>
-                            </div>
-                            <div className="row setupInlineRow">
-                                <label>
-                                    <span>Parking type</span>
-                                    <select className="input" value={parkingType} onChange={(e) => setParkingType(e.target.value as ParkingType)}>
-                                        <option value="private">Private</option>
-                                        <option value="public">Public</option>
-                                    </select>
-                                </label>
-                                <label>
-                                    <span>Total spaces</span>
-                                    <input
-                                        className="input"
-                                        type="number"
-                                        min="1"
-                                        value={capacityTotal}
-                                        onChange={(e) => setCapacityTotal(e.target.value)}
-                                    />
-                                </label>
-                                <label>
-                                    <span>Available now</span>
-                                    <input
-                                        className="input"
-                                        type="number"
-                                        min="0"
-                                        value={capacityAvailable}
-                                        onChange={(e) => setCapacityAvailable(e.target.value)}
-                                    />
-                                </label>
-                            </div>
-                        </div>
-
-                        <div className="card formSection formSection--availability">
-                            <div className="h3">3. Availability</div>
-                            <div className="availabilityTypeGrid" role="tablist" aria-label="Availability options">
-                                <button
-                                    type="button"
-                                    className={`availabilityTypeBtn availabilityTypeBtn--custom${
-                                        availabilityType === "custom_weekly" ? " is-active" : ""
-                                    }`}
-                                    onClick={() => setAvailabilityType("custom_weekly")}
-                                >
-                                    Custom Time
-                                </button>
-                                <button
-                                    type="button"
-                                    className={`availabilityTypeBtn availabilityTypeBtn--same${
-                                        availabilityType === "same_everyday" ? " is-active" : ""
-                                    }`}
-                                    onClick={() => setAvailabilityType("same_everyday")}
-                                >
-                                    Same Time, Daily
-                                </button>
-                                <button
-                                    type="button"
-                                    className={`availabilityTypeBtn availabilityTypeBtn--always${
-                                        availabilityType === "24_7" ? " is-active" : ""
-                                    }`}
-                                    onClick={() => setAvailabilityType("24_7")}
-                                >
-                                    24/7
-                                </button>
-                            </div>
-                            <div className="row">
-                                <label>
-                                    <span>Start date</span>
-                                    <input
-                                        className="input"
-                                        type="date"
-                                        value={dateFrom}
-                                        onChange={(e) => setDateFrom(e.target.value)}
-                                    />
-                                </label>
-                                <label>
-                                    <span>End date</span>
-                                    <input
-                                        className="input"
-                                        type="date"
-                                        value={dateTo}
-                                        onChange={(e) => setDateTo(e.target.value)}
-                                    />
-                                </label>
-                            </div>
-
-                            {availabilityType === "same_everyday" && (
-                                <div className="row">
-                                    <label>
-                                        <span>Start time</span>
-                                        <input
-                                            className="input"
-                                            type="time"
-                                            value={sameStart}
-                                            onChange={(e) => setSameStart(e.target.value)}
+                                <div className="wizardTileGrid">
+                                    {MODEL_CHOICES.map((choice) => (
+                                        <SelectionTile
+                                            key={choice.mode}
+                                            title={choice.title}
+                                            copy={choice.copy}
+                                            help={choice.help}
+                                            tone={choice.tone}
+                                            active={mode === choice.mode}
+                                            onClick={() => setMode(choice.mode)}
                                         />
-                                    </label>
-                                    <label>
-                                        <span>End time</span>
-                                        <input
-                                            className="input"
-                                            type="time"
-                                            value={sameEnd}
-                                            onChange={(e) => setSameEnd(e.target.value)}
-                                        />
-                                    </label>
-                                </div>
-                            )}
-
-                            {availabilityType === "custom_weekly" && (
-                                <div className="stack">
-                                    {customWeeklySlots.map((slot) => (
-                                        <div className="customSlotRow" key={slot.id}>
-                                            <label>
-                                                <span>Day</span>
-                                                <select
-                                                    className="input"
-                                                    value={slot.dow}
-                                                    onChange={(e) =>
-                                                        updateCustomSlot(slot.id, { dow: Number(e.target.value) })
-                                                    }
-                                                >
-                                                    {DAY_LABELS.map((dayLabel, dayIndex) => (
-                                                        <option key={`${slot.id}-${dayLabel}`} value={dayIndex}>
-                                                            {dayLabel}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </label>
-                                            <label>
-                                                <span>Start</span>
-                                                <input
-                                                    className="input"
-                                                    type="time"
-                                                    value={slot.start}
-                                                    onChange={(e) =>
-                                                        updateCustomSlot(slot.id, { start: e.target.value })
-                                                    }
-                                                />
-                                            </label>
-                                            <label>
-                                                <span>End</span>
-                                                <input
-                                                    className="input"
-                                                    type="time"
-                                                    value={slot.end}
-                                                    onChange={(e) =>
-                                                        updateCustomSlot(slot.id, { end: e.target.value })
-                                                    }
-                                                />
-                                            </label>
-                                            <button
-                                                type="button"
-                                                className="btn btn-danger"
-                                                onClick={() => removeCustomSlot(slot.id)}
-                                                disabled={customWeeklySlots.length === 1}
-                                            >
-                                                Remove
-                                            </button>
-                                        </div>
                                     ))}
-                                    <div className="rowInline">
-                                        <button type="button" className="btn" onClick={addCustomSlot}>
-                                            + More dates and time
-                                        </button>
-                                    </div>
                                 </div>
-                            )}
-                        </div>
 
-                        <div className="card formSection formSection--setupPricing">
-                            <div className="h3">4. Pricing</div>
-                            <div className="stack">
-                                {mode === "rent" && (
-                                    <div className="row">
-                                        <label>
-                                            <span>Price unit</span>
-                                            <select
-                                                className="input"
-                                                value={priceUnit}
-                                                onChange={(e) => setPriceUnit(e.target.value as PriceUnit)}
-                                            >
-                                                <option value="hour">Hour</option>
-                                                <option value="day">Day</option>
-                                                <option value="week">Week</option>
-                                            </select>
-                                        </label>
-                                        <label>
-                                            <span>Price (GBP)</span>
-                                            <input
-                                                className="input"
-                                                type="number"
-                                                min="0"
-                                                step="0.5"
-                                                value={price}
-                                                onChange={(e) => setPrice(e.target.value)}
-                                            />
-                                        </label>
-                                    </div>
-                                )}
-
-                                {mode === "auction" && (
-                                    <div className="row">
-                                        <label>
-                                            <span>Starting bid per hour (GBP)</span>
-                                            <input
-                                                className="input"
-                                                type="number"
-                                                min="0.1"
-                                                step="0.1"
-                                                value={auctionStartPrice}
-                                                onChange={(e) => setAuctionStartPrice(e.target.value)}
-                                            />
-                                        </label>
-                                        <label>
-                                            <span>Auction end date/time</span>
-                                            <input
-                                                className="input"
-                                                type="datetime-local"
-                                                value={auctionEndLocal}
-                                                onChange={(e) => setAuctionEndLocal(e.target.value)}
-                                            />
-                                        </label>
-                                    </div>
-                                )}
-
-                                {mode === "free" && (
-                                    <div className="modeInfoNote">Free listings do not require a money price.</div>
-                                )}
-
-                                <div className="pointsQuickCard">
-                                    <label className="chip" style={{ justifyContent: "flex-start" }}>
-                                        <input
-                                            type="checkbox"
-                                            checked={allowPoints}
-                                            disabled={mode === "free"}
-                                            onChange={(e) => setAllowPoints(e.target.checked)}
-                                        />
-                                        <span>Allow points payment</span>
-                                    </label>
-                                    {mode === "free" && (
-                                        <span className="pointsDisabledNote">Points payment is disabled for free listings.</span>
-                                    )}
-                                    {allowPoints && mode !== "free" && (
-                                        <label>
-                                            <span>Points cost</span>
-                                            <input
-                                                className="input"
-                                                type="number"
-                                                min="1"
-                                                step="1"
-                                                value={pointsCost}
-                                                onChange={(e) => setPointsCost(e.target.value)}
-                                            />
-                                        </label>
-                                    )}
+                                <div className="wizardIntroSelected">
+                                    Selected: {modeLabel(mode)} - {modeSummary(mode)}
                                 </div>
-                            </div>
-                        </div>
 
-                        <div className="card formSection formSection--location">
-                            <div className="sectionHeader">
-                                <div className="h3">5. Location</div>
-                            </div>
-                            <div className="addressLookupWrap" ref={addressLookupRef}>
-                                <label>
-                                    <span>Address</span>
-                                    <div className="addressInputRow">
-                                        <input
-                                            className="input"
-                                            value={addressText}
-                                            onChange={(e) => {
-                                                setAddressText(e.target.value);
-                                                setAddressSearchMessage("");
-                                            }}
-                                            onFocus={() => setAddressDropdownOpen(addressSuggestions.length > 0)}
-                                            onKeyDown={(event) => {
-                                                if (event.key !== "Enter") return;
-                                                event.preventDefault();
-                                                onAddressSearchClick();
-                                            }}
-                                            placeholder="Start typing an address (e.g. 295 Upper Street)"
-                                            autoComplete="off"
-                                        />
-                                        <button
-                                            type="button"
-                                            className="btn btn-primary addressSearchBtn"
-                                            disabled={addressSearchBusy}
-                                            onClick={onAddressSearchClick}
-                                        >
-                                            {addressSearchBusy ? "Searching..." : "Search"}
-                                        </button>
+                                <div className="wizardInlineRow wizardInlineRow--intro">
+                                    <div>
+                                        <div className="wizardInlineTitle">Spaces available</div>
+                                        <div className="wizardInlineValue">
+                                            {setupCapacity || 1} {setupCapacity === 1 ? "space" : "spaces"}
+                                        </div>
                                     </div>
-                                </label>
-                                {addressSearchMessage && <div className="addressLookupStatus">{addressSearchMessage}</div>}
-                                {addressSearchBusy && <div className="addressLookupStatus muted">Searching address options...</div>}
-                                {addressDropdownOpen && addressSuggestions.length > 0 && (
-                                    <div className="addressSuggestList" role="listbox" aria-label="Address suggestions">
-                                        {addressSuggestions.map((suggestion) => (
-                                            <button
-                                                key={`${suggestion.place_id}-${suggestion.lat}-${suggestion.lon}`}
-                                                type="button"
-                                                className="addressSuggestItem"
-                                                onClick={() => onSelectAddressSuggestion(suggestion)}
-                                            >
-                                                {suggestion.display_name}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                            <div className="locationHelp muted">
-                                Click anywhere on the map to place your pin and auto-fill the nearest real address.
-                            </div>
-                            {reverseLookupBusy && <div className="addressLookupStatus muted">Finding the closest address...</div>}
-                            <div className="mapWrap mapWrap--pin createListingMap">
-                                <div className="leafletShell">
-                                    <MapContainer center={mapCenter} zoom={13} className="leafletMap">
-                                        <MapRecenter center={mapCenter} />
-                                        <TileLayer
-                                            attribution='&copy; OpenStreetMap contributors'
-                                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                                        />
-                                        <MapPickerPin position={markerPosition} onPick={onMapPick} />
-                                    </MapContainer>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="card formSection formSection--media">
-                            <div className="sectionHeader">
-                                <div className="h3">6. Listing image</div>
-                                <span className="badge">Optional</span>
-                            </div>
-                            <div className="muted">
-                                Upload one clear photo so drivers can quickly identify the parking space.
-                            </div>
-                            <input
-                                ref={imageInputRef}
-                                className="srOnlyInput"
-                                type="file"
-                                accept="image/*"
-                                onChange={onImageFileChange}
-                            />
-                            <div className="uploadRow">
-                                <button type="button" className="btn btn-primary" onClick={() => imageInputRef.current?.click()}>
-                                    {imageUrl ? "Change image" : "Choose image"}
-                                </button>
-                                <span className="uploadFileName">{selectedImageName || "No file selected"}</span>
-                                {imageUrl && (
-                                    <button type="button" className="btn" onClick={clearImage}>
-                                        Remove image
+                                    <button type="button" className="btn" onClick={openSpacesSheet}>
+                                        Choose spaces
                                     </button>
-                                )}
-                            </div>
-                            <div className="uploadHint muted">Supported formats: PNG, JPG, WEBP. Max size: 4MB.</div>
-                            <div className="listingImagePreviewWrap">
-                                {imageUrl ? (
-                                    <img src={imageUrl} alt="Listing preview" className="listingImagePreview" />
-                                ) : (
-                                    <div className="listingImageEmpty">Image preview will appear here.</div>
-                                )}
-                            </div>
-                        </div>
+                                </div>
 
-                        <div className="card formSection">
-                            {error && <div className="spotAlert">{error}</div>}
-                            {success && <div className="badge badge--green">{success}</div>}
-                            <div className="rowInline">
-                                <button className="btn btn-primary" type="submit" disabled={saving || deleting}>
-                                    {saving ? "Saving..." : isEdit ? "Save changes" : "Publish listing"}
-                                </button>
-                                <Link className="btn" to={isEdit && editId ? `/spots/${editId}` : "/dashboard"}>
-                                    Cancel
-                                </Link>
-                                {isEdit && (
+                                <div className="wizardActions wizardActions--intro">
+                                    <Link className="btn" to={isEdit && editId ? `/spots/${editId}` : "/dashboard"}>
+                                        Cancel
+                                    </Link>
                                     <button
                                         type="button"
-                                        className="btn btn-danger"
-                                        disabled={saving || deleting}
-                                        onClick={onDeleteListing}
+                                        className="btn btn-primary"
+                                        onClick={goNext}
+                                        disabled={!stepReady[1] || saving}
                                     >
-                                        Delete listing
+                                        Next
                                     </button>
-                                )}
+                                </div>
+                                {error && <div className="createInlineError">{error}</div>}
+                            </div>
+                        </section>
+                    )}
+
+                    {activeStep > 1 && (
+                        <StepShell
+                            step={flowStep}
+                            panel={STEP_META[flowStep]}
+                            title={STEP_META[flowStep].title}
+                            subtitle={STEP_META[flowStep].subtitle}
+                            footer={stepNavigation}
+                        >
+                            {renderStepBody(flowStep)}
+                        </StepShell>
+                    )}
+                </form>
+            )}
+
+            <WizardSheet
+                open={spacesSheetOpen}
+                title="Choose spaces"
+                subtitle="Select how many spaces drivers can book at once."
+                onClose={() => setSpacesSheetOpen(false)}
+            >
+                <div className="createSheetSpaceGrid">
+                    {SPACE_CHOICES.map((choice) => (
+                        <button
+                            key={choice.id}
+                            type="button"
+                            className={`createSheetSpaceBtn${pendingSpacesChoice === choice.id ? " is-active" : ""}`}
+                            onClick={() => setPendingSpacesChoice(choice.id)}
+                        >
+                            {choice.label}
+                        </button>
+                    ))}
+                </div>
+
+                {pendingSpacesChoice === "4plus" && (
+                    <label>
+                        <span>Custom spaces (4+)</span>
+                        <input
+                            className="input"
+                            type="number"
+                            min={4}
+                            step={1}
+                            value={pendingSpacesCustom}
+                            onChange={(event) => setPendingSpacesCustom(event.target.value)}
+                        />
+                    </label>
+                )}
+
+                <div className="createSheetActions">
+                    <button type="button" className="btn" onClick={() => setSpacesSheetOpen(false)}>
+                        Cancel
+                    </button>
+                    <button type="button" className="btn btn-primary" onClick={applySpacesSheet}>
+                        Apply spaces
+                    </button>
+                </div>
+            </WizardSheet>
+
+            <WizardSheet
+                open={customSheetOpen}
+                title="Custom availability"
+                subtitle="Set day and time ranges for bookings."
+                onClose={() => setCustomSheetOpen(false)}
+                wide
+            >
+                <div className="stack">
+                    {customSlots.map((slot) => (
+                        <div className="customSlotCard" key={slot.id}>
+                            <div className="customSlotRow">
+                                <label>
+                                    <span>Day</span>
+                                    <select
+                                        className="input"
+                                        value={slot.dow}
+                                        onChange={(event) => updateCustomSlot(slot.id, { dow: Number(event.target.value) })}
+                                    >
+                                        {DAY_LABELS.map((dayLabel, dayIndex) => (
+                                            <option key={`${slot.id}-${dayLabel}`} value={dayIndex}>
+                                                {dayLabel}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+
+                                <label>
+                                    <span>Start</span>
+                                    <input
+                                        className="input"
+                                        type="time"
+                                        value={slot.start}
+                                        onChange={(event) => updateCustomSlot(slot.id, { start: event.target.value })}
+                                    />
+                                </label>
+
+                                <label>
+                                    <span>End</span>
+                                    <input
+                                        className="input"
+                                        type="time"
+                                        value={slot.end}
+                                        onChange={(event) => updateCustomSlot(slot.id, { end: event.target.value })}
+                                    />
+                                </label>
+
+                                <button
+                                    type="button"
+                                    className="btn btn-ghost"
+                                    onClick={() => removeCustomSlot(slot.id)}
+                                    disabled={customSlots.length === 1}
+                                >
+                                    Remove
+                                </button>
                             </div>
                         </div>
-                    </form>
-                )}
-            </div>
+                    ))}
 
+                    <div className="rowInline">
+                        <button type="button" className="btn" onClick={addCustomSlot}>
+                            + Add day window
+                        </button>
+                    </div>
+
+                    {!areSlotsValid(customSlots) && (
+                        <div className="createInlineError">Each row needs a valid day and time range.</div>
+                    )}
+                </div>
+
+                <div className="createSheetActions">
+                    <button type="button" className="btn" onClick={() => setCustomSheetOpen(false)}>
+                        Cancel
+                    </button>
+                    <button type="button" className="btn btn-primary" onClick={applyCustomSheet}>
+                        Apply custom times
+                    </button>
+                </div>
+            </WizardSheet>
+
+            <WizardSheet
+                open={confirmSheetOpen}
+                title={isEdit ? "Confirm save" : "Confirm publish"}
+                subtitle="One final check before publishing. You'll return to all listings right after."
+                onClose={() => {
+                    setConfirmSheetOpen(false);
+                    setError("");
+                }}
+            >
+                <div className="card">
+                    <div className="h3">{title || "Untitled listing"}</div>
+                    <div className="muted tiny">{addressText || "Address not set"}</div>
+                    <div className="rowInline tiny" style={{ marginTop: "0.45rem" }}>
+                        <span>{modeLabel(mode)}</span>
+                        <span>|</span>
+                        <span>{priceSummary}</span>
+                        <span>|</span>
+                        <span>{availabilityLabel(availabilityPreset)}</span>
+                    </div>
+                </div>
+
+                {error && <div className="createInlineError">{error}</div>}
+
+                <div className="createSheetActions">
+                    <button
+                        type="button"
+                        className="btn"
+                        onClick={() => {
+                            setConfirmSheetOpen(false);
+                            setError("");
+                        }}
+                        disabled={saving}
+                    >
+                        Back
+                    </button>
+                    <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => void submitListing()}
+                        disabled={!publishReady || saving}
+                    >
+                        {saving ? "Saving..." : isEdit ? "Save listing" : "Publish listing"}
+                    </button>
+                </div>
+            </WizardSheet>
         </div>
     );
 }

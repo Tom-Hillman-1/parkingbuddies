@@ -159,16 +159,6 @@ export default function BidConfirmPage() {
             .catch(() => setSpot(null));
     }, [spotId]);
 
-    const minPerHour = useMemo(() => {
-        const v = Number(spot?.auction_start_price_gbp ?? 0);
-        return Number.isFinite(v) ? v : 0;
-    }, [spot?.auction_start_price_gbp]);
-    const auctionEnded = useMemo(() => {
-        const end = spot?.auction_end ? new Date(spot.auction_end).getTime() : null;
-        if (!end || !Number.isFinite(end)) return false;
-        return end <= Date.now();
-    }, [spot?.auction_end]);
-
     if (!token) return <Navigate to="/login" replace />;
     if (!spotId || !start || !end) {
         return <Navigate to="/" replace />;
@@ -205,8 +195,6 @@ export default function BidConfirmPage() {
 
     const totalLabel = pay === "points" ? `${totalPoints} pts` : `£${totalMoney.toFixed(2)}`;
     const perHourLabel = pay === "points" ? `${Number(pointsPerHour || 0)} pts` : `£${Number(perHour || 0).toFixed(2)}`;
-    const perHourTooLow = pay === "money" && minPerHour > 0 && Number(perHour || 0) < minPerHour;
-
     return (
         <div className="container">
             <div className="pageHeader">
@@ -254,37 +242,15 @@ export default function BidConfirmPage() {
 
             {pay === "money" ? (
                 <Elements stripe={stripePromise} options={{}}>
-                    {auctionEnded ? (
-                        <div className="card formSection" style={{ marginTop: 12 }}>
-                            <div className="h3">Auction ended</div>
-                            <div className="tiny muted" style={{ marginTop: 6 }}>
-                                This auction has ended. You can’t place a new bid.
-                            </div>
-                            <div className="rowInline" style={{ marginTop: 10 }}>
-                                <Link to={`/spots/${spotId}`} className="btn btn-primary">Back to listing</Link>
-                            </div>
-                        </div>
-                    ) : perHourTooLow ? (
-                        <div className="card formSection" style={{ marginTop: 12 }}>
-                            <div className="h3">Bid amount too low</div>
-                            <div className="tiny muted" style={{ marginTop: 6 }}>
-                                Minimum bid per hour is £{minPerHour.toFixed(2)}.
-                            </div>
-                            <div className="rowInline" style={{ marginTop: 10 }}>
-                                <Link to={`/spots/${spotId}`} className="btn btn-primary">Back to listing</Link>
-                            </div>
-                        </div>
-                    ) : (
-                        <BidCardForm
-                            amountGbp={totalMoney}
-                            spotId={spotId}
-                            start={start}
-                            end={end}
-                            token={token}
-                            onDone={() => navigate("/dashboard?tab=myAuctionBids")}
-                            onError={(m) => setErr(m)}
-                        />
-                    )}
+                    <BidCardForm
+                        amountGbp={totalMoney}
+                        spotId={spotId}
+                        start={start}
+                        end={end}
+                        token={token}
+                        onDone={() => navigate("/dashboard?tab=myAuctionBids")}
+                        onError={(m) => setErr(m)}
+                    />
                 </Elements>
             ) : (
                 <div className="card formSection" style={{ marginTop: 12 }}>
@@ -296,19 +262,15 @@ export default function BidConfirmPage() {
                         <button
                             className="btn btn-primary"
                             onClick={confirmPoints}
-                            disabled={busy || auctionEnded}
+                            disabled={busy}
                         >
-                            {busy ? "Submitting…" : "Confirm bid"}
+                            {busy ? "Submitting..." : "Confirm bid"}
                         </button>
                         <Link to={`/spots/${spotId}`} className="btn">Cancel</Link>
                     </div>
-                    {auctionEnded && (
-                        <div className="tiny muted" style={{ marginTop: 8 }}>
-                            Auction has ended. You can’t place a new bid.
-                        </div>
-                    )}
                 </div>
             )}
         </div>
     );
 }
+

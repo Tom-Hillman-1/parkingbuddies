@@ -49,7 +49,7 @@ export default function NavBar() {
                                 <span className="nav-user-points">{user?.points_balance ?? 0} pts</span>
                             </Link>
 
-                            <button
+                            <button 
                                 type="button"
                                 className="btn btn-ghost"
                                 onClick={() => {

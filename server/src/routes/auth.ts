@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import { pool } from "../db";
 
 const router = Router();
+const SIGNUP_REWARD_POINTS = 1;
 
 // simple validators (enough for PDD)
 function isValidEmail(email: string) {
@@ -59,17 +60,35 @@ router.post("/signup", async (req, res) => {
 
         const passwordHash = await bcrypt.hash(password, 10);
 
-        const created = await pool.query(
-            `INSERT INTO users (email, name, password_hash)
-       VALUES ($1, $2, $3)
-       RETURNING id, email, name, points_balance, created_at`,
-            [trimmedEmail, trimmedName, passwordHash]
-        );
+        const client = await pool.connect();
+        try {
+            await client.query("BEGIN");
+            const created = await client.query(
+                `INSERT INTO users (email, name, password_hash, points_balance)
+                 VALUES ($1, $2, $3, $4)
+                 RETURNING id, email, name, points_balance, created_at`,
+                [trimmedEmail, trimmedName, passwordHash, SIGNUP_REWARD_POINTS]
+            );
 
-        const user = created.rows[0];
-        const token = issueToken(user.id);
+            const user = created.rows[0];
+            await client.query(
+                `INSERT INTO reward_transactions (user_id, type, amount, reason)
+                 VALUES ($1, 'earn', $2, 'account_signup')`,
+                [user.id, SIGNUP_REWARD_POINTS]
+            );
 
-        return res.status(201).json({ ok: true, token, user });
+            await client.query("COMMIT");
+            const token = issueToken(user.id);
+            return res.status(201).json({ ok: true, token, user });
+        } catch (e: any) {
+            await client.query("ROLLBACK");
+            if (String(e?.code) === "23505") {
+                return res.status(409).json({ ok: false, error: "Email already in use" });
+            }
+            throw e;
+        } finally {
+            client.release();
+        }
     } catch (e) {
         return res.status(500).json({ ok: false, error: String(e) });
     }
@@ -111,7 +130,7 @@ router.post("/login", async (req, res) => {
             id: user.id,
             email: user.email,
             name: user.name,
-            points_balance: user.points_balance,
+            points_balance: Math.max(0, Number(user.points_balance ?? 0)),
             created_at: user.created_at,
         };
 

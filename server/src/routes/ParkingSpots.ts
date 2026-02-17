@@ -4,11 +4,13 @@ import { requireAuth, AuthRequest } from "../middleware/auth";
 
 const router = Router();
 
-// reward amount for uploading a listing (PDD #8)
-const LISTING_REWARD_POINTS = 5;
-const IMAGE_REWARD_POINTS = 2;
+const LISTING_REWARD_POINTS = 1;
 const MIN_AUCTION_START_PRICE_GBP = 0.1;
 const MIN_POINTS_COST = 1;
+const DEMO_PAYOUTS_ENABLED = ["1", "true", "yes", "on"].includes(
+    String(process.env.DEMO_BYPASS_CONNECT ?? "").toLowerCase()
+);
+const DEMO_CONNECT_ACCOUNT_PREFIX = "acct_demo_";
 const NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org";
 const NOMINATIM_HEADERS = {
     "Accept-Language": "en-GB,en;q=0.9",
@@ -18,12 +20,28 @@ const NOMINATIM_HEADERS = {
 type PriceUnit = "hour" | "day" | "week";
 type Mode = "free" | "rent" | "auction";
 type ParkingType = "private" | "public";
+type ParkingKind =
+    | "street"
+    | "parking_lot"
+    | "garage"
+    | "closed_parking"
+    | "driveway"
+    | "underground"
+    | "carport"
+    | "multi_storey"
+    | "ev_charging";
 
 // New availability JSON shapes (supports your improved UI)
 type AvailabilityJson =
-    | { type: "24_7"; date_from?: string; date_to?: string }
-    | { type: "same_everyday"; start: string; end: string; date_from?: string; date_to?: string }
-    | { type: "custom_weekly"; rules: Array<{ dow: number; start: string; end: string }>; date_from?: string; date_to?: string };
+    | { type: "24_7"; date_from?: string; date_to?: string; parking_kind?: ParkingKind }
+    | { type: "same_everyday"; start: string; end: string; date_from?: string; date_to?: string; parking_kind?: ParkingKind }
+    | {
+          type: "custom_weekly";
+          rules: Array<{ dow: number; start: string; end: string }>;
+          date_from?: string;
+          date_to?: string;
+          parking_kind?: ParkingKind;
+      };
 
 // Legacy (old) availability (your earlier phase-2 code)
 type LegacyAvailabilityType = "24_7" | "weekly";
@@ -61,6 +79,25 @@ function parseParkingType(x: unknown): ParkingType | null {
     if (x === "private" || x === "public") return x;
     return null;
 }
+
+function parseParkingKind(x: unknown): ParkingKind | null {
+    if (
+        x === "street" ||
+        x === "parking_lot" ||
+        x === "garage" ||
+        x === "closed_parking" ||
+        x === "driveway" ||
+        x === "underground" ||
+        x === "carport" ||
+        x === "multi_storey" ||
+        x === "ev_charging"
+    ) {
+        return x;
+    }
+    if (x === "covered_parking") return "closed_parking";
+    return null;
+}
+
 function parsePriceUnit(x: unknown): PriceUnit | null {
     if (x === "hour" || x === "day" || x === "week") return x;
     return null;
@@ -75,6 +112,16 @@ function safeMoney(x: unknown) {
 function safeInt(x: unknown) {
     const n = Number(x ?? 0);
     return Number.isFinite(n) ? Math.floor(n) : 0;
+}
+
+function isDemoConnectAccountId(accountId: string | null | undefined) {
+    return typeof accountId === "string" && accountId.startsWith(DEMO_CONNECT_ACCOUNT_PREFIX);
+}
+
+function auctionEndFromAvailability(availability: AvailabilityJson) {
+    const dateTo = availability.date_to;
+    if (!isDateYYYYMMDD(dateTo)) return null;
+    return new Date(`${dateTo}T23:59:59.999Z`).toISOString();
 }
 
 let auctionSchemaReady = false;
@@ -249,13 +296,15 @@ function buildAvailabilityJson(body: any): { ok: true; availability: Availabilit
     const a = body?.availability;
     const date_from = isDateYYYYMMDD(a?.date_from) ? a.date_from : undefined;
     const date_to = isDateYYYYMMDD(a?.date_to) ? a.date_to : undefined;
+    const parking_kind = parseParkingKind(body?.parking_kind ?? a?.parking_kind) ?? undefined;
+    const kindField = parking_kind ? { parking_kind } : {};
     if (date_from && date_to && date_from > date_to) {
         return { ok: false, error: "availability.date_from must be before availability.date_to" };
     }
 
     // ✅ New format (preferred)
     if (a && typeof a === "object") {
-        if (a.type === "24_7") return { ok: true, availability: { type: "24_7", date_from, date_to } };
+        if (a.type === "24_7") return { ok: true, availability: { type: "24_7", date_from, date_to, ...kindField } };
 
         if (a.type === "same_everyday") {
             if (!isTimeHHMM(a.start) || !isTimeHHMM(a.end)) {
@@ -264,7 +313,10 @@ function buildAvailabilityJson(body: any): { ok: true; availability: Availabilit
             if (minutes(a.start) >= minutes(a.end)) {
                 return { ok: false, error: "availability.start must be before availability.end" };
             }
-            return { ok: true, availability: { type: "same_everyday", start: a.start, end: a.end, date_from, date_to } };
+            return {
+                ok: true,
+                availability: { type: "same_everyday", start: a.start, end: a.end, date_from, date_to, ...kindField },
+            };
         }
 
         if (a.type === "custom_weekly") {
@@ -289,7 +341,7 @@ function buildAvailabilityJson(body: any): { ok: true; availability: Availabilit
                 }
             }
 
-            return { ok: true, availability: { type: "custom_weekly", rules, date_from, date_to } };
+            return { ok: true, availability: { type: "custom_weekly", rules, date_from, date_to, ...kindField } };
         }
 
         return { ok: false, error: "Invalid availability.type" };
@@ -298,7 +350,7 @@ function buildAvailabilityJson(body: any): { ok: true; availability: Availabilit
     // ✅ Old format fallback (keeps backwards compatibility)
     const legacyType = (body?.availability_type ?? "24_7") as LegacyAvailabilityType;
     if (legacyType === "24_7") {
-        return { ok: true, availability: { type: "24_7" } };
+        return { ok: true, availability: { type: "24_7", ...kindField } };
     }
 
     if (legacyType === "weekly") {
@@ -324,7 +376,11 @@ function buildAvailabilityJson(body: any): { ok: true; availability: Availabilit
         // Convert weekly to custom_weekly rules (one rule per day)
         return {
             ok: true,
-            availability: { type: "custom_weekly", rules: parsedDays.map((dow: number) => ({ dow, start: ds, end: de })) },
+            availability: {
+                type: "custom_weekly",
+                rules: parsedDays.map((dow: number) => ({ dow, start: ds, end: de })),
+                ...kindField,
+            },
         };
     }
 
@@ -382,6 +438,33 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         return res.status(400).json({ ok: false, error: "points_cost must be >= 1 when allow_points is true" });
     }
 
+    const ownerConnectR = await pool.query(
+        `SELECT stripe_account_id,
+                stripe_charges_enabled,
+                stripe_payouts_enabled,
+                stripe_details_submitted
+         FROM users
+         WHERE id = $1`,
+        [req.userId]
+    );
+    if (!ownerConnectR.rowCount) {
+        return res.status(404).json({ ok: false, error: "User not found" });
+    }
+    const ownerConnect = ownerConnectR.rows[0];
+    const onboardingComplete =
+        (DEMO_PAYOUTS_ENABLED && !ownerConnect.stripe_account_id) ||
+        isDemoConnectAccountId(ownerConnect.stripe_account_id) ||
+        (typeof ownerConnect.stripe_account_id === "string" &&
+            ownerConnect.stripe_charges_enabled &&
+            ownerConnect.stripe_payouts_enabled &&
+            ownerConnect.stripe_details_submitted);
+    if (!onboardingComplete) {
+        return res.status(400).json({
+            ok: false,
+            error: "Complete Stripe onboarding in Settings before publishing a listing.",
+        });
+    }
+
     // availability (new or old)
     const av = buildAvailabilityJson(body);
     if (!av.ok) return res.status(400).json({ ok: false, error: av.error });
@@ -395,26 +478,20 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         if (ap < MIN_AUCTION_START_PRICE_GBP) {
             return res.status(400).json({ ok: false, error: "auction_start_price_gbp must be >= 0.1 for auction" });
         }
-
-        const endRaw = body.auction_end;
-        if (typeof endRaw !== "string" || Number.isNaN(Date.parse(endRaw))) {
-            return res.status(400).json({ ok: false, error: "auction_end must be a valid ISO datetime for auction" });
-        }
-
         auction_start_price_gbp = ap;
-        auction_end = new Date(endRaw).toISOString();
 
-        // auction listings do NOT use price_gbp as rent price
-        priceNum = 0;
-
-        // require date range for auction listings
-        const av = buildAvailabilityJson(body);
-        if (!av.ok) return res.status(400).json({ ok: false, error: av.error });
-        const dateFrom = (av as any).availability?.date_from;
-        const dateTo = (av as any).availability?.date_to;
+        const dateFrom = av.availability.date_from;
+        const dateTo = av.availability.date_to;
         if (!dateFrom || !dateTo) {
             return res.status(400).json({ ok: false, error: "Auction listings must include availability date range" });
         }
+        auction_end = auctionEndFromAvailability(av.availability);
+        if (!auction_end) {
+            return res.status(400).json({ ok: false, error: "Auction listings need a valid end date" });
+        }
+
+        // auction listings do NOT use price_gbp as rent price
+        priceNum = 0;
     }
 
     // Free forces price=0
@@ -534,12 +611,11 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         await client.query("RELEASE SAVEPOINT insert_spot");
 
         // reward listing creation
-        const totalReward = LISTING_REWARD_POINTS + (image_url ? IMAGE_REWARD_POINTS : 0);
         await client.query(
             `UPDATE users
        SET points_balance = points_balance + $1, updated_at = now()
        WHERE id = $2`,
-            [totalReward, req.userId]
+            [LISTING_REWARD_POINTS, req.userId]
         );
 
         await client.query(
@@ -547,13 +623,6 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
        VALUES ($1,'earn',$2,'listing_upload',$3)`,
             [req.userId, LISTING_REWARD_POINTS, spot.id]
         );
-        if (image_url) {
-            await client.query(
-                `INSERT INTO reward_transactions (user_id, type, amount, reason, related_spot_id)
-         VALUES ($1,'earn',$2,'listing_photo',$3)`,
-                [req.userId, IMAGE_REWARD_POINTS, spot.id]
-            );
-        }
 
         await client.query("COMMIT");
         return res.status(201).json({ ok: true, parking_spot: spot });
@@ -623,13 +692,17 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
             return res.status(400).json({ ok: false, error: "auction_start_price_gbp must be >= 0.1 for auction" });
         }
 
-        const endRaw = body.auction_end;
-        if (typeof endRaw !== "string" || Number.isNaN(Date.parse(endRaw))) {
-            return res.status(400).json({ ok: false, error: "auction_end must be a valid ISO datetime for auction" });
+        const dateFrom = av.availability.date_from;
+        const dateTo = av.availability.date_to;
+        if (!dateFrom || !dateTo) {
+            return res.status(400).json({ ok: false, error: "Auction listings must include availability date range" });
         }
 
         auction_start_price_gbp = ap;
-        auction_end = new Date(endRaw).toISOString();
+        auction_end = auctionEndFromAvailability(av.availability);
+        if (!auction_end) {
+            return res.status(400).json({ ok: false, error: "Auction listings need a valid end date" });
+        }
         priceNum = 0;
     }
 

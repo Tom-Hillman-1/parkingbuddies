@@ -9,7 +9,7 @@ type SortMode = "distance" | "price_low" | "price_high";
 type ModeFilter = Record<ParkingSpot["mode"], boolean>;
 
 const LONDON = { lat: 51.5074, lng: -0.1278 };
-const HOME_HERO_BACKGROUND_URL = new URL("../assets/background.json", import.meta.url).href;
+const HOME_HERO_BACKGROUND_URL = new URL("../assets/loading (2).json", import.meta.url).href;
 const HOME_HERO_CITY_URL = new URL("../assets/city.json", import.meta.url).href;
 
 function toNumber(value: unknown) {
@@ -25,12 +25,20 @@ function priceValue(spot: ParkingSpot) {
 function priceLabel(spot: ParkingSpot) {
     const price = priceValue(spot);
     const unit = String(spot.price_unit ?? "hour");
+    const points = Math.max(0, toNumber(spot.points_cost));
+    const pointsText = Number.isInteger(points) ? points.toFixed(0) : points.toFixed(1);
+    const pointsLabel = spot.allow_points && points > 0 ? `${pointsText} pts` : null;
+    let main = "";
 
     if (spot.mode === "auction") {
-        return `Bid from \u00A3${price.toFixed(1)}`;
+        main = `Bid from \u00A3${price.toFixed(2)}`;
+    } else if (price <= 0) {
+        main = "Free";
+    } else {
+        main = `\u00A3${price.toFixed(2)} / ${unit}`;
     }
-    if (price <= 0) return "Free";
-    return `\u00A3${price.toFixed(2)} / ${unit}`;
+
+    return { main, pointsLabel };
 }
 
 function modeLabel(mode: ParkingSpot["mode"]) {
@@ -157,25 +165,26 @@ export default function HomePage() {
         return rows;
     }, [filtered, anchor, sort]);
 
-    const visible = useMemo(() => ranked.slice(0, 4), [ranked]);
+    const visible = ranked;
+    const mapSpots = useMemo(() => ranked.map((entry) => entry.spot), [ranked]);
 
     useEffect(() => {
-        if (!visible.length) {
+        if (!mapSpots.length) {
             setSelectedId(null);
             return;
         }
 
-        if (!selectedId || !visible.some((entry) => entry.spot.id === selectedId)) {
-            setSelectedId(visible[0].spot.id);
+        if (!selectedId || !mapSpots.some((spot) => spot.id === selectedId)) {
+            setSelectedId(mapSpots[0].id);
         }
-    }, [visible, selectedId]);
+    }, [mapSpots, selectedId]);
 
     const mapCenter = useMemo(() => {
-        const selected = visible.find((entry) => entry.spot.id === selectedId)?.spot;
+        const selected = mapSpots.find((spot) => spot.id === selectedId);
         if (selected) return { lat: selected.lat, lng: selected.lng };
-        if (visible[0]) return { lat: visible[0].spot.lat, lng: visible[0].spot.lng };
+        if (mapSpots[0]) return { lat: mapSpots[0].lat, lng: mapSpots[0].lng };
         return LONDON;
-    }, [visible, selectedId]);
+    }, [mapSpots, selectedId]);
 
     const isLocEnabled = locStatus === "Location enabled.";
     const isLocPending = locStatus === "Enabling location...";
@@ -277,7 +286,7 @@ export default function HomePage() {
                             <span className="field-label">Search</span>
                             <div className="search-inline">
                                 <input
-                                    className="input"
+                                    className="input input--search"
                                     value={query}
                                     onChange={(event) => setQuery(event.target.value)}
                                     placeholder="Search by area, street, or landmark"
@@ -294,7 +303,7 @@ export default function HomePage() {
                         </label>
 
                         <div className="control-grid control-grid--compact">
-                            <label className="field">
+                            <label className="field home-sort-glass">
                                 <span className="field-label">Sort</span>
                                 <select
                                     className="input"
@@ -324,8 +333,8 @@ export default function HomePage() {
                         </div>
 
                         <p className="tiny muted">
-                            Showing {visible.length} of {ranked.length} spots
-                            {ranked.length !== spots.length ? ` (filtered from ${spots.length})` : ""}.
+                            Showing {visible.length} spots
+                            {ranked.length !== spots.length ? ` out of ${spots.length}` : ""}.
                         </p>
                     </div>
 
@@ -342,6 +351,7 @@ export default function HomePage() {
                         {!loading && !error && visible.map((entry) => {
                             const { spot, distKm } = entry;
                             const active = selectedId === spot.id;
+                            const price = priceLabel(spot);
 
                             return (
                                 <article
@@ -363,33 +373,40 @@ export default function HomePage() {
                                     }}
                                 >
                                     <div className="spot-head">
-                                        <div>
+                                        <div className="spot-head-main">
                                             <h3 className="h3">{spot.title}</h3>
-                                            <p className="tiny muted">{spot.address_text}</p>
+                                            <p className="spot-address" title={spot.address_text}>{spot.address_text}</p>
                                         </div>
-                                        <span className="spot-price">{priceLabel(spot)}</span>
+                                        <span className={`spot-price${price.pointsLabel ? " spot-price--stacked" : ""}`}>
+                                            <span className="spot-price-main">{price.main}</span>
+                                            {price.pointsLabel && (
+                                                <>
+                                                    <span className="spot-price-or">or</span>
+                                                    <span className="spot-price-points">{price.pointsLabel}</span>
+                                                </>
+                                            )}
+                                        </span>
                                     </div>
 
                                     <p className="spot-copy">
                                         {spot.description || "Quick access and clear arrival details."}
                                     </p>
 
-                                    <div className="spot-meta">
-                                        <span className="badge">{modeLabel(spot.mode)}</span>
-                                        <span className="badge">{distKm.toFixed(1)} km</span>
-                                        {spot.allow_points && spot.points_cost > 0 && (
-                                            <span className="badge">{spot.points_cost} pts</span>
-                                        )}
-                                    </div>
+                                    <div className="spot-foot">
+                                        <div className="spot-meta">
+                                            <span className="badge">{modeLabel(spot.mode)}</span>
+                                            <span className="badge">{distKm.toFixed(1)} km</span>
+                                        </div>
 
-                                    <div className="spot-actions">
-                                        <Link
-                                            to={`/spots/${spot.id}`}
-                                            className="btn btn-primary"
-                                            onClick={(event) => event.stopPropagation()}
-                                        >
-                                            View details
-                                        </Link>
+                                        <div className="spot-actions">
+                                            <Link
+                                                to={`/spots/${spot.id}`}
+                                                className="btn btn-primary"
+                                                onClick={(event) => event.stopPropagation()}
+                                            >
+                                                View details
+                                            </Link>
+                                        </div>
                                     </div>
                                 </article>
                             );
@@ -399,7 +416,7 @@ export default function HomePage() {
 
                 <section ref={mapRef} className="home-map card" aria-label="Map results">
                     <SpotsMap
-                        spots={visible.map((entry) => entry.spot)}
+                        spots={mapSpots}
                         center={mapCenter}
                         selectedId={selectedId}
                         hoveredId={hoveredId}

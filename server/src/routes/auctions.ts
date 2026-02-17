@@ -190,8 +190,11 @@ function remainingMinutes(spot: any, approved: Array<{ start: Date; end: Date }>
 
 function isValidDurationMinutes(minutes: number) {
     if (!Number.isFinite(minutes) || minutes <= 0) return false;
-    if (minutes <= 8 * 60) return minutes % 15 === 0;
-    if (minutes <= 23 * 60) return minutes % 60 === 0;
+
+    // Match client duration ladder:
+    // 15-min steps up to 12h, hourly up to 72h, then whole days to 30d.
+    if (minutes <= 12 * 60) return minutes % 15 === 0;
+    if (minutes <= 72 * 60) return minutes % 60 === 0;
     if (minutes <= 30 * 24 * 60) return minutes % (24 * 60) === 0;
     return false;
 }
@@ -249,28 +252,6 @@ router.get("/:spotId", async (req, res) => {
             return res.status(400).json({ ok: false, error: "Listing is not an auction" });
         }
 
-        const highestR = await pool.query(
-            `SELECT amount_gbp FROM auction_bids
-             WHERE parking_spot_id = $1
-               AND status = 'pending'
-               AND pay_method = 'money'
-             ORDER BY amount_gbp DESC, created_at ASC
-             LIMIT 1`,
-            [spotId]
-        );
-        const highest = highestR.rowCount ? toMoney(highestR.rows[0].amount_gbp) : 0;
-
-        const highestPointsR = await pool.query(
-            `SELECT amount_points FROM auction_bids
-             WHERE parking_spot_id = $1
-               AND status = 'pending'
-               AND pay_method = 'points'
-             ORDER BY amount_points DESC, created_at ASC
-             LIMIT 1`,
-            [spotId]
-        );
-        const highestPoints = highestPointsR.rowCount ? Number(highestPointsR.rows[0].amount_points ?? 0) : 0;
-
         const approvedR = await pool.query(
             `SELECT id, amount_gbp, amount_points, pay_method, status, start_time, end_time, created_at, updated_at
              FROM auction_bids
@@ -284,20 +265,25 @@ router.get("/:spotId", async (req, res) => {
             `SELECT id, amount_gbp, amount_points, pay_method, status, start_time, end_time, created_at
              FROM auction_bids
              WHERE parking_spot_id = $1 AND status = 'pending'
-             ORDER BY amount_gbp DESC, created_at ASC
+             ORDER BY created_at DESC
              LIMIT 5`,
             [spotId]
         );
 
-        const approvedBookings = approvedR.rows
-            .filter((b: any) => b.start_time && b.end_time)
-            .map((b: any) => ({ start: new Date(b.start_time), end: new Date(b.end_time) }));
-        const remaining = remainingMinutes(spot, approvedBookings);
+        const bookingWindowsR = await pool.query(
+            `SELECT start_time, end_time
+             FROM bookings
+             WHERE parking_spot_id = $1
+               AND status IN ('confirmed', 'pending')
+               AND start_time IS NOT NULL
+               AND end_time IS NOT NULL`,
+            [spotId]
+        );
+        const occupied = bookingWindowsR.rows.map((b: any) => ({ start: new Date(b.start_time), end: new Date(b.end_time) }));
+        const remaining = remainingMinutes(spot, occupied);
         const soldOut = remaining < 16;
 
         const auction: any = {
-            highest_pending_bid_gbp: highest,
-            highest_pending_bid_points: highestPoints,
             auction_end: spot.auction_end,
             auction_start_price_gbp: spot.auction_start_price_gbp,
             pending_bids: pendingR.rows,
@@ -319,7 +305,7 @@ router.get("/:spotId", async (req, res) => {
                          JOIN users u ON u.id = b.bidder_user_id
                          WHERE b.parking_spot_id = $1
                            AND b.status = 'pending'
-                         ORDER BY b.amount_gbp DESC, b.created_at ASC
+                         ORDER BY b.created_at DESC
                          LIMIT 20`,
                         [spotId]
                     );
@@ -398,23 +384,13 @@ router.get("/:spotId/owner", requireAuth, async (req: AuthRequest, res) => {
              FROM auction_bids b
              JOIN users u ON u.id = b.bidder_user_id
              WHERE b.parking_spot_id = $1
-             ORDER BY b.amount_gbp DESC, b.created_at ASC`,
+             ORDER BY b.created_at DESC`,
             [spotId]
         );
-
-        const highestR = await pool.query(
-            `SELECT amount_gbp FROM auction_bids
-             WHERE parking_spot_id = $1 AND status = 'pending' AND pay_method = 'money'
-             ORDER BY amount_gbp DESC, created_at ASC
-             LIMIT 1`,
-            [spotId]
-        );
-        const highest = highestR.rowCount ? toMoney(highestR.rows[0].amount_gbp) : 0;
 
         return res.json({
             ok: true,
             auction: {
-                highest_pending_bid_gbp: highest,
                 auction_end: spot.auction_end,
                 auction_start_price_gbp: spot.auction_start_price_gbp,
                 bids: bidsR.rows,
@@ -451,7 +427,7 @@ router.get("/owner/bids", requireAuth, async (req: AuthRequest, res) => {
                       JOIN users u ON u.id = b.bidder_user_id
              WHERE ps.owner_user_id = $1
                AND ps.mode = 'auction'
-             ORDER BY b.amount_gbp DESC, b.created_at ASC`,
+             ORDER BY b.created_at DESC`,
             [req.userId]
         );
 
@@ -607,7 +583,10 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
     }
     const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
     if (!isValidDurationMinutes(minutes)) {
-        return res.status(400).json({ ok: false, error: "Invalid bid duration" });
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid duration. Use 15-min steps up to 12h, hourly steps up to 72h, then whole days.",
+        });
     }
     const maxEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     if (end > maxEnd) {
@@ -619,9 +598,10 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
     try {
         await client.query("BEGIN");
         await ensureAuctionBidSchema();
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [spotId]);
 
         const spotR = await client.query(
-            `SELECT id, owner_user_id, mode, auction_end, auction_start_price_gbp, allow_points, points_cost, availability_json, availability_type, available_days, daily_start, daily_end, capacity_total
+            `SELECT id, owner_user_id, mode, auction_start_price_gbp, allow_points, points_cost, availability_json, availability_type, available_days, daily_start, daily_end, capacity_total
              FROM parking_spots
              WHERE id = $1`,
             [spotId]
@@ -640,34 +620,25 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
             await client.query("ROLLBACK");
             return res.status(400).json({ ok: false, error: "Owners cannot bid on their own listings" });
         }
-        if (spot.auction_end && new Date(spot.auction_end) <= new Date()) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Auction has ended" });
-        }
 
         if (!isSlotAllowed(spot, start, end)) {
             await client.query("ROLLBACK");
             return res.status(400).json({ ok: false, error: "Requested slot is outside listing availability" });
         }
 
-        const approvedR = await client.query(
-            `SELECT start_time, end_time
-             FROM auction_bids
-             WHERE parking_spot_id = $1 AND status = 'accepted' AND start_time IS NOT NULL AND end_time IS NOT NULL`,
-            [spotId]
+        const capacity = Math.max(1, Number(spot.capacity_total ?? 1));
+        const overlapR = await client.query(
+            `SELECT COUNT(*)::int AS count
+             FROM bookings
+             WHERE parking_spot_id = $1
+               AND status IN ('confirmed', 'pending')
+               AND NOT (end_time <= $2 OR start_time >= $3)`,
+            [spotId, start.toISOString(), end.toISOString()]
         );
-        const approved = approvedR.rows.map((b: any) => ({ start: new Date(b.start_time), end: new Date(b.end_time) }));
-        const remaining = remainingMinutes(spot, approved);
-        if (remaining < 16) {
+        const overlapCount = Number(overlapR.rows[0]?.count ?? 0);
+        if (overlapCount >= capacity) {
             await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Auction is sold out" });
-        }
-
-        for (const a of approved) {
-            if (a.start < end && a.end > start) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: "Selected slot is no longer available" });
-            }
+            return res.status(400).json({ ok: false, error: "Selected slot is no longer available" });
         }
 
         if (payMethod === "money") {
@@ -758,18 +729,7 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
         client.release();
     }
 
-    // return updated auction summary
-    const summary = await pool.query(
-        `SELECT amount_gbp FROM auction_bids
-         WHERE parking_spot_id = $1
-           AND status = 'pending'
-           AND pay_method = 'money'
-         ORDER BY amount_gbp DESC, created_at ASC
-         LIMIT 1`,
-        [spotId]
-    );
-    const highest = summary.rowCount ? toMoney(summary.rows[0].amount_gbp) : 0;
-    return res.json({ ok: true, auction: { highest_pending_bid_gbp: highest }, bid_id: bidId });
+    return res.json({ ok: true, bid_id: bidId });
 });
 
 /**
@@ -788,6 +748,7 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
     try {
         await client.query("BEGIN");
         await ensureAuctionBidSchema();
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [spotId]);
 
         const spotR = await client.query(
             `SELECT id, owner_user_id, mode, availability_json, availability_type, available_days, daily_start, daily_end, capacity_total
@@ -842,24 +803,19 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
             return res.status(400).json({ ok: false, error: "Bid slot is outside listing availability" });
         }
 
-        const approvedR = await client.query(
-            `SELECT start_time, end_time
-             FROM auction_bids
-             WHERE parking_spot_id = $1 AND status = 'accepted' AND start_time IS NOT NULL AND end_time IS NOT NULL`,
-            [spotId]
+        const capacity = Math.max(1, Number(spot.capacity_total ?? 1));
+        const overlapR = await client.query(
+            `SELECT COUNT(*)::int AS count
+             FROM bookings
+             WHERE parking_spot_id = $1
+               AND status IN ('confirmed', 'pending')
+               AND NOT (end_time <= $2 OR start_time >= $3)`,
+            [spotId, start.toISOString(), end.toISOString()]
         );
-        const approved = approvedR.rows.map((b: any) => ({ start: new Date(b.start_time), end: new Date(b.end_time) }));
-        for (const a of approved) {
-            if (a.start < end && a.end > start) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: "Slot already approved for another bid" });
-            }
-        }
-
-        const remaining = remainingMinutes(spot, approved);
-        if (remaining < 16) {
+        const overlapCount = Number(overlapR.rows[0]?.count ?? 0);
+        if (overlapCount >= capacity) {
             await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Auction is sold out" });
+            return res.status(400).json({ ok: false, error: "Slot already full for this time range" });
         }
 
         if ((bidInfo.pay_method ?? "money") === "money") {
@@ -915,25 +871,28 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
             }
             const totalPoints = Math.ceil(perHourPoints * units);
 
-            const userR = await client.query(`SELECT id, points_balance FROM users WHERE id = $1`, [
-                bidInfo.bidder_user_id,
-            ]);
-            if (!userR.rowCount) {
-                await client.query("ROLLBACK");
-                return res.status(404).json({ ok: false, error: "Bidder not found" });
-            }
-            const balance = Number(userR.rows[0].points_balance ?? 0);
-            if (balance < totalPoints) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: `Bidder does not have enough points (${totalPoints} required)` });
-            }
-
-            await client.query(
+            const deductedR = await client.query(
                 `UPDATE users
                  SET points_balance = points_balance - $1, updated_at = now()
-                 WHERE id = $2`,
+                 WHERE id = $2
+                   AND points_balance >= $1
+                 RETURNING points_balance`,
                 [totalPoints, bidInfo.bidder_user_id]
             );
+            if (!deductedR.rowCount) {
+                const balanceR = await client.query(`SELECT points_balance FROM users WHERE id = $1`, [
+                    bidInfo.bidder_user_id,
+                ]);
+                if (!balanceR.rowCount) {
+                    await client.query("ROLLBACK");
+                    return res.status(404).json({ ok: false, error: "Bidder not found" });
+                }
+                await client.query("ROLLBACK");
+                return res.status(400).json({
+                    ok: false,
+                    error: `Bidder does not have enough points (${totalPoints} required)`,
+                });
+            }
             await client.query(
                 `UPDATE users
                  SET points_balance = points_balance + $1, updated_at = now()

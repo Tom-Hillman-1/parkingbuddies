@@ -451,9 +451,6 @@ export default function SettingsPage() {
                                         Use demo payouts
                                     </button>
                                 )}
-                                <button className="btn" onClick={refreshConnectStatus} disabled={connectBusy}>
-                                    Refresh status
-                                </button>
                                 <button
                                     className="btn"
                                     onClick={openStripeDashboard}
@@ -461,6 +458,8 @@ export default function SettingsPage() {
                                 >
                                     Open Stripe dashboard
                                 </button>
+
+
                             </div>
                         </div>
 

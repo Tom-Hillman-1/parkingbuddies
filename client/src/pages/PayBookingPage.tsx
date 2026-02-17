@@ -13,6 +13,7 @@ type Booking = {
     spot_address?: string;
     start_time?: string;
     end_time?: string;
+    created_at?: string;
     payment_provider_ref?: string | null;
 };
 
@@ -31,6 +32,15 @@ function formatDateRange(start?: string | null, end?: string | null) {
         const from = new Date(start).toLocaleString();
         const to = new Date(end).toLocaleString();
         return `${from} → ${to}`;
+    } catch {
+        return "Time on file";
+    }
+}
+
+function formatDateTime(value?: string | null) {
+    if (!value) return "Time on file";
+    try {
+        return new Date(value).toLocaleString();
     } catch {
         return "Time on file";
     }
@@ -149,6 +159,7 @@ export default function PayBookingPage() {
     const bookingTitle = booking?.spot_title ?? "Parking booking";
     const bookingAddress = booking?.spot_address ?? "Address on file";
     const bookingWindow = booking ? formatDateRange(booking.start_time, booking.end_time) : "Time on file";
+    const bookedAt = formatDateTime(booking?.created_at);
     const stripeSummary = hasStripeReceipt
         ? [
               {
@@ -164,8 +175,8 @@ export default function PayBookingPage() {
                   value: receipt!.charge_id ?? "—",
               },
               {
-                  label: "Receipt email",
-                  value: receipt!.receipt_email ?? "—",
+                  label: "Booked at",
+                  value: bookedAt,
               },
           ]
         : [];
@@ -174,7 +185,7 @@ export default function PayBookingPage() {
         <div className="container">
             <div className="pageHeader">
                 <div className="heroKicker">STRIPE</div>
-                <div className="heroTitle">Payment</div>
+                <div className="heroTitle">Track booking</div>
                 <div className="heroSub muted">Pay securely, then open your official Stripe receipt.</div>
             </div>
 
@@ -184,7 +195,7 @@ export default function PayBookingPage() {
             {!loading && !err && booking && (
                 <>
                 {requiresPayment && !successCheckout && (
-                    <div className="card formSection">
+                    <div className="card formSection" style={{ marginBottom: 14 }}>
                         <div className="h3">Continue in Stripe</div>
                         <div className="muted" style={{ marginTop: 6 }}>
                             You will complete payment on Stripe and receive the official receipt there.
@@ -257,10 +268,8 @@ export default function PayBookingPage() {
                                 >
                                     Open Stripe receipt
                                 </a>
-
-                            </div>
-                            <div className="rowInline">
                                 <Link to="/dashboard" className="btn">Back to dashboard</Link>
+                                <Link to="/about#contact-us" className="btn">Contact support</Link>
                             </div>
                         </div>
                     </div>

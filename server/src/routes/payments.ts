@@ -8,11 +8,11 @@ import { stripe } from "../stripe";
 
 const router = Router();
 
-const POINTS_EARN_PER_MONEY_BOOKING = 10;
 const STRIPE_CONNECT_COUNTRY = process.env.STRIPE_CONNECT_COUNTRY ?? "GB";
 const DEMO_PAYOUTS_ENABLED = ["1", "true", "yes", "on"].includes(
     String(process.env.DEMO_BYPASS_CONNECT ?? "").toLowerCase()
 );
+const DEMO_CONNECT_ACCOUNT_PREFIX = "acct_demo_";
 
 type UserConnectRow = {
     id: string;
@@ -47,6 +47,10 @@ function toMoney(x: unknown) {
     return Number.isFinite(n) ? n : 0;
 }
 
+function moneyBookingRewardPoints(totalPriceGbp: unknown) {
+    return Math.max(0, Math.floor(toMoney(totalPriceGbp)));
+}
+
 function frontendBaseUrl() {
     return process.env.FRONTEND_URL ?? process.env.CLIENT_URL ?? "http://localhost:5173";
 }
@@ -62,6 +66,10 @@ function demoConnectStatus(accountId: string | null = null): ConnectStatus {
         demo_bypass: true,
         demo_available: DEMO_PAYOUTS_ENABLED,
     };
+}
+
+function isDemoConnectAccountId(accountId: string | null | undefined) {
+    return typeof accountId === "string" && accountId.startsWith(DEMO_CONNECT_ACCOUNT_PREFIX);
 }
 
 async function getStripeReceiptDetails(paymentIntentId: string): Promise<StripeReceiptDetails> {
@@ -166,6 +174,8 @@ async function upsertLatestPaymentRow(
 async function awardMoneyBookingRewardIfNeeded(client: PoolClient, booking: any) {
     const paid = toMoney(booking.total_price_gbp) > 0;
     if (!paid) return;
+    const points = moneyBookingRewardPoints(booking.total_price_gbp);
+    if (points <= 0) return;
 
     const existingRewardR = await client.query(
         `SELECT 1
@@ -182,13 +192,13 @@ async function awardMoneyBookingRewardIfNeeded(client: PoolClient, booking: any)
         `UPDATE users
          SET points_balance = points_balance + $1, updated_at = now()
          WHERE id = $2`,
-        [POINTS_EARN_PER_MONEY_BOOKING, booking.driver_user_id]
+        [points, booking.driver_user_id]
     );
 
     await client.query(
         `INSERT INTO reward_transactions (user_id, type, amount, reason, related_booking_id, related_spot_id)
          VALUES ($1, 'earn', $2, 'booking_purchase', $3, $4)`,
-        [booking.driver_user_id, POINTS_EARN_PER_MONEY_BOOKING, booking.id, booking.parking_spot_id]
+        [booking.driver_user_id, points, booking.id, booking.parking_spot_id]
     );
 }
 
@@ -279,7 +289,7 @@ router.post("/connect/onboard", requireAuth, async (req: AuthRequest, res) => {
                     error: "Demo payouts are disabled on this server.",
                 });
             }
-            if (row.stripe_account_id) {
+            if (row.stripe_account_id && !isDemoConnectAccountId(row.stripe_account_id)) {
                 const status = await syncStripeAccountStatus(client, req.userId, row.stripe_account_id);
                 return res.json({
                     ok: true,
@@ -289,11 +299,16 @@ router.post("/connect/onboard", requireAuth, async (req: AuthRequest, res) => {
             return res.json({
                 ok: true,
                 url: `${frontendBaseUrl()}/dashboard?tab=payouts&connect=demo`,
-                connect: demoConnectStatus(null),
+                connect: demoConnectStatus(
+                    isDemoConnectAccountId(row.stripe_account_id) ? row.stripe_account_id : null
+                ),
             });
         }
 
         let accountId = row.stripe_account_id;
+        if (isDemoConnectAccountId(accountId)) {
+            accountId = null;
+        }
         if (!accountId) {
             const account = await stripe.accounts.create({
                 type: "express",
@@ -347,11 +362,20 @@ router.get("/connect/status", requireAuth, async (req: AuthRequest, res) => {
         const row = await getUserConnectRow(client, req.userId);
         if (!row) return res.status(404).json({ ok: false, error: "User not found" });
 
+        if (isDemoConnectAccountId(row.stripe_account_id)) {
+            return res.json({
+                ok: true,
+                connect: demoConnectStatus(row.stripe_account_id),
+            });
+        }
+
         if (DEMO_PAYOUTS_ENABLED) {
-            if (!row.stripe_account_id) {
+            if (!row.stripe_account_id || isDemoConnectAccountId(row.stripe_account_id)) {
                 return res.json({
                     ok: true,
-                    connect: demoConnectStatus(null),
+                    connect: demoConnectStatus(
+                        isDemoConnectAccountId(row.stripe_account_id) ? row.stripe_account_id : null
+                    ),
                 });
             }
         }
@@ -392,7 +416,10 @@ router.post("/connect/dashboard-link", requireAuth, async (req: AuthRequest, res
     try {
         const row = await getUserConnectRow(client, req.userId);
         if (!row) return res.status(404).json({ ok: false, error: "User not found" });
-        if (!row.stripe_account_id && DEMO_PAYOUTS_ENABLED) {
+        if (
+            (!row.stripe_account_id && DEMO_PAYOUTS_ENABLED) ||
+            isDemoConnectAccountId(row.stripe_account_id)
+        ) {
             return res.status(400).json({
                 ok: false,
                 error: "Demo payouts are active. Connect Stripe first to open a Stripe dashboard.",
@@ -469,20 +496,21 @@ router.post("/checkout-session", requireAuth, async (req: AuthRequest, res) => {
         }
 
         const ownerAccountId = typeof booking.stripe_account_id === "string" ? booking.stripe_account_id : null;
+        const ownerAccountUsable = ownerAccountId && !isDemoConnectAccountId(ownerAccountId) ? ownerAccountId : null;
         let ownerConnectStatus: ConnectStatus;
-        if (ownerAccountId) {
+        if (ownerAccountUsable) {
             const statusClient = await pool.connect();
             try {
                 ownerConnectStatus = await syncStripeAccountStatus(
                     statusClient,
                     booking.owner_user_id,
-                    ownerAccountId
+                    ownerAccountUsable
                 );
             } finally {
                 statusClient.release();
             }
-        } else if (DEMO_PAYOUTS_ENABLED) {
-            ownerConnectStatus = demoConnectStatus(null);
+        } else if (DEMO_PAYOUTS_ENABLED || isDemoConnectAccountId(ownerAccountId)) {
+            ownerConnectStatus = demoConnectStatus(ownerAccountId ?? null);
         } else {
             return res.status(400).json({
                 ok: false,
@@ -510,15 +538,15 @@ router.post("/checkout-session", requireAuth, async (req: AuthRequest, res) => {
                 booking_id,
                 user_id: req.userId ?? "",
                 owner_user_id: booking.owner_user_id,
-                owner_account_id: ownerAccountId ?? "",
+                owner_account_id: ownerAccountUsable ?? "",
                 type: "rent_booking",
                 demo_bypass_connect: ownerConnectStatus.demo_bypass ? "true" : "false",
             },
             description: `Booking ${booking_id} | ${title} | ${address} | ${when}`,
         };
-        if (ownerAccountId && !ownerConnectStatus.demo_bypass) {
-            paymentIntentData.transfer_data = { destination: ownerAccountId };
-            paymentIntentData.on_behalf_of = ownerAccountId;
+        if (ownerAccountUsable && !ownerConnectStatus.demo_bypass) {
+            paymentIntentData.transfer_data = { destination: ownerAccountUsable };
+            paymentIntentData.on_behalf_of = ownerAccountUsable;
         }
 
         const session = await stripe.checkout.sessions.create({
@@ -618,20 +646,21 @@ router.post("/auction-intent", requireAuth, async (req: AuthRequest, res) => {
             return res.status(400).json({ ok: false, error: "Owners cannot bid on their own listings" });
         }
         const ownerAccountId = typeof spot.stripe_account_id === "string" ? spot.stripe_account_id : null;
+        const ownerAccountUsable = ownerAccountId && !isDemoConnectAccountId(ownerAccountId) ? ownerAccountId : null;
         let ownerConnectStatus: ConnectStatus;
-        if (ownerAccountId) {
+        if (ownerAccountUsable) {
             const statusClient = await pool.connect();
             try {
                 ownerConnectStatus = await syncStripeAccountStatus(
                     statusClient,
                     spot.owner_user_id,
-                    ownerAccountId
+                    ownerAccountUsable
                 );
             } finally {
                 statusClient.release();
             }
-        } else if (DEMO_PAYOUTS_ENABLED) {
-            ownerConnectStatus = demoConnectStatus(null);
+        } else if (DEMO_PAYOUTS_ENABLED || isDemoConnectAccountId(ownerAccountId)) {
+            ownerConnectStatus = demoConnectStatus(ownerAccountId ?? null);
         } else {
             return res.status(400).json({
                 ok: false,
@@ -655,14 +684,14 @@ router.post("/auction-intent", requireAuth, async (req: AuthRequest, res) => {
                 spot_id,
                 user_id: req.userId ?? "",
                 owner_user_id: spot.owner_user_id,
-                owner_account_id: ownerAccountId ?? "",
+                owner_account_id: ownerAccountUsable ?? "",
                 type: "auction_bid",
                 demo_bypass_connect: ownerConnectStatus.demo_bypass ? "true" : "false",
             },
         };
-        if (ownerAccountId && !ownerConnectStatus.demo_bypass) {
-            paymentIntentPayload.transfer_data = { destination: ownerAccountId };
-            paymentIntentPayload.on_behalf_of = ownerAccountId;
+        if (ownerAccountUsable && !ownerConnectStatus.demo_bypass) {
+            paymentIntentPayload.transfer_data = { destination: ownerAccountUsable };
+            paymentIntentPayload.on_behalf_of = ownerAccountUsable;
         }
 
         const intent = await stripe.paymentIntents.create(paymentIntentPayload);

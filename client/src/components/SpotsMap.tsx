@@ -139,6 +139,14 @@ export default function SpotsMap({
                         >
                             <Popup className="map-popup">
                                 <div className="map-popup__body">
+                                    {spot.image_url && (
+                                        <img
+                                            src={spot.image_url}
+                                            alt={spot.title}
+                                            className="map-popup__image"
+                                            loading="lazy"
+                                        />
+                                    )}
                                     <div className="map-popup__title">{spot.title}</div>
                                     <div className="map-popup__address">{spot.address_text}</div>
                                     <div className="map-popup__meta">

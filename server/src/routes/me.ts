@@ -32,7 +32,7 @@ router.get("/", requireAuth, async (req: AuthRequest, res) => {
              WHERE user_id = $1`,
             [req.userId]
         );
-        const computed = Number(pointsR.rows[0]?.balance ?? 0);
+        const computed = Math.max(0, Number(pointsR.rows[0]?.balance ?? 0));
         const current = Number(r.rows[0].points_balance ?? 0);
 
         if (computed !== current) {

@@ -817,13 +817,18 @@ export default function DashboardPage() {
 
                                             <div className="rowInline" style={{ marginTop: 8 }}>
                                                 {b.pay_method === "money" && (
-                                                    <button
-                                                        className="btn btn-primary"
-                                                        onClick={() => openPaymentReceipt(b.id)}
-                                                        disabled={receiptLoadingId === b.id}
-                                                    >
-                                                        {receiptLoadingId === b.id ? "Loading receipt…" : "Open Stripe receipt"}
-                                                    </button>
+                                                    <>
+                                                        <button
+                                                            className="btn btn-primary"
+                                                            onClick={() => openPaymentReceipt(b.id)}
+                                                            disabled={receiptLoadingId === b.id}
+                                                        >
+                                                            {receiptLoadingId === b.id ? "Loading receipt…" : "Open Stripe receipt"}
+                                                        </button>
+                                                        <Link to={`/pay/${b.id}`} className="btn">
+                                                            Booking confirmation
+                                                        </Link>
+                                                    </>
                                                 )}
 
                                                 {b.status === "pending" && (
@@ -898,6 +903,9 @@ export default function DashboardPage() {
                                                 </div>
                                             )}
                                             <div className="rowInline" style={{ marginTop: 8 }}>
+                                                <Link to={`/bids/${b.id}`} className="btn btn-primary">
+                                                    View local receipt
+                                                </Link>
                                                 <Link to={`/spots/${b.parking_spot_id}`} className="btn">
                                                     View listing
                                                 </Link>
@@ -1008,7 +1016,7 @@ export default function DashboardPage() {
                                     ? `Min bid £${auctionStart.toFixed(2)}`
                                     : price > 0 ? `£${price.toFixed(2)}` : "Free";
                                 return (
-                                    <div key={s.id} className="card dashItem dashItem--listings">
+                                    <div key={s.id} className={`card dashItem dashItem--listings dashItem--listings-${s.mode}`}>
                                         <div className="dashItemHeader">
                                             {renderThumb(s.image_url, s.title)}
                                             <div className="dashItemText">
@@ -1122,12 +1130,12 @@ export default function DashboardPage() {
                         <span className="badge badge--warm sectionHeaderBadge">{pendingOwnerCount} Pending</span>
                     </button>
                     <div className="sectionSub muted">
-                        Review bids and choose the winner. Charges are captured on approval.
+                        Review bids and approve any that fit your available slots. Charges are captured on approval.
                     </div>
 
                     {open.ownerPending && (
                         <div className="dashItemGrid" style={{ marginTop: 10 }}>
-                            <div className="tiny muted">Auction bids</div>
+
                             {auctionBids.filter((b) => {
                                 const s = String(b.status ?? "").toLowerCase();
                                 return s === "pending";
@@ -1167,6 +1175,9 @@ export default function DashboardPage() {
                                                     </div>
                                                 )}
                                                 <div className="rowInline" style={{ marginTop: 8 }}>
+                                                    <Link to={`/bids/${b.id}`} className="btn">
+                                                        View local receipt
+                                                    </Link>
                                                     <button
                                                         onClick={() => acceptBid(b.parking_spot_id, b.id)}
                                                         disabled={busyId === b.id}
@@ -1371,13 +1382,18 @@ export default function DashboardPage() {
                                                     </div>
                                                     <div className="rowInline" style={{ marginTop: 12 }}>
                                                         {p.direction === "outgoing" && (
-                                                            <button
-                                                                className="btn btn-primary"
-                                                                onClick={() => openPaymentReceipt(p.booking_id)}
-                                                                disabled={receiptLoadingId === p.booking_id}
-                                                            >
-                                                                {receiptLoadingId === p.booking_id ? "Loading receipt…" : "Open Stripe receipt"}
-                                                            </button>
+                                                            <>
+                                                                <button
+                                                                    className="btn btn-primary"
+                                                                    onClick={() => openPaymentReceipt(p.booking_id)}
+                                                                    disabled={receiptLoadingId === p.booking_id}
+                                                                >
+                                                                    {receiptLoadingId === p.booking_id ? "Loading receipt…" : "Open Stripe receipt"}
+                                                                </button>
+                                                                <Link to={`/pay/${p.booking_id}`} className="btn">
+                                                                    Booking confirmation
+                                                                </Link>
+                                                            </>
                                                         )}
                                                         {p.direction === "incoming" && (
                                                             <button

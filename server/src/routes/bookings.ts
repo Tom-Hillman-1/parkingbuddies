@@ -358,28 +358,28 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
 
         // If points booking: check user points and deduct
         if (method === "points") {
-            const userR = await client.query(`SELECT id, points_balance FROM users WHERE id = $1`, [req.userId]);
+            const deductedR = await client.query(
+                `UPDATE users
+                 SET points_balance = points_balance - $1, updated_at = now()
+                 WHERE id = $2
+                   AND points_balance >= $1
+                 RETURNING points_balance`,
+                [total_points, req.userId]
+            );
 
-            if (!userR.rowCount) {
-                await client.query("ROLLBACK");
-                return res.status(404).json({ ok: false, error: "User not found" });
-            }
-
-            const balance = Number(userR.rows[0].points_balance ?? 0);
-            if (balance < (total_points ?? 0)) {
+            if (!deductedR.rowCount) {
+                const balanceR = await client.query(`SELECT points_balance FROM users WHERE id = $1`, [req.userId]);
+                if (!balanceR.rowCount) {
+                    await client.query("ROLLBACK");
+                    return res.status(404).json({ ok: false, error: "User not found" });
+                }
+                const balance = Number(balanceR.rows[0].points_balance ?? 0);
                 await client.query("ROLLBACK");
                 return res.status(400).json({
                     ok: false,
                     error: `Not enough points. Need ${total_points ?? 0}, you have ${balance}.`,
                 });
             }
-
-            await client.query(
-                `UPDATE users
-                 SET points_balance = points_balance - $1, updated_at = now()
-                 WHERE id = $2`,
-                [total_points, req.userId]
-            );
         }
 
         // Create booking

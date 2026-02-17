@@ -178,7 +178,7 @@ export default function BidReceiptPage() {
                         </div>
                     </div>
 
-                    <div className="card formSection">
+                    <div className="card formSection" style={{ marginTop: 14 }}>
                         <div className="h3">Next steps</div>
                         <div className="muted" style={{ marginTop: 6 }}>
                             {bid.status === "pending"
@@ -190,7 +190,7 @@ export default function BidReceiptPage() {
                         <div className="rowInline" style={{ marginTop: 10 }}>
                             <Link to="/dashboard?tab=myAuctionBids" className="btn btn-primary">Go to dashboard</Link>
                             {bid.booking_id && (
-                                <Link to={`/pay/${bid.booking_id}`} className="btn">Payment status</Link>
+                                <Link to={`/pay/${bid.booking_id}`} className="btn">Booking confirmation</Link>
                             )}
                             {bid.parking_spot_id && (
                                 <Link to={`/spots/${bid.parking_spot_id}`} className="btn">View listing</Link>
