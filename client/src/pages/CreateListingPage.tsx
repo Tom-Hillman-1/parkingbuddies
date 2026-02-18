@@ -1,10 +1,12 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import L from "leaflet";
+import Lottie from "lottie-react";
 import { MapContainer, Marker, TileLayer, useMapEvents } from "react-leaflet";
 import { Link, Navigate, useBeforeUnload, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import successAnimation from "../assets/Success.json";
 import type { ParkingSpot } from "../types";
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -15,41 +17,13 @@ type PriceUnit = "hour" | "day" | "week";
 type AvailabilityPreset = "always" | "weekdays" | "weekends" | "custom";
 type WizardStep = 1 | 2 | 3 | 4 | 5 | 6;
 type FlowStep = Exclude<WizardStep, 1>;
-type SpaceChoice = "1" | "2" | "3" | "4plus";
-type Tone = "blue" | "lilac" | "mint" | "cream" | "sky" | "sage";
+type SpaceChoice = "1" | "2" | "3plus";
+type Tone = "blue" | "lilac" | "mint" | "cream" | "sky";
+type PendingLeaveAction = { kind: "link"; path: string } | { kind: "history" } | { kind: "reload" } | null;
 
-type GeocodeSuggestion = {
-    display_name: string;
-    lat: string;
-    lon: string;
-};
-
-type AvailabilitySlot = {
-    id: string;
-    dow: number;
-    start: string;
-    end: string;
-};
-
-type DraftSnapshot = {
-    mode: Mode;
-    title: string;
-    description: string;
-    capacityTotal: string;
-    priceUnit: PriceUnit;
-    price: string;
-    auctionStartPrice: string;
-    allowPoints: boolean;
-    pointsCost: string;
-    availabilityPreset: AvailabilityPreset;
-    dateFrom: string;
-    dateTo: string;
-    customSlots: AvailabilitySlot[];
-    addressText: string;
-    lat: string;
-    lng: string;
-    imageUrl: string;
-};
+type GeocodeSuggestion = { display_name: string; lat: string; lon: string };
+type AvailabilitySlot = { id: string; dow: number; start: string; end: string };
+type DraftSnapshot = { mode: Mode; title: string; description: string; capacityTotal: string; priceUnit: PriceUnit; price: string; auctionStartPrice: string; allowPoints: boolean; pointsCost: string; availabilityPreset: AvailabilityPreset; dateFrom: string; dateTo: string; customSlots: AvailabilitySlot[]; addressText: string; lat: string; lng: string; imageUrl: string };
 
 const STEP_COUNT = 6;
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -60,93 +34,43 @@ const MIN_POINTS_COST = 1;
 const DEFAULT_AUCTION_START_PRICE = String(MIN_AUCTION_START_PRICE_GBP);
 const DEFAULT_POINTS_COST = String(MIN_POINTS_COST);
 const LEAVE_DRAFT_MESSAGE = "Are you sure you want to leave? Changes will not be saved.";
+const DRAFT_STORAGE_KEY = "parkingbuddies:create-listing-draft:v1";
+
+type StoredDraft = {
+    editId: string | null;
+    activeStep: WizardStep;
+    baselineSignature: string;
+    snapshot: DraftSnapshot;
+};
 
 const SPACE_CHOICES: Array<{ id: SpaceChoice; label: string; value: number }> = [
     { id: "1", label: "1 space", value: 1 },
     { id: "2", label: "2 spaces", value: 2 },
-    { id: "3", label: "3 spaces", value: 3 },
-    { id: "4plus", label: "4+ spaces", value: 4 },
+    { id: "3plus", label: "3+ spaces", value: 4 },
 ];
 
 const MODEL_CHOICES: Array<{ mode: Mode; title: string; copy: string; tone: Tone; help: string }> = [
-    {
-        mode: "rent",
-        title: "Rent",
-        copy: "Fixed pricing for instant bookings.",
-        tone: "blue",
-        help: "Drivers can book instantly at the rate you set.",
-    },
-    {
-        mode: "auction",
-        title: "Auction",
-        copy: "Drivers submit offers. You approve what works.",
-        tone: "lilac",
-        help: "Drivers send offers and you decide which bid to accept.",
-    },
-    {
-        mode: "free",
-        title: "Free",
-        copy: "No payment required for this listing.",
-        tone: "mint",
-        help: "Bookings are free to drivers and no payment is collected.",
-    },
+    { mode: "rent", title: "Rent", copy: "Fixed pricing for instant bookings.", tone: "blue", help: "Drivers can book instantly at the rate you set." },
+    { mode: "auction", title: "Auction", copy: "Drivers submit offers. You get to approve.", tone: "lilac", help: "Drivers send offers and you decide which bid to accept." },
+    { mode: "free", title: "Free", copy: "No payment required for this listing.", tone: "mint", help: "Bookings are free to drivers and no payment is collected." },
 ];
 
 const STEP_META: Record<FlowStep, { panelTitle: string; panelCopy: string; panelTone: Tone; title: string; subtitle: string }> = {
-    2: {
-        panelTitle: "Basics",
-        panelCopy: "Set the core details so drivers quickly understand your space.",
-        panelTone: "blue",
-        title: "Listing basics",
-        subtitle: "Keep this short, clear, and practical.",
-    },
-    3: {
-        panelTitle: "Pricing",
-        panelCopy: "Choose a simple pricing setup that matches your listing model.",
-        panelTone: "lilac",
-        title: "Pricing",
-        subtitle: "Set how drivers pay for this listing.",
-    },
-    4: {
-        panelTitle: "Availability",
-        panelCopy: "Define when drivers can request or book this space.",
-        panelTone: "mint",
-        title: "Availability",
-        subtitle: "Choose quick presets or custom day and time windows.",
-    },
-    5: {
-        panelTitle: "Location",
-        panelCopy: "Add a searchable address and confirm the exact map pin.",
-        panelTone: "cream",
-        title: "Location",
-        subtitle: "Search once, then fine-tune by tapping on the map.",
-    },
-    6: {
-        panelTitle: "Images",
-        panelCopy: "A clear image improves trust and click-through for drivers.",
-        panelTone: "sky",
-        title: "Images",
-        subtitle: "Optional, but strongly recommended.",
-    },
+    2: { panelTitle: "Basics", panelCopy: "Set the core details so drivers quickly understand your space.", panelTone: "blue", title: "Listing basics", subtitle: "Keep this short, clear, and practical." },
+    3: { panelTitle: "Pricing", panelCopy: "Choose a simple pricing setup that matches your listing model.", panelTone: "mint", title: "Pricing", subtitle: "Set how drivers pay for this listing." },
+    4: { panelTitle: "Availability", panelCopy: "Define when drivers can request or book this space.", panelTone: "lilac", title: "Availability", subtitle: "Choose quick presets or custom day and time windows." },
+    5: { panelTitle: "Location", panelCopy: "Add a searchable address and confirm the exact map pin.", panelTone: "cream", title: "Location", subtitle: "Search once, then fine-tune by tapping on the map." },
+    6: { panelTitle: "Images", panelCopy: "A clear image improves trust and click-through for drivers.", panelTone: "sky", title: "Images", subtitle: "Optional, but strongly recommended." },
 };
 
-const AVAILABILITY_CHOICES: Array<{
-    id: AvailabilityPreset;
-    title: string;
-    copy: string;
-    tone: "blue" | "lilac" | "mint" | "cream";
-}> = [
+const AVAILABILITY_CHOICES: Array<{ id: AvailabilityPreset; title: string; copy: string; tone: "blue" | "lilac" | "mint" | "cream" }> = [
     { id: "always", title: "24/7", copy: "Always available", tone: "blue" },
     { id: "weekdays", title: "Weekdays", copy: "Mon-Fri", tone: "lilac" },
     { id: "weekends", title: "Weekends", copy: "Sat-Sun", tone: "mint" },
     { id: "custom", title: "Custom", copy: "Choose days and times", tone: "cream" },
 ];
 
-const PRICE_UNIT_CHOICES: Array<{ id: PriceUnit; label: string }> = [
-    { id: "hour", label: "Hourly" },
-    { id: "day", label: "Daily" },
-    { id: "week", label: "Weekly" },
-];
+const PRICE_UNIT_CHOICES: Array<{ id: PriceUnit; label: string }> = [{ id: "hour", label: "Hourly" }, { id: "day", label: "Daily" }, { id: "week", label: "Weekly" }];
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -211,16 +135,11 @@ function areSlotsValid(slots: AvailabilitySlot[]) {
 }
 
 function modeLabel(mode: Mode) {
-    if (mode === "rent") return "Rent";
-    if (mode === "auction") return "Auction";
-    return "Free";
+    return mode === "rent" ? "Rent" : mode === "auction" ? "Auction" : "Free";
 }
 
 function availabilityLabel(preset: AvailabilityPreset) {
-    if (preset === "always") return "24/7";
-    if (preset === "weekdays") return "Weekdays";
-    if (preset === "weekends") return "Weekends";
-    return "Custom";
+    return preset === "always" ? "24/7" : preset === "weekdays" ? "Weekdays" : preset === "weekends" ? "Weekends" : "Custom";
 }
 
 function draftSignature(snapshot: DraftSnapshot) {
@@ -273,19 +192,77 @@ function parseAvailabilityRules(rawRules: any): AvailabilitySlot[] {
 }
 
 function quickPresetRules(preset: AvailabilityPreset) {
-    if (preset === "weekdays") {
-        return [1, 2, 3, 4, 5].map((dow) => ({ dow, start: "00:00", end: "23:59" }));
-    }
-    return [0, 6].map((dow) => ({ dow, start: "00:00", end: "23:59" }));
+    return (preset === "weekdays" ? [1, 2, 3, 4, 5] : [0, 6]).map((dow) => ({ dow, start: "00:00", end: "23:59" }));
 }
 
-function MapPickerPin({
-    position,
-    onPick,
-}: {
-    position: [number, number] | null;
-    onPick: (lat: number, lng: number) => void;
-}) {
+function stepFromUnknown(value: unknown): WizardStep {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 1;
+    if (numeric <= 1) return 1;
+    if (numeric >= STEP_COUNT) return STEP_COUNT as WizardStep;
+    return Math.floor(numeric) as WizardStep;
+}
+
+function readStoredDraft(expectedEditId: string | null): StoredDraft | null {
+    try {
+        const raw = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+        if (!raw) return null;
+
+        const parsed = JSON.parse(raw) as Partial<StoredDraft>;
+        if ((parsed.editId ?? null) !== expectedEditId) return null;
+        if (!parsed.snapshot || typeof parsed.snapshot !== "object") return null;
+
+        const snapshot = parsed.snapshot as Partial<DraftSnapshot>;
+        const normalizedSnapshot: DraftSnapshot = {
+            mode: snapshot.mode === "auction" || snapshot.mode === "free" ? snapshot.mode : "rent",
+            title: typeof snapshot.title === "string" ? snapshot.title : "",
+            description: typeof snapshot.description === "string" ? snapshot.description : "",
+            capacityTotal: typeof snapshot.capacityTotal === "string" ? snapshot.capacityTotal : "1",
+            priceUnit:
+                snapshot.priceUnit === "day" || snapshot.priceUnit === "week" ? snapshot.priceUnit : "hour",
+            price: typeof snapshot.price === "string" ? snapshot.price : "5",
+            auctionStartPrice:
+                typeof snapshot.auctionStartPrice === "string"
+                    ? snapshot.auctionStartPrice
+                    : DEFAULT_AUCTION_START_PRICE,
+            allowPoints: Boolean(snapshot.allowPoints),
+            pointsCost: typeof snapshot.pointsCost === "string" ? snapshot.pointsCost : DEFAULT_POINTS_COST,
+            availabilityPreset:
+                snapshot.availabilityPreset === "weekdays" ||
+                snapshot.availabilityPreset === "weekends" ||
+                snapshot.availabilityPreset === "custom"
+                    ? snapshot.availabilityPreset
+                    : "always",
+            dateFrom: typeof snapshot.dateFrom === "string" ? snapshot.dateFrom : dateFromToday(0),
+            dateTo: typeof snapshot.dateTo === "string" ? snapshot.dateTo : dateFromToday(3),
+            customSlots:
+                Array.isArray(snapshot.customSlots) && snapshot.customSlots.length > 0
+                    ? snapshot.customSlots.map((slot) =>
+                          createSlot({
+                              dow: Number.isInteger(Number(slot?.dow)) ? Number(slot?.dow) : 1,
+                              start: typeof slot?.start === "string" ? slot.start : "09:00",
+                              end: typeof slot?.end === "string" ? slot.end : "17:00",
+                          })
+                      )
+                    : [createSlot()],
+            addressText: typeof snapshot.addressText === "string" ? snapshot.addressText : "",
+            lat: typeof snapshot.lat === "string" ? snapshot.lat : String(DEFAULT_CENTER[0]),
+            lng: typeof snapshot.lng === "string" ? snapshot.lng : String(DEFAULT_CENTER[1]),
+            imageUrl: typeof snapshot.imageUrl === "string" ? snapshot.imageUrl : "",
+        };
+
+        return {
+            editId: expectedEditId,
+            activeStep: stepFromUnknown(parsed.activeStep),
+            baselineSignature: typeof parsed.baselineSignature === "string" ? parsed.baselineSignature : "",
+            snapshot: normalizedSnapshot,
+        };
+    } catch {
+        return null;
+    }
+}
+
+function MapPickerPin({ position, onPick }: { position: [number, number] | null; onPick: (lat: number, lng: number) => void }) {
     useMapEvents({
         click(event) {
             onPick(event.latlng.lat, event.latlng.lng);
@@ -299,7 +276,14 @@ function MapPickerPin({
 function Tooltip({ label, text }: { label: string; text: string }) {
     return (
         <span className="wizardTooltip">
-            <button type="button" className="wizardTooltipBtn" aria-label={label} title={text}>
+            <button
+                type="button"
+                className="wizardTooltipBtn"
+                aria-label={label}
+                title={text}
+                onClick={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
+            >
                 ?
             </button>
             <span role="tooltip" className="wizardTooltipBubble">
@@ -329,17 +313,26 @@ function SelectionTile({
     onEditSpaces?: () => void;
 }) {
     return (
-        <article className={`wizardTile wizardTile--${tone}${active ? " is-active" : ""}`}>
-            <button type="button" className="wizardTileSelect" onClick={onClick} aria-pressed={active}>
+        <article
+            className={`wizardTile wizardTile--${tone}${active ? " is-active" : ""}`}
+            role="button"
+            tabIndex={0}
+            aria-pressed={active}
+            onClick={onClick}
+            onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                onClick();
+            }}
+        >
+            <div className="wizardTileSelect">
                 <div className="wizardTileHead">
                     <Tooltip label={`${title} mode help`} text={help} />
                 </div>
                 <span className="wizardTileTitle">{title}</span>
                 <span className="wizardTileCopy">{copy}</span>
-                <span className="wizardTileCheck" aria-hidden="true">
-                    Selected
-                </span>
-            </button>
+            </div>
 
             {active && onEditSpaces && spacesLabel && (
                 <div className="wizardTileSpotsRow">
@@ -357,75 +350,6 @@ function SelectionTile({
                 </div>
             )}
         </article>
-    );
-}
-
-function StepShell({
-    step,
-    panel,
-    title,
-    subtitle,
-    footer,
-    children,
-}: {
-    step: FlowStep;
-    panel: { panelTitle: string; panelCopy: string; panelTone: Tone };
-    title: string;
-    subtitle: string;
-    footer: ReactNode;
-    children: ReactNode;
-}) {
-    return (
-        <section className="wizardSplit" key={`step-${step}`}>
-            <aside className={`wizardLeft wizardLeft--${panel.panelTone}`}>
-                <div className="wizardLeftLogo">ParkingBuddies</div>
-                <div className="wizardLeftStep">
-                    Step {step} of {STEP_COUNT}
-                </div>
-                <h2 className="wizardLeftTitle">{panel.panelTitle}</h2>
-                <p className="wizardLeftCopy">{panel.panelCopy}</p>
-            </aside>
-
-            <section className="wizardRight">
-                <div className="wizardCard">
-                    <header className="wizardCardHead">
-                        <h3 className="h2 wizardCardTitle">{title}</h3>
-                        <p className="wizardCardSub">{subtitle}</p>
-                    </header>
-
-                    <div className="wizardCardBody">{children}</div>
-                    <footer className="wizardCardFoot">{footer}</footer>
-                </div>
-            </section>
-        </section>
-    );
-}
-
-function StepNavigation({
-    onBack,
-    onNext,
-    nextLabel = "Next",
-    nextDisabled = false,
-    backDisabled = false,
-    hint = "",
-}: {
-    onBack: () => void;
-    onNext: () => void;
-    nextLabel?: string;
-    nextDisabled?: boolean;
-    backDisabled?: boolean;
-    hint?: string;
-}) {
-    return (
-        <div className="wizardActions">
-            <button type="button" className="btn" onClick={onBack} disabled={backDisabled}>
-                Back
-            </button>
-            <div className="wizardActionHint">{hint}</div>
-            <button type="button" className="btn btn-primary" onClick={onNext} disabled={nextDisabled}>
-                {nextLabel}
-            </button>
-        </div>
     );
 }
 
@@ -508,44 +432,47 @@ export default function CreateListingPage() {
     const [imageUrl, setImageUrl] = useState("");
     const [spacesSheetOpen, setSpacesSheetOpen] = useState(false);
     const [pendingSpacesChoice, setPendingSpacesChoice] = useState<SpaceChoice>("1");
-    const [pendingSpacesCustom, setPendingSpacesCustom] = useState("4");
+    const [pendingSpacesCustom, setPendingSpacesCustom] = useState("3");
 
     const [customSheetOpen, setCustomSheetOpen] = useState(false);
 
     const [confirmSheetOpen, setConfirmSheetOpen] = useState(false);
+    const [leaveSheetOpen, setLeaveSheetOpen] = useState(false);
+    const [pendingLeaveAction, setPendingLeaveAction] = useState<PendingLeaveAction>(null);
 
     const [loadingExisting, setLoadingExisting] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
+    const [publishingOverlayOpen, setPublishingOverlayOpen] = useState(false);
     const [baselineSignature, setBaselineSignature] = useState("");
     const suppressNextPopGuardRef = useRef(false);
+    const successTimerRef = useRef<number | null>(null);
 
     const imageInputRef = useRef<HTMLInputElement | null>(null);
 
-    const parsedCoords = useMemo(() => parseCoordinates(lat, lng), [lat, lng]);
+    const parsedCoords = parseCoordinates(lat, lng);
     const mapCenter: [number, number] = parsedCoords ? [parsedCoords.lat, parsedCoords.lng] : DEFAULT_CENTER;
     const markerPosition: [number, number] | null = parsedCoords ? [parsedCoords.lat, parsedCoords.lng] : null;
-    const currentSignature = useMemo(
-        () =>
-            draftSignature({
-                mode,
-                title,
-                description,
-                capacityTotal,
-                priceUnit,
-                price,
-                auctionStartPrice,
-                allowPoints,
-                pointsCost,
-                availabilityPreset,
-                dateFrom,
-                dateTo,
-                customSlots,
-                addressText,
-                lat,
-                lng,
-                imageUrl,
-            }),
+    const draftSnapshot: DraftSnapshot = useMemo(
+        () => ({
+            mode,
+            title,
+            description,
+            capacityTotal,
+            priceUnit,
+            price,
+            auctionStartPrice,
+            allowPoints,
+            pointsCost,
+            availabilityPreset,
+            dateFrom,
+            dateTo,
+            customSlots,
+            addressText,
+            lat,
+            lng,
+            imageUrl,
+        }),
         [
             mode,
             title,
@@ -566,7 +493,28 @@ export default function CreateListingPage() {
             imageUrl,
         ]
     );
+    const currentSignature = draftSignature(draftSnapshot);
     const hasUnsavedChanges = baselineSignature !== "" && currentSignature !== baselineSignature;
+
+    function applySnapshot(snapshot: DraftSnapshot) {
+        setMode(snapshot.mode);
+        setTitle(snapshot.title);
+        setDescription(snapshot.description);
+        setCapacityTotal(snapshot.capacityTotal);
+        setPriceUnit(snapshot.priceUnit);
+        setPrice(snapshot.price);
+        setAuctionStartPrice(snapshot.auctionStartPrice);
+        setAllowPoints(snapshot.allowPoints);
+        setPointsCost(snapshot.pointsCost);
+        setAvailabilityPreset(snapshot.availabilityPreset);
+        setDateFrom(snapshot.dateFrom);
+        setDateTo(snapshot.dateTo);
+        setCustomSlots(snapshot.customSlots);
+        setAddressText(snapshot.addressText);
+        setLat(snapshot.lat);
+        setLng(snapshot.lng);
+        setImageUrl(snapshot.imageUrl);
+    }
 
     useBeforeUnload(
         (event) => {
@@ -606,10 +554,10 @@ export default function CreateListingPage() {
             const nextPath = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
             if (currentPath === nextPath) return;
 
-            if (!window.confirm(LEAVE_DRAFT_MESSAGE)) {
-                event.preventDefault();
-                event.stopPropagation();
-            }
+            event.preventDefault();
+            event.stopPropagation();
+            setPendingLeaveAction({ kind: "link", path: nextPath });
+            setLeaveSheetOpen(true);
         };
 
         const onPopState = () => {
@@ -617,16 +565,29 @@ export default function CreateListingPage() {
                 suppressNextPopGuardRef.current = false;
                 return;
             }
-            if (window.confirm(LEAVE_DRAFT_MESSAGE)) return;
             suppressNextPopGuardRef.current = true;
             window.history.go(1);
+            setPendingLeaveAction({ kind: "history" });
+            setLeaveSheetOpen(true);
+        };
+
+        const onReloadShortcut = (event: KeyboardEvent) => {
+            const key = event.key.toLowerCase();
+            const wantsReload = key === "f5" || ((event.ctrlKey || event.metaKey) && key === "r");
+            if (!wantsReload) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setPendingLeaveAction({ kind: "reload" });
+            setLeaveSheetOpen(true);
         };
 
         document.addEventListener("click", onDocumentClick, true);
         window.addEventListener("popstate", onPopState);
+        window.addEventListener("keydown", onReloadShortcut, true);
         return () => {
             document.removeEventListener("click", onDocumentClick, true);
             window.removeEventListener("popstate", onPopState);
+            window.removeEventListener("keydown", onReloadShortcut, true);
         };
     }, [hasUnsavedChanges, saving]);
 
@@ -635,12 +596,37 @@ export default function CreateListingPage() {
     }, [editId]);
 
     useEffect(() => {
+        if (isEdit) return;
+        const stored = readStoredDraft(null);
+        if (!stored) return;
+        applySnapshot(stored.snapshot);
+        setActiveStep(stored.activeStep);
+        setBaselineSignature(stored.baselineSignature);
+    }, [isEdit]);
+
+    useEffect(() => {
         if (isEdit || loadingExisting || baselineSignature) return;
         setBaselineSignature(currentSignature);
     }, [isEdit, loadingExisting, baselineSignature, currentSignature]);
 
     useEffect(() => {
+        return () => {
+            if (successTimerRef.current != null) {
+                window.clearTimeout(successTimerRef.current);
+            }
+        };
+    }, []);
+
+    useEffect(() => {
         if (!isEdit || !token || !editId) return;
+
+        const stored = readStoredDraft(editId);
+        if (stored) {
+            applySnapshot(stored.snapshot);
+            setActiveStep(stored.activeStep);
+            setBaselineSignature(stored.baselineSignature);
+            return;
+        }
 
         let active = true;
         setLoadingExisting(true);
@@ -683,45 +669,28 @@ export default function CreateListingPage() {
                     nextCustomSlots = [0, 1, 2, 3, 4, 5, 6].map((dow) => createSlot({ dow, start, end }));
                 }
 
-                setMode(nextMode);
-                setTitle(nextTitle);
-                setDescription(nextDescription);
-                setPrice(nextPrice);
-                setPriceUnit(nextPriceUnit);
-                setAllowPoints(nextAllowPoints);
-                setPointsCost(nextPointsCost);
-                setAuctionStartPrice(nextAuctionStartPrice);
-                setCapacityTotal(nextCapacityTotal);
-                setAddressText(nextAddressText);
-                setLat(nextLat);
-                setLng(nextLng);
-                setImageUrl(nextImageUrl);
-                setDateFrom(nextDateFrom);
-                setDateTo(nextDateTo);
-                setAvailabilityPreset(nextAvailabilityPreset);
-                setCustomSlots(nextCustomSlots);
+                const nextSnapshot: DraftSnapshot = {
+                    mode: nextMode,
+                    title: nextTitle,
+                    description: nextDescription,
+                    capacityTotal: nextCapacityTotal,
+                    priceUnit: nextPriceUnit,
+                    price: nextPrice,
+                    auctionStartPrice: nextAuctionStartPrice,
+                    allowPoints: nextAllowPoints,
+                    pointsCost: nextPointsCost,
+                    availabilityPreset: nextAvailabilityPreset,
+                    dateFrom: nextDateFrom,
+                    dateTo: nextDateTo,
+                    customSlots: nextCustomSlots,
+                    addressText: nextAddressText,
+                    lat: nextLat,
+                    lng: nextLng,
+                    imageUrl: nextImageUrl,
+                };
 
-                setBaselineSignature(
-                    draftSignature({
-                        mode: nextMode,
-                        title: nextTitle,
-                        description: nextDescription,
-                        capacityTotal: nextCapacityTotal,
-                        priceUnit: nextPriceUnit,
-                        price: nextPrice,
-                        auctionStartPrice: nextAuctionStartPrice,
-                        allowPoints: nextAllowPoints,
-                        pointsCost: nextPointsCost,
-                        availabilityPreset: nextAvailabilityPreset,
-                        dateFrom: nextDateFrom,
-                        dateTo: nextDateTo,
-                        customSlots: nextCustomSlots,
-                        addressText: nextAddressText,
-                        lat: nextLat,
-                        lng: nextLng,
-                        imageUrl: nextImageUrl,
-                    })
-                );
+                applySnapshot(nextSnapshot);
+                setBaselineSignature(draftSignature(nextSnapshot));
             })
             .catch((e: any) => {
                 if (!active) return;
@@ -739,7 +708,7 @@ export default function CreateListingPage() {
     useEffect(() => {
         const spaces = Math.max(1, Math.floor(Number(capacityTotal) || 1));
         if (spaces >= 4) {
-            setPendingSpacesChoice("4plus");
+            setPendingSpacesChoice("3plus");
             setPendingSpacesCustom(String(spaces));
             return;
         }
@@ -772,16 +741,33 @@ export default function CreateListingPage() {
     }, [allowPoints, pointsCost]);
 
     useEffect(() => {
-        if (!spacesSheetOpen && !customSheetOpen && !confirmSheetOpen) return;
+        if (loadingExisting) return;
+        const payload: StoredDraft = {
+            editId,
+            activeStep,
+            baselineSignature,
+            snapshot: draftSnapshot,
+        };
+        try {
+            window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(payload));
+        } catch {
+            // localStorage unavailable; skip draft persistence quietly
+        }
+    }, [editId, activeStep, baselineSignature, currentSignature, draftSnapshot, loadingExisting]);
+
+    useEffect(() => {
+        if (!spacesSheetOpen && !customSheetOpen && !confirmSheetOpen && !leaveSheetOpen) return;
         const onEscape = (event: KeyboardEvent) => {
             if (event.key !== "Escape") return;
             setSpacesSheetOpen(false);
             setCustomSheetOpen(false);
             setConfirmSheetOpen(false);
+            setLeaveSheetOpen(false);
+            setPendingLeaveAction(null);
         };
         window.addEventListener("keydown", onEscape);
         return () => window.removeEventListener("keydown", onEscape);
-    }, [spacesSheetOpen, customSheetOpen, confirmSheetOpen]);
+    }, [spacesSheetOpen, customSheetOpen, confirmSheetOpen, leaveSheetOpen]);
 
     function applyPickedLocation(nextLat: number, nextLng: number, nextAddress?: string) {
         setLat(nextLat.toFixed(6));
@@ -844,7 +830,7 @@ export default function CreateListingPage() {
     function openSpacesSheet() {
         const spaces = Math.max(1, Math.floor(Number(capacityTotal) || 1));
         if (spaces >= 4) {
-            setPendingSpacesChoice("4plus");
+            setPendingSpacesChoice("3plus");
             setPendingSpacesCustom(String(spaces));
         } else {
             setPendingSpacesChoice(String(spaces) as SpaceChoice);
@@ -855,7 +841,7 @@ export default function CreateListingPage() {
 
     function applySpacesSheet() {
         const selectedSpaces =
-            pendingSpacesChoice === "4plus"
+            pendingSpacesChoice === "3plus"
                 ? Math.max(4, Math.floor(Number(pendingSpacesCustom) || 4))
                 : Number(pendingSpacesChoice);
 
@@ -926,6 +912,17 @@ export default function CreateListingPage() {
         if (imageInputRef.current) {
             imageInputRef.current.value = "";
         }
+    }
+
+    function showPublishSuccess(nextPath: string) {
+        if (successTimerRef.current != null) {
+            window.clearTimeout(successTimerRef.current);
+        }
+        setPublishingOverlayOpen(true);
+        successTimerRef.current = window.setTimeout(() => {
+            setPublishingOverlayOpen(false);
+            navigate(nextPath, { replace: true });
+        }, 4000);
     }
 
     function buildAvailabilityPayload() {
@@ -1051,29 +1048,23 @@ export default function CreateListingPage() {
         const payload = buildSubmitPayload();
         if (!payload) return;
 
-        if (isEdit && editId) {
-            setSaving(true);
-            try {
-                await apiPatch<{ parking_spot: ParkingSpot }>(`/parking-spots/${editId}`, payload, token);
-                setBaselineSignature(currentSignature);
-                setConfirmSheetOpen(false);
-                navigate("/", { replace: true });
-            } catch (e: any) {
-                setError(e?.message || "Failed to save listing.");
-            } finally {
-                setSaving(false);
-            }
-            return;
-        }
-
         setSaving(true);
         try {
-            await apiPost<{ parking_spot: ParkingSpot }>("/parking-spots", payload, token);
+            const response =
+                isEdit && editId
+                    ? await apiPatch<{ parking_spot: ParkingSpot }>(`/parking-spots/${editId}`, payload, token)
+                    : await apiPost<{ parking_spot: ParkingSpot }>("/parking-spots", payload, token);
+            const nextId = response.parking_spot?.id || editId;
             setBaselineSignature(currentSignature);
             setConfirmSheetOpen(false);
-            navigate("/", { replace: true });
+            try {
+                window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+            } catch {
+                // ignore storage errors
+            }
+            showPublishSuccess(nextId ? `/spots/${nextId}` : "/dashboard");
         } catch (e: any) {
-            setError(e?.message || "Failed to publish listing.");
+            setError(e?.message || (isEdit ? "Failed to save listing." : "Failed to publish listing."));
         } finally {
             setSaving(false);
         }
@@ -1121,24 +1112,19 @@ export default function CreateListingPage() {
             ? "Each custom row needs a valid day and time range."
             : "";
 
-    const stepHint =
-        activeStep === 2
-            ? !titleValid
-                ? "Add a listing name with at least 3 characters."
-                : !descriptionValid
-                    ? "Description should be at least 5 characters, or leave it empty."
-                    : ""
-            : activeStep === 3
-                ? pricingIssue
-                : activeStep === 4
-                    ? availabilityIssue
-                    : activeStep === 5
-                        ? !addressValid
-                            ? "Add an address with at least 5 characters."
-                            : !hasCoordinates
-                                ? "Set a map pin so drivers can find your listing."
-                                : ""
-                        : "";
+    const stepHintByStep: Record<WizardStep, string> = {
+        1: "",
+        2: !titleValid
+            ? "Add a listing name with at least 3 characters."
+            : !descriptionValid
+                ? "Description should be at least 5 characters, or leave it empty."
+                : "",
+        3: pricingIssue,
+        4: availabilityIssue,
+        5: !addressValid ? "Add an address with at least 5 characters." : !hasCoordinates ? "Set a map pin so drivers can find your listing." : "",
+        6: "",
+    };
+    const stepHint = stepHintByStep[activeStep];
 
     const currentStepReady = stepReady[activeStep];
 
@@ -1150,8 +1136,16 @@ export default function CreateListingPage() {
                 : "Free listing";
     const customSummary = customSlots
         .map((slot) => `${DAY_LABELS[slot.dow]} ${slot.start}-${slot.end}`)
-        .slice(0, 2)
         .join(" | ");
+    const availabilitySummary =
+        availabilityPreset === "custom" ? customSummary || "Custom schedule not set" : availabilityLabel(availabilityPreset);
+    const confirmRows: Array<{ label: string; value: string }> = [
+        { label: "Model", value: modeLabel(mode) },
+        { label: "Spaces", value: `${setupCapacity || 1} ${setupCapacity === 1 ? "space" : "spaces"}` },
+        { label: "Pricing", value: priceSummary },
+        { label: "Availability", value: availabilitySummary },
+        { label: "Address", value: addressText.trim() || "Address not set" },
+    ];
 
     function goNext() {
         if (!currentStepReady) return;
@@ -1169,6 +1163,30 @@ export default function CreateListingPage() {
         if (activeStep <= 1) return;
         setError("");
         setActiveStep((prev) => Math.max(1, prev - 1) as WizardStep);
+    }
+
+    function stayOnPage() {
+        setLeaveSheetOpen(false);
+        setPendingLeaveAction(null);
+    }
+
+    function leavePage() {
+        const action = pendingLeaveAction;
+        setLeaveSheetOpen(false);
+        setPendingLeaveAction(null);
+
+        if (!action) return;
+        if (action.kind === "link") {
+            navigate(action.path);
+            return;
+        }
+        if (action.kind === "reload") {
+            window.location.reload();
+            return;
+        }
+
+        suppressNextPopGuardRef.current = true;
+        window.history.back();
     }
 
     function renderStepBody(step: FlowStep) {
@@ -1207,7 +1225,7 @@ export default function CreateListingPage() {
 
         if (step === 3) {
             return (
-                <div className="wizardSection">
+                <div className="wizardSection wizardSection--pricing">
                     <div className="wizardSectionHead">
                         <div className="wizardSubTitle">Pricing setup</div>
                         <Tooltip
@@ -1217,15 +1235,27 @@ export default function CreateListingPage() {
                     </div>
 
                     {mode === "rent" && (
-                        <div className="wizardFieldGrid wizardFieldGrid--compact">
-                            <label>
-                                <span>Price unit</span>
-                                <div className="createSegmented" role="radiogroup" aria-label="Price unit">
+                        <div className="wizardPointsRow wizardPointsRow--pricing wizardPricingRow">
+                            <label className="wizardPricingAmount">
+                                <span>Price (GBP)</span>
+                                <input
+                                    className="input wizardPricingInput"
+                                    type="number"
+                                    min="0"
+                                    step="0.5"
+                                    value={price}
+                                    onChange={(event) => setPrice(event.target.value)}
+                                />
+                            </label>
+
+                            <label className="wizardPricingUnit">
+                                <span>Charge by</span>
+                                <div className="createSegmented wizardPricingSegmented" role="radiogroup" aria-label="Price unit">
                                     {PRICE_UNIT_CHOICES.map((unit) => (
                                         <button
                                             key={unit.id}
                                             type="button"
-                                            className={`createSegmentedBtn createSegmentedBtn--${unit.id}${priceUnit === unit.id ? " is-active" : ""}`}
+                                            className={`createSegmentedBtn wizardPricingUnitBtn createSegmentedBtn--${unit.id}${priceUnit === unit.id ? " is-active" : ""}`}
                                             aria-pressed={priceUnit === unit.id}
                                             onClick={() => setPriceUnit(unit.id)}
                                         >
@@ -1233,18 +1263,6 @@ export default function CreateListingPage() {
                                         </button>
                                     ))}
                                 </div>
-                            </label>
-
-                            <label>
-                                <span>Price (GBP)</span>
-                                <input
-                                    className="input"
-                                    type="number"
-                                    min="0"
-                                    step="0.5"
-                                    value={price}
-                                    onChange={(event) => setPrice(event.target.value)}
-                                />
                             </label>
                         </div>
                     )}
@@ -1266,7 +1284,7 @@ export default function CreateListingPage() {
 
                     {mode === "free" && <div className="wizardInlineText">Free listing selected, so no money price is required.</div>}
 
-                    <div className="wizardPointsRow">
+                    <div className="wizardPointsRow wizardPointsRow--points">
                         <label className={`createSwitch${mode === "free" ? " is-disabled" : ""}`}>
                             <input
                                 type="checkbox"
@@ -1324,7 +1342,7 @@ export default function CreateListingPage() {
                         ))}
                     </div>
 
-                    <div className="wizardFieldGrid wizardFieldGrid--compact">
+                    <div className="wizardFieldGrid">
                         <label>
                             <span>Start date</span>
                             <input className="input" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
@@ -1447,23 +1465,13 @@ export default function CreateListingPage() {
 
     const actionHint = error || (!currentStepReady && stepHint ? stepHint : "");
 
-    const stepNavigation = (
-        <StepNavigation
-            onBack={goBack}
-            onNext={goNext}
-            backDisabled={activeStep <= 1 || saving}
-            nextDisabled={!currentStepReady || saving}
-            nextLabel={activeStep === 6 ? "Publish" : "Next"}
-            hint={actionHint}
-        />
-    );
-
     if (!token) {
         const next = `${location.pathname}${location.search}`;
         return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
     }
 
     const flowStep = activeStep as FlowStep;
+    const stepMeta = STEP_META[flowStep];
 
     return (
         <div className="container createWizardPage">
@@ -1518,15 +1526,43 @@ export default function CreateListingPage() {
                     )}
 
                     {activeStep > 1 && (
-                        <StepShell
-                            step={flowStep}
-                            panel={STEP_META[flowStep]}
-                            title={STEP_META[flowStep].title}
-                            subtitle={STEP_META[flowStep].subtitle}
-                            footer={stepNavigation}
-                        >
-                            {renderStepBody(flowStep)}
-                        </StepShell>
+                        <section className="wizardSplit" key={`step-${flowStep}`}>
+                            <aside className={`wizardLeft wizardLeft--${stepMeta.panelTone}`}>
+                                <div className="wizardLeftLogo">ParkingBuddies</div>
+                                <div className="wizardLeftStep">
+                                    Step {flowStep} of {STEP_COUNT}
+                                </div>
+                                <h2 className="wizardLeftTitle">{stepMeta.panelTitle}</h2>
+                                <p className="wizardLeftCopy">{stepMeta.panelCopy}</p>
+                            </aside>
+
+                            <section className="wizardRight">
+                                <div className="wizardCard">
+                                    <header className="wizardCardHead">
+                                        <h3 className="h2 wizardCardTitle">{stepMeta.title}</h3>
+                                        <p className="wizardCardSub">{stepMeta.subtitle}</p>
+                                    </header>
+
+                                    <div className="wizardCardBody">{renderStepBody(flowStep)}</div>
+                                    <footer className="wizardCardFoot">
+                                        <div className="wizardActions">
+                                            <button type="button" className="btn" onClick={goBack} disabled={activeStep <= 1 || saving}>
+                                                Back
+                                            </button>
+                                            <div className="wizardActionHint">{actionHint}</div>
+                                            <button
+                                                type="button"
+                                                className="btn btn-primary"
+                                                onClick={goNext}
+                                                disabled={!currentStepReady || saving}
+                                            >
+                                                {activeStep === 6 ? "Publish" : "Next"}
+                                            </button>
+                                        </div>
+                                    </footer>
+                                </div>
+                            </section>
+                        </section>
                     )}
                 </form>
             )}
@@ -1550,13 +1586,13 @@ export default function CreateListingPage() {
                     ))}
                 </div>
 
-                {pendingSpacesChoice === "4plus" && (
+                {pendingSpacesChoice === "3plus" && (
                     <label>
-                        <span>Custom spaces (4+)</span>
+                        <span>Custom spaces (3+)</span>
                         <input
                             className="input"
                             type="number"
-                            min={4}
+                            min={3}
                             step={1}
                             value={pendingSpacesCustom}
                             onChange={(event) => setPendingSpacesCustom(event.target.value)}
@@ -1656,21 +1692,21 @@ export default function CreateListingPage() {
             <WizardSheet
                 open={confirmSheetOpen}
                 title={isEdit ? "Confirm save" : "Confirm publish"}
-                subtitle="One final check before publishing. You'll return to all listings right after."
+                subtitle="Review your final details and publish when ready."
                 onClose={() => {
                     setConfirmSheetOpen(false);
                     setError("");
                 }}
             >
-                <div className="card">
+                <div className="receiptCard card">
                     <div className="h3">{title || "Untitled listing"}</div>
-                    <div className="muted tiny">{addressText || "Address not set"}</div>
-                    <div className="rowInline tiny" style={{ marginTop: "0.45rem" }}>
-                        <span>{modeLabel(mode)}</span>
-                        <span>|</span>
-                        <span>{priceSummary}</span>
-                        <span>|</span>
-                        <span>{availabilityLabel(availabilityPreset)}</span>
+                    <div className="receiptBody">
+                        {confirmRows.map((row) => (
+                            <div className="receiptRow" key={row.label}>
+                                <span className="muted tiny receiptKey">{row.label}</span>
+                                <strong className="receiptValue">{row.value}</strong>
+                            </div>
+                        ))}
                     </div>
                 </div>
 
@@ -1698,6 +1734,36 @@ export default function CreateListingPage() {
                     </button>
                 </div>
             </WizardSheet>
+
+            <WizardSheet
+                open={leaveSheetOpen}
+                title="Leave create listing?"
+                subtitle="You have unsaved changes in this draft."
+                onClose={stayOnPage}
+            >
+                <div className="createFieldHint">
+                    {LEAVE_DRAFT_MESSAGE}
+                </div>
+                <div className="createSheetActions">
+                    <button type="button" className="btn" onClick={stayOnPage}>
+                        Stay here
+                    </button>
+                    <button type="button" className="btn btn-primary" onClick={leavePage}>
+                        Leave page
+                    </button>
+                </div>
+            </WizardSheet>
+
+            {publishingOverlayOpen && (
+                <div className="createSuccessOverlay" role="status" aria-live="polite">
+                    <section className="createSuccessCard">
+                        <Lottie animationData={successAnimation} loop={false} className="createSuccessAnimation" />
+                        <div className="h3">{isEdit ? "Saving listing..." : "Publishing listing..."}</div>
+                        <div className="createFieldHint">Finalizing details and opening your spot page.</div>
+                    </section>
+                </div>
+            )}
         </div>
     );
 }
+

@@ -733,11 +733,10 @@ export default function DashboardPage() {
                 </button>
             </div>
 
-            {loading && <div className="card formSection">Loading...</div>}
             {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
             {msg && <div className="card formSection">{msg}</div>}
 
-            <div className="dashboardLayout">
+            <div className="dashboardLayout" aria-busy={loading}>
                 <aside className="dashboardRail" aria-label="Dashboard sections">
                     {navSections.map((section) => (
                         <button

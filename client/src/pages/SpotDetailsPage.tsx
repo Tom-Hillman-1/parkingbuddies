@@ -422,6 +422,20 @@ export default function SpotDetailsPage() {
                         <div className="heroTitle">{spot.title}</div>
                         <p className="muted" style={{ marginTop: 6 }}>{spot.description}</p>
 
+                        {isOwner && (
+                            <div className="spotOwnerTools">
+                                <div className="spotOwnerFlag">Owner view: this is your own listing.</div>
+                                <div className="rowInline spotOwnerActions">
+                                    <Link to={`/create-listing?edit=${spot.id}`} className="btn btn-primary">
+                                        Edit listing
+                                    </Link>
+                                    <Link to="/dashboard?tab=manageListings" className="btn">
+                                        Go to dashboard
+                                    </Link>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="spotSimpleBadges">
                             <span className="badge">{modeLabel}</span>
                             <span className="badge badge--cool">{priceLabel}</span>
@@ -672,8 +686,7 @@ function SlotCalendar({ spot, selectedDate, startAt, endAt, onPickDate, disabled
 
                     const key = localDateStr(day);
                     const available = isDaySelectable(spot, day);
-                    const fillPercent = getDayFillPercent(day, startAt, endAt);
-                    const inRange = fillPercent > 0;
+                    const inRange = isDayInSelectedRange(day, startAt, endAt);
                     const selected = selectedDate === key;
 
                     return (
@@ -684,12 +697,6 @@ function SlotCalendar({ spot, selectedDate, startAt, endAt, onPickDate, disabled
                             onClick={() => onPickDate(key)}
                             disabled={disabled || !available}
                         >
-                            {fillPercent > 0 && (
-                                <span
-                                    className="slotCalFillBg"
-                                    style={{ width: `${Math.max(16, Math.min(100, fillPercent))}%` }}
-                                />
-                            )}
                             <span className="slotCalNum">{day.getDate()}</span>
                             {day.getDate() === 1 && <span className="slotCalMonth">{day.toLocaleDateString(undefined, { month: "short" })}</span>}
                         </button>
@@ -793,16 +800,11 @@ function buildCalendarCells(startDate: Date, totalDays: number) {
     return cells;
 }
 
-function getDayFillPercent(day: Date, startAt: Date, endAt: Date) {
+function isDayInSelectedRange(day: Date, startAt: Date, endAt: Date) {
     const dayStart = startOfDay(day);
     const dayEnd = new Date(dayStart);
     dayEnd.setDate(dayEnd.getDate() + 1);
-
-    const overlapStart = Math.max(dayStart.getTime(), startAt.getTime());
-    const overlapEnd = Math.min(dayEnd.getTime(), endAt.getTime());
-    if (overlapEnd <= overlapStart) return 0;
-
-    return ((overlapEnd - overlapStart) / (24 * 60 * 60 * 1000)) * 100;
+    return dayEnd.getTime() > startAt.getTime() && dayStart.getTime() < endAt.getTime();
 }
 
 function isDaySelectable(spot: ParkingSpot, day: Date) {
