@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { SUPPORT_EMAIL } from "./pagesShared";
 
 const remembered = localStorage.getItem("pb_remember") === "true";
 
@@ -111,7 +112,7 @@ export default function LoginPage() {
                         No account yet? <Link to="/signup">Create one</Link>
                     </div>
                     <div className="tiny muted" style={{ marginTop: 8 }}>
-                        Need help? Please contact <a href="mailto:parkingbuddiesproject@gmail.com">parkingbuddiesproject@gmail.com</a>
+                        Need help? Please contact <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>
                     </div>
                 </div>
             </div>

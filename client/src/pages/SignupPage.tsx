@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { SUPPORT_EMAIL } from "./pagesShared";
 
 export default function SignupPage() {
     const { signup } = useAuth();
@@ -153,7 +154,7 @@ export default function SignupPage() {
                         Already have an account? <Link to="/login">Log in</Link>
                     </div>
                     <div className="tiny muted" style={{ marginTop: 8 }}>
-                        Need help? Please contact <a href="mailto:parkingbuddiesproject@gmail.com">parkingbuddiesproject@gmail.com</a>
+                        Need help? Please contact <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>
                     </div>
                 </div>
             </div>

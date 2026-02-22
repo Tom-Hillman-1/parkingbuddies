@@ -3,71 +3,92 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import SpotsMap from "../components/SpotsMap";
 import { apiGet, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import type { Booking as SharedBooking, ParkingSpot as SharedParkingSpot } from "../types";
+import {
+    calcUnitsForMinutes,
+    capitalizeLabel,
+    formatDateTimeCompact,
+    parseYmd,
+    toFiniteNumber,
+    toLocalDateInput,
+    type PriceUnit,
+} from "./pagesShared";
+import {
+    addMinutes,
+    clampDurationMinutes,
+    formatAvailability,
+    formatBidAmount,
+    getAutoStartForDate,
+    isSlotAllowed,
+    nextWholeQuarterHour,
+    normalizeTimeInput,
+    parseDurationQuery,
+    roundMoney,
+    setTime,
+    SlotCalendar,
+    SlotDialog,
+    startOfDay,
+    toTimeInput,
+    type AvailabilityJson,
+} from "./spotDetailsSupport";
 
-type PriceUnit = "hour" | "day" | "week";
 type PayMethod = "money" | "points";
 
-type AvailabilityJson = {
-    type: "24_7" | "same_everyday" | "custom_weekly";
-    start?: string;
-    end?: string;
-    rules?: Array<{ dow: number; start: string; end: string }>;
-    date_from?: string;
-    date_to?: string;
-};
-
-type ParkingSpot = {
-    id: string;
-    owner_user_id: string;
-    title: string;
-    description: string;
-    address_text: string;
-    lat: number;
-    lng: number;
-    image_url?: string | null;
-    mode: "free" | "rent" | "auction";
+type ParkingSpot = Omit<SharedParkingSpot, "price_gbp" | "availability_json"> & {
     price_gbp: number | string;
-    price_unit?: PriceUnit;
-    allow_points?: boolean;
-    points_cost?: number;
-    auction_end?: string | null;
-    auction_start_price_gbp?: number | null;
     availability_json?: AvailabilityJson | null;
     availability_type?: "24_7" | "weekly";
     available_days?: number[];
     daily_start?: string | null;
     daily_end?: string | null;
-    capacity_total?: number;
 };
 
-type SpotBooking = {
-    id: string;
-    start_time?: string;
-    end_time?: string;
-    status?: string;
-    pay_method?: PayMethod;
-    total_price_gbp?: number | string;
-};
+type SpotBooking = Pick<SharedBooking, "id" | "start_time" | "end_time" | "status" | "pay_method" | "total_price_gbp">;
+type AuctionBid = { id: string; amount_gbp?: number; amount_points?: number; pay_method?: PayMethod; status: string; start_time?: string; end_time?: string; bidder_name?: string; bidder_email?: string };
+type AuctionInfo = { pending_bids?: AuctionBid[]; sold_out?: boolean };
 
-type AuctionBid = {
-    id: string;
-    amount_gbp?: number;
-    amount_points?: number;
-    pay_method?: PayMethod;
-    status: string;
-    start_time?: string;
-    end_time?: string;
-    bidder_name?: string;
-    bidder_email?: string;
-};
-
-type AuctionInfo = {
-    pending_bids?: AuctionBid[];
-    sold_out?: boolean;
-};
-
-const MAX_DURATION_MINUTES = 30 * 24 * 60;
-const DURATION_OPTIONS = buildDurationOptions();
+function PayMethodToggle({
+    value,
+    onChange,
+    canUseMoney = true,
+    canUsePoints,
+    moneyLabel = "Money",
+    pointsLabel = "Points",
+    disabled = false,
+}: {
+    value: PayMethod;
+    onChange: (next: PayMethod) => void;
+    canUseMoney?: boolean;
+    canUsePoints: boolean;
+    moneyLabel?: string;
+    pointsLabel?: string;
+    disabled?: boolean;
+}) {
+    return (
+        <div className="payToggle">
+            {canUseMoney && (
+                <button
+                    type="button"
+                    className={`payToggleBtn ${value === "money" ? "active" : ""}`}
+                    onClick={() => onChange("money")}
+                    disabled={disabled}
+                >
+                    {moneyLabel}
+                </button>
+            )}
+            {canUsePoints && (
+                <button
+                    type="button"
+                    className={`payToggleBtn ${value === "points" ? "active" : ""}`}
+                    onClick={() => onChange("points")}
+                    disabled={disabled}
+                >
+                    {pointsLabel}
+                </button>
+            )}
+        </div>
+    );
+}
 
 export default function SpotDetailsPage() {
     const { id } = useParams<{ id: string }>();
@@ -82,14 +103,16 @@ export default function SpotDetailsPage() {
     const [bookings, setBookings] = useState<SpotBooking[]>([]);
     const [auctionInfo, setAuctionInfo] = useState<AuctionInfo | null>(null);
 
-    const [selectedDate, setSelectedDate] = useState(localDateStr(new Date()));
+    const [selectedDate, setSelectedDate] = useState(toLocalDateInput(new Date()));
     const [selectedStartTime, setSelectedStartTime] = useState(() => toTimeInput(nextWholeQuarterHour()));
     const [durationMinutes, setDurationMinutes] = useState(60);
 
     const [slotDialogOpen, setSlotDialogOpen] = useState(false);
-    const [slotDialogDate, setSlotDialogDate] = useState(localDateStr(new Date()));
-    const [slotDialogStartTime, setSlotDialogStartTime] = useState(toTimeInput(nextWholeQuarterHour()));
-    const [slotDialogDurationMinutes, setSlotDialogDurationMinutes] = useState(60);
+    const [slotDialogDraft, setSlotDialogDraft] = useState(() => ({
+        date: toLocalDateInput(new Date()),
+        startTime: toTimeInput(nextWholeQuarterHour()),
+        durationMinutes: 60,
+    }));
 
     const [payMethod, setPayMethod] = useState<PayMethod>("money");
     const [pointsAmount, setPointsAmount] = useState("");
@@ -179,22 +202,34 @@ export default function SpotDetailsPage() {
 
     const startAt = useMemo(() => {
         const day = parseYmd(selectedDate);
-        if (!day) return getAutoStartForDate(spot, localDateStr(new Date()));
+        if (!day) return getAutoStartForDate(spot, toLocalDateInput(new Date()));
         const normalizedTime = normalizeTimeInput(selectedStartTime);
         return setTime(startOfDay(day), normalizedTime);
     }, [spot, selectedDate, selectedStartTime]);
     const endAt = useMemo(() => addMinutes(startAt, durationMinutes), [startAt, durationMinutes]);
     const startsInFuture = useMemo(() => startAt.getTime() >= Date.now(), [startAt]);
 
-    const canUsePoints = !!spot?.allow_points && toNumber(spot.points_cost) > 0;
+    const canUsePoints = !!spot?.allow_points && toFiniteNumber(spot.points_cost) > 0;
 
     useEffect(() => {
         if (!canUsePoints && payMethod === "points") setPayMethod("money");
     }, [canUsePoints, payMethod]);
 
+    const listingPrice = toFiniteNumber(spot?.price_gbp);
+    const canUseMoneyBooking = !!spot && spot.mode !== "free" && listingPrice > 0;
+    const canUseMoneyBids = !spot || spot.mode !== "auction" || toFiniteNumber(spot.auction_start_price_gbp) >= 0.1;
+
+    useEffect(() => {
+        if (!canUseMoneyBooking && payMethod === "money" && canUsePoints) setPayMethod("points");
+    }, [canUseMoneyBooking, canUsePoints, payMethod]);
+
     useEffect(() => {
         if (!canUsePoints && bidPayMethod === "points") setBidPayMethod("money");
     }, [canUsePoints, bidPayMethod]);
+
+    useEffect(() => {
+        if (!canUseMoneyBids && bidPayMethod === "money" && canUsePoints) setBidPayMethod("points");
+    }, [canUseMoneyBids, canUsePoints, bidPayMethod]);
 
     const slotRangeValid = useMemo(() => {
         if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) return false;
@@ -218,7 +253,7 @@ export default function SpotDetailsPage() {
         });
     }, [bookings, startAt, endAt, slotRangeValid]);
 
-    const capacity = Math.max(1, toNumber(spot?.capacity_total || 1));
+    const capacity = Math.max(1, toFiniteNumber(spot?.capacity_total || 1));
     const spotsLeft = Math.max(0, capacity - overlappingBookings.length);
     const slotFull = spotsLeft <= 0;
 
@@ -240,7 +275,6 @@ export default function SpotDetailsPage() {
 
     const isOwner = !!user && !!spot && user.id === spot.owner_user_id;
 
-    const listingPrice = toNumber(spot?.price_gbp);
     const listingUnit = (spot?.price_unit ?? "hour") as PriceUnit;
     const estimatedTotal = useMemo(() => {
         if (!spot || spot.mode === "free") return 0;
@@ -251,7 +285,7 @@ export default function SpotDetailsPage() {
     const pointsMinTotal = useMemo(() => {
         if (!canUsePoints || !spot) return 0;
         const units = calcUnitsForMinutes(durationMinutes, listingUnit);
-        return Math.ceil(toNumber(spot.points_cost) * units);
+        return Math.ceil(toFiniteNumber(spot.points_cost) * units);
     }, [canUsePoints, spot, durationMinutes, listingUnit]);
 
     useEffect(() => {
@@ -260,21 +294,21 @@ export default function SpotDetailsPage() {
         if (!Number.isFinite(value) || value < pointsMinTotal) setPointsAmount(String(pointsMinTotal));
     }, [payMethod, pointsMinTotal, pointsAmount]);
 
-    const auctionMinPerHour = toNumber(spot?.auction_start_price_gbp);
-    const bidUnits = useMemo(() => calcUnitsForMinutes(durationMinutes, "hour"), [durationMinutes]);
+    const auctionMinPerUnit = toFiniteNumber(spot?.auction_start_price_gbp);
+    const bidUnits = useMemo(() => calcUnitsForMinutes(durationMinutes, listingUnit), [durationMinutes, listingUnit]);
     const bidTotalMoney = useMemo(() => {
-        const perHour = Number(bidMoneyPerHour);
-        if (!Number.isFinite(perHour) || perHour <= 0) return 0;
-        return roundMoney(perHour * bidUnits);
+        const perUnit = Number(bidMoneyPerHour);
+        if (!Number.isFinite(perUnit) || perUnit <= 0) return 0;
+        return roundMoney(perUnit * bidUnits);
     }, [bidMoneyPerHour, bidUnits]);
 
     const bidTotalPoints = useMemo(() => {
-        const perHour = Number(bidPointsPerHour);
-        if (!Number.isFinite(perHour) || perHour <= 0) return 0;
-        return Math.ceil(perHour * bidUnits);
+        const perUnit = Number(bidPointsPerHour);
+        if (!Number.isFinite(perUnit) || perUnit <= 0) return 0;
+        return Math.ceil(perUnit * bidUnits);
     }, [bidPointsPerHour, bidUnits]);
 
-    const userPoints = toNumber(user?.points_balance);
+    const userPoints = toFiniteNumber(user?.points_balance);
     const bidPointsInsufficient = bidPayMethod === "points" && bidTotalPoints > 0 && userPoints < bidTotalPoints;
 
     const auctionSoldOut = !!auctionInfo?.sold_out;
@@ -282,16 +316,18 @@ export default function SpotDetailsPage() {
 
     function openSlotDialog(date: string) {
         const autoStart = toTimeInput(getAutoStartForDate(spot, date));
-        setSlotDialogDate(date);
-        setSlotDialogStartTime(selectedDate === date ? selectedStartTime : autoStart);
-        setSlotDialogDurationMinutes(durationMinutes);
+        setSlotDialogDraft({
+            date,
+            startTime: selectedDate === date ? selectedStartTime : autoStart,
+            durationMinutes,
+        });
         setSlotDialogOpen(true);
     }
 
     function applySlotDialog() {
-        setSelectedDate(slotDialogDate);
-        setSelectedStartTime(normalizeTimeInput(slotDialogStartTime));
-        setDurationMinutes(clampDurationMinutes(slotDialogDurationMinutes));
+        setSelectedDate(slotDialogDraft.date);
+        setSelectedStartTime(normalizeTimeInput(slotDialogDraft.startTime));
+        setDurationMinutes(clampDurationMinutes(slotDialogDraft.durationMinutes));
         setSlotDialogOpen(false);
     }
 
@@ -300,6 +336,7 @@ export default function SpotDetailsPage() {
         if (!spot || spot.mode === "auction") return;
         if (isOwner) return setActionMsg("You cannot book your own listing.");
         if (!slotStatus.ok) return setActionMsg(slotStatus.label);
+        if (payMethod === "money" && !canUseMoneyBooking) return setActionMsg("This listing accepts points only.");
 
         if (payMethod === "points") {
             const value = Number(pointsAmount);
@@ -326,7 +363,7 @@ export default function SpotDetailsPage() {
 
             const needsPayment =
                 booking?.pay_method === "money" &&
-                toNumber(booking?.total_price_gbp) > 0 &&
+                toFiniteNumber(booking?.total_price_gbp) > 0 &&
                 booking?.status === "pending" &&
                 booking?.id;
 
@@ -347,11 +384,12 @@ export default function SpotDetailsPage() {
         if (!slotStatus.ok) return setBidMsg(slotStatus.label);
 
         if (bidPayMethod === "money") {
+            if (!canUseMoneyBids) return setBidMsg("This auction accepts points only.");
             const value = Number(bidMoneyPerHour);
-            if (!Number.isFinite(value) || value <= 0) return setBidMsg("Enter a valid GBP amount per hour.");
+            if (!Number.isFinite(value) || value <= 0) return setBidMsg(`Enter a valid GBP amount per ${listingUnit}.`);
         } else {
             const value = Number(bidPointsPerHour);
-            if (!Number.isFinite(value) || value <= 0) return setBidMsg("Enter a valid points amount per hour.");
+            if (!Number.isFinite(value) || value <= 0) return setBidMsg(`Enter a valid points amount per ${listingUnit}.`);
             if (bidPointsInsufficient) return setBidMsg(`You need ${bidTotalPoints} pts, you have ${userPoints}.`);
         }
 
@@ -386,12 +424,12 @@ export default function SpotDetailsPage() {
     if (error) return <div style={{ padding: 24, color: "crimson" }}>{error}</div>;
     if (!spot) return <div style={{ padding: 24 }}>Listing not found.</div>;
 
-    const modeLabel = capitalize(spot.mode);
+    const modeLabel = capitalizeLabel(spot.mode);
     const priceLabel =
         spot.mode === "free"
             ? "Free"
             : spot.mode === "auction"
-                ? `Bid from GBP ${auctionMinPerHour.toFixed(2)} / hour`
+                ? `Bid from GBP ${auctionMinPerUnit.toFixed(2)} / ${listingUnit}`
                 : `GBP ${listingPrice.toFixed(2)} / ${listingUnit}`;
 
     const pendingBids = auctionInfo?.pending_bids ?? [];
@@ -456,6 +494,7 @@ export default function SpotDetailsPage() {
                         <p className="tiny muted">Tap a date, then choose start time and duration.</p>
 
                         <SlotCalendar
+                            key={selectedDate.slice(0, 7)}
                             spot={spot}
                             selectedDate={selectedDate}
                             startAt={startAt}
@@ -466,7 +505,7 @@ export default function SpotDetailsPage() {
 
                         <div className="slotRangeSummary">
                             <span className="tiny muted">Selected slot</span>
-                            <span className="badge">{formatDateTime(startAt.toISOString())} {" -> "} {formatDateTime(endAt.toISOString())}</span>
+                            <span className="badge">{formatDateTimeCompact(startAt.toISOString())} {" -> "} {formatDateTimeCompact(endAt.toISOString())}</span>
                         </div>
 
                         <div className={`slotStatus ${slotStatus.ok ? "slotStatus--ok" : "slotStatus--bad"}`}>
@@ -486,30 +525,17 @@ export default function SpotDetailsPage() {
                             )}
                             {isOwner && <div className="spotAlert">You are the owner of this listing.</div>}
 
-                            <div className="payToggle">
-                                <button
-                                    type="button"
-                                    className={`payToggleBtn ${bidPayMethod === "money" ? "active" : ""}`}
-                                    onClick={() => setBidPayMethod("money")}
-                                    disabled={auctionClosed || bidBusy}
-                                >
-                                    Money
-                                </button>
-                                {canUsePoints && (
-                                    <button
-                                        type="button"
-                                        className={`payToggleBtn ${bidPayMethod === "points" ? "active" : ""}`}
-                                        onClick={() => setBidPayMethod("points")}
-                                        disabled={auctionClosed || bidBusy}
-                                    >
-                                        Points
-                                    </button>
-                                )}
-                            </div>
+                            <PayMethodToggle
+                                value={bidPayMethod}
+                                onChange={setBidPayMethod}
+                                canUseMoney={canUseMoneyBids}
+                                canUsePoints={canUsePoints}
+                                disabled={auctionClosed || bidBusy}
+                            />
 
                             {bidPayMethod === "money" ? (
                                 <label>
-                                    <span>Bid per hour (GBP)</span>
+                                    <span>Bid per {listingUnit} (GBP)</span>
                                     <input
                                         className="input"
                                         type="number"
@@ -524,7 +550,7 @@ export default function SpotDetailsPage() {
                                 </label>
                             ) : (
                                 <label>
-                                    <span>Bid per hour (points)</span>
+                                    <span>Bid per {listingUnit} (points)</span>
                                     <input
                                         className="input"
                                         type="number"
@@ -532,7 +558,7 @@ export default function SpotDetailsPage() {
                                         step={1}
                                         value={bidPointsPerHour}
                                         onChange={(e) => setBidPointsPerHour(e.target.value)}
-                                        placeholder="Points per hour"
+                                        placeholder={`Points per ${listingUnit}`}
                                         disabled={auctionClosed || bidBusy}
                                     />
                                     <div className="tiny muted">Estimated total: {bidTotalPoints > 0 ? `${bidTotalPoints} pts` : "-"}</div>
@@ -571,26 +597,14 @@ export default function SpotDetailsPage() {
                                 <span className="badge">{spot.mode === "free" ? "Free" : `GBP ${estimatedTotal.toFixed(2)}`}</span>
                             </div>
 
-                            <div className="payToggle">
-                                <button
-                                    type="button"
-                                    className={`payToggleBtn ${payMethod === "money" ? "active" : ""}`}
-                                    onClick={() => setPayMethod("money")}
-                                    disabled={busy}
-                                >
-                                    Card
-                                </button>
-                                {canUsePoints && (
-                                    <button
-                                        type="button"
-                                        className={`payToggleBtn ${payMethod === "points" ? "active" : ""}`}
-                                        onClick={() => setPayMethod("points")}
-                                        disabled={busy}
-                                    >
-                                        Points
-                                    </button>
-                                )}
-                            </div>
+                            <PayMethodToggle
+                                value={payMethod}
+                                onChange={setPayMethod}
+                                canUseMoney={canUseMoneyBooking}
+                                canUsePoints={canUsePoints}
+                                moneyLabel="Card"
+                                disabled={busy}
+                            />
 
                             {payMethod === "points" && canUsePoints && (
                                 <label>
@@ -636,7 +650,7 @@ export default function SpotDetailsPage() {
                                         </div>
                                         <div className="tiny muted">{bid.bidder_name || bid.bidder_email || "Bidder"}</div>
                                         {bid.start_time && bid.end_time && (
-                                            <div className="tiny muted">{formatDateTime(bid.start_time)} {" -> "} {formatDateTime(bid.end_time)}</div>
+                                            <div className="tiny muted">{formatDateTimeCompact(bid.start_time)} {" -> "} {formatDateTimeCompact(bid.end_time)}</div>
                                         )}
                                     </div>
                                 ))}
@@ -648,11 +662,11 @@ export default function SpotDetailsPage() {
 
             <SlotDialog
                 open={slotDialogOpen}
-                dateLabel={slotDialogDate}
-                startTime={slotDialogStartTime}
-                setStartTime={setSlotDialogStartTime}
-                durationMinutes={slotDialogDurationMinutes}
-                setDurationMinutes={setSlotDialogDurationMinutes}
+                dateLabel={slotDialogDraft.date}
+                startTime={slotDialogDraft.startTime}
+                setStartTime={(value) => setSlotDialogDraft((prev) => ({ ...prev, startTime: value }))}
+                durationMinutes={slotDialogDraft.durationMinutes}
+                setDurationMinutes={(value) => setSlotDialogDraft((prev) => ({ ...prev, durationMinutes: value }))}
                 onApply={applySlotDialog}
                 onClose={() => setSlotDialogOpen(false)}
             />
@@ -660,439 +674,3 @@ export default function SpotDetailsPage() {
     );
 }
 
-type SlotCalendarProps = {
-    spot: ParkingSpot;
-    selectedDate: string;
-    startAt: Date;
-    endAt: Date;
-    onPickDate: (date: string) => void;
-    disabled?: boolean;
-};
-
-function SlotCalendar({ spot, selectedDate, startAt, endAt, onPickDate, disabled }: SlotCalendarProps) {
-    const cells = useMemo(() => buildCalendarCells(new Date(), 30), []);
-
-    return (
-        <div className="slotCal">
-            <div className="slotCalHead">
-                {WEEKDAYS.map((day) => (
-                    <span key={day}>{day}</span>
-                ))}
-            </div>
-
-            <div className="slotCalGrid">
-                {cells.map((day, idx) => {
-                    if (!day) return <div key={`blank-${idx}`} className="slotCalBlank" />;
-
-                    const key = localDateStr(day);
-                    const available = isDaySelectable(spot, day);
-                    const inRange = isDayInSelectedRange(day, startAt, endAt);
-                    const selected = selectedDate === key;
-
-                    return (
-                        <button
-                            key={key}
-                            type="button"
-                            className={`slotCalDay ${available ? "slotCalDay--available" : "slotCalDay--off"} ${selected ? "slotCalDay--selected" : ""} ${inRange ? "slotCalDay--range" : ""}`}
-                            onClick={() => onPickDate(key)}
-                            disabled={disabled || !available}
-                        >
-                            <span className="slotCalNum">{day.getDate()}</span>
-                            {day.getDate() === 1 && <span className="slotCalMonth">{day.toLocaleDateString(undefined, { month: "short" })}</span>}
-                        </button>
-                    );
-                })}
-            </div>
-        </div>
-    );
-}
-
-type SlotDialogProps = {
-    open: boolean;
-    dateLabel: string;
-    startTime: string;
-    setStartTime: (value: string) => void;
-    durationMinutes: number;
-    setDurationMinutes: (value: number) => void;
-    onApply: () => void;
-    onClose: () => void;
-};
-
-function SlotDialog({
-    open,
-    dateLabel,
-    startTime,
-    setStartTime,
-    durationMinutes,
-    setDurationMinutes,
-    onApply,
-    onClose,
-}: SlotDialogProps) {
-    if (!open) return null;
-
-    const parsedDate = parseYmd(dateLabel);
-    const slotStart = parsedDate ? setTime(parsedDate, normalizeTimeInput(startTime)) : null;
-    const slotEnd = slotStart ? addMinutes(slotStart, durationMinutes) : null;
-
-    return (
-        <div className="slotDialogBackdrop" role="dialog" aria-modal="true">
-            <div className="card slotDialog">
-                <div className="h3">Pick start time and duration</div>
-                <div className="tiny muted">{dateLabel}</div>
-
-                <label className="field">
-                    <span>Start time</span>
-                    <input
-                        className="input"
-                        type="time"
-                        step={900}
-                        value={normalizeTimeInput(startTime)}
-                        onChange={(e) => setStartTime(normalizeTimeInput(e.target.value))}
-                    />
-                </label>
-
-                <label className="field">
-                    <span>Duration</span>
-                    <select
-                        className="input"
-                        value={durationMinutes}
-                        onChange={(e) => setDurationMinutes(clampDurationMinutes(Number(e.target.value)))}
-                    >
-                        {DURATION_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                                {option.label}
-                            </option>
-                        ))}
-                    </select>
-                </label>
-
-                {slotStart && slotEnd && (
-                    <div className="slotDialogPreview">
-                        {formatDateTime(slotStart.toISOString())} {" -> "} {formatDateTime(slotEnd.toISOString())}
-                    </div>
-                )}
-
-                <div className="rowInline" style={{ justifyContent: "flex-end" }}>
-                    <button type="button" className="btn" onClick={onClose}>Cancel</button>
-                    <button type="button" className="btn btn-primary" onClick={onApply}>Apply</button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-function buildCalendarCells(startDate: Date, totalDays: number) {
-    const start = startOfDay(startDate);
-    const cells: Array<Date | null> = [];
-
-    for (let i = 0; i < start.getDay(); i += 1) {
-        cells.push(null);
-    }
-
-    for (let i = 0; i < totalDays; i += 1) {
-        const d = new Date(start);
-        d.setDate(start.getDate() + i);
-        cells.push(d);
-    }
-
-    return cells;
-}
-
-function isDayInSelectedRange(day: Date, startAt: Date, endAt: Date) {
-    const dayStart = startOfDay(day);
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate() + 1);
-    return dayEnd.getTime() > startAt.getTime() && dayStart.getTime() < endAt.getTime();
-}
-
-function isDaySelectable(spot: ParkingSpot, day: Date) {
-    const dayStart = startOfDay(day);
-    if (dayStart < startOfDay(new Date())) return false;
-
-    const a = spot.availability_json;
-    const key = localDateStr(dayStart);
-    if (a?.date_from && key < a.date_from) return false;
-    if (a?.date_to && key > a.date_to) return false;
-
-    const isTwentyFourSeven = a?.type === "24_7" || (!a && (spot.availability_type ?? "24_7") === "24_7");
-    if (isTwentyFourSeven) return true;
-
-    const rules = extractAvailabilityRules(spot);
-    return rules.some((r) => r.dow === dayStart.getDay());
-}
-
-function getAutoStartForDate(spot: ParkingSpot | null, ymd: string) {
-    const day = parseYmd(ymd);
-    if (!day) return nextWholeQuarterHour();
-
-    const base = startOfDay(day);
-    if (!spot) {
-        const fallback = new Date(base);
-        if (isSameDay(fallback, new Date())) return nextWholeQuarterHour();
-        return fallback;
-    }
-
-    const a = spot.availability_json;
-    const isTwentyFourSeven = a?.type === "24_7" || (!a && (spot.availability_type ?? "24_7") === "24_7");
-
-    let start = new Date(base);
-
-    if (!isTwentyFourSeven) {
-        const todaysRules = extractAvailabilityRules(spot)
-            .filter((r) => r.dow === base.getDay())
-            .sort((x, y) => hhmmToMinutes(x.start) - hhmmToMinutes(y.start));
-
-        if (todaysRules.length > 0) {
-            start = setTime(base, todaysRules[0].start);
-        }
-    }
-
-    const now = nextWholeQuarterHour();
-    if (isSameDay(start, now) && now > start) return now;
-    return start;
-}
-
-function formatAvailability(spot: ParkingSpot) {
-    const a = spot.availability_json;
-    if (a?.type === "24_7") return "24/7";
-    if (a?.type === "same_everyday" && a.start && a.end) return `Daily ${a.start}-${a.end}`;
-    if (a?.type === "custom_weekly" && Array.isArray(a.rules)) {
-        return a.rules.map((r) => `${dayShort(r.dow)} ${r.start}-${r.end}`).join(", ");
-    }
-
-    if (spot.availability_type === "24_7") return "24/7";
-    if (spot.availability_type === "weekly" && Array.isArray(spot.available_days)) {
-        const days = spot.available_days.map(dayShort).join(", ");
-        const start = spot.daily_start?.slice(0, 5);
-        const end = spot.daily_end?.slice(0, 5);
-        return start && end ? `${days} ${start}-${end}` : `${days} (weekly)`;
-    }
-
-    return "Not specified";
-}
-
-function isSlotAllowed(spot: ParkingSpot, start: Date, end: Date) {
-    if (!(start < end)) return false;
-
-    const rules = extractAvailabilityRules(spot);
-    if (!rules.length) return true;
-
-    const a = spot.availability_json;
-    const from = a?.date_from ? new Date(`${a.date_from}T00:00:00`) : null;
-    const to = a?.date_to ? new Date(`${a.date_to}T23:59:59`) : null;
-
-    if (from && start < from) return false;
-    if (to && end > to) return false;
-
-    const isTwentyFourSeven = a?.type === "24_7" || (!a && (spot.availability_type ?? "24_7") === "24_7");
-    if (isTwentyFourSeven) return true;
-
-    if (!isSameDay(start, end)) return false;
-
-    const dayRules = rules.filter((r) => r.dow === start.getDay());
-    if (!dayRules.length) return false;
-
-    for (const rule of dayRules) {
-        const ruleStart = setTime(start, rule.start);
-        const ruleEnd = setTime(start, rule.end);
-        if (start >= ruleStart && end <= ruleEnd) return true;
-    }
-
-    return false;
-}
-
-function extractAvailabilityRules(spot: ParkingSpot): Array<{ dow: number; start: string; end: string }> {
-    const a = spot.availability_json;
-
-    if (a?.type === "24_7") {
-        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: "00:00", end: "23:59" }));
-    }
-
-    if (a?.type === "same_everyday" && a.start && a.end) {
-        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: a.start!, end: a.end! }));
-    }
-
-    if (a?.type === "custom_weekly" && Array.isArray(a.rules)) {
-        return a.rules.filter(
-            (r): r is { dow: number; start: string; end: string } =>
-                typeof r?.dow === "number" && typeof r?.start === "string" && typeof r?.end === "string"
-        );
-    }
-
-    if (spot.availability_type === "24_7") {
-        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: "00:00", end: "23:59" }));
-    }
-
-    if (spot.availability_type === "weekly" && Array.isArray(spot.available_days)) {
-        const start = spot.daily_start?.slice(0, 5) ?? "00:00";
-        const end = spot.daily_end?.slice(0, 5) ?? "23:59";
-        return spot.available_days.map((dow) => ({ dow, start, end }));
-    }
-
-    return [];
-}
-
-function calcUnitsForMinutes(minutes: number, unit: PriceUnit) {
-    if (!Number.isFinite(minutes) || minutes <= 0) return 0;
-
-    if (unit === "hour") {
-        const roundedMinutes = Math.max(5, Math.ceil(minutes / 5) * 5);
-        return roundedMinutes / 60;
-    }
-
-    if (unit === "day") return Math.max(1, Math.ceil(minutes / (24 * 60)));
-    return Math.max(1, Math.ceil(minutes / (24 * 60 * 7)));
-}
-
-function parseDurationQuery(raw: string) {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n <= 0) return 0;
-    return clampDurationMinutes(n * 60);
-}
-
-function clampDurationMinutes(value: number) {
-    if (!Number.isFinite(value)) return 60;
-
-    const bounded = Math.max(15, Math.min(MAX_DURATION_MINUTES, Math.round(value)));
-    let closest = DURATION_OPTIONS[0]?.value ?? 60;
-
-    for (const option of DURATION_OPTIONS) {
-        if (Math.abs(option.value - bounded) < Math.abs(closest - bounded)) {
-            closest = option.value;
-        }
-    }
-
-    return closest;
-}
-
-function buildDurationOptions() {
-    const options: Array<{ value: number; label: string }> = [];
-
-    for (let minutes = 15; minutes <= 12 * 60; minutes += 15) {
-        options.push({ value: minutes, label: formatDurationLabel(minutes) });
-    }
-
-    for (let hours = 13; hours <= 72; hours += 1) {
-        const minutes = hours * 60;
-        options.push({ value: minutes, label: formatDurationLabel(minutes) });
-    }
-
-    for (let days = 4; days <= 30; days += 1) {
-        const minutes = days * 24 * 60;
-        options.push({ value: minutes, label: formatDurationLabel(minutes) });
-    }
-
-    return options;
-}
-
-function formatDurationLabel(minutes: number) {
-    if (minutes < 60) return `${minutes} min`;
-    if (minutes % (24 * 60) === 0) {
-        const days = minutes / (24 * 60);
-        return days === 1 ? "1 day" : `${days} days`;
-    }
-
-    const hours = Math.floor(minutes / 60);
-    const remainder = minutes % 60;
-    if (remainder === 0) return hours === 1 ? "1 hour" : `${hours} hours`;
-    return `${hours}h ${remainder}m`;
-}
-
-function formatBidAmount(bid: AuctionBid) {
-    if (bid.pay_method === "points" || bid.amount_points != null) return `${toNumber(bid.amount_points)} pts`;
-    return `GBP ${toNumber(bid.amount_gbp).toFixed(2)}`;
-}
-
-function capitalize(value: string) {
-    if (!value) return value;
-    return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function formatDateTime(iso: string) {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return `${pad2(d.getDate())}:${pad2(d.getMonth() + 1)}:${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-}
-
-function nextWholeQuarterHour() {
-    const now = new Date();
-    const d = new Date(now);
-    d.setSeconds(0, 0);
-    const roundedMinutes = Math.ceil(d.getMinutes() / 15) * 15;
-    if (roundedMinutes === 60) {
-        d.setHours(d.getHours() + 1, 0, 0, 0);
-    } else {
-        d.setMinutes(roundedMinutes, 0, 0);
-    }
-    if (d <= now) d.setMinutes(d.getMinutes() + 15, 0, 0);
-    return d;
-}
-
-function toTimeInput(date: Date) {
-    return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
-}
-
-function normalizeTimeInput(value: string) {
-    if (!/^\d{2}:\d{2}$/.test(value)) return "00:00";
-    const [hRaw, mRaw] = value.split(":");
-    const h = Number(hRaw);
-    const m = Number(mRaw);
-    if (!Number.isFinite(h) || !Number.isFinite(m)) return "00:00";
-    if (h < 0 || h > 23 || m < 0 || m > 59) return "00:00";
-    return `${pad2(h)}:${pad2(m)}`;
-}
-
-function addMinutes(date: Date, minutes: number) {
-    return new Date(date.getTime() + minutes * 60000);
-}
-
-function setTime(date: Date, hhmm: string) {
-    const [h, m] = hhmm.split(":").map((v) => Number(v));
-    const out = new Date(date);
-    out.setHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0);
-    return out;
-}
-
-function parseYmd(value: string) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-    const d = new Date(`${value}T00:00:00`);
-    return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function localDateStr(date: Date) {
-    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
-}
-
-function pad2(n: number) {
-    return String(n).padStart(2, "0");
-}
-
-function startOfDay(date: Date) {
-    const d = new Date(date);
-    d.setHours(0, 0, 0, 0);
-    return d;
-}
-
-function isSameDay(a: Date, b: Date) {
-    return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-}
-
-function hhmmToMinutes(hhmm: string) {
-    const [h, m] = hhmm.split(":").map((v) => Number(v));
-    return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
-}
-
-function toNumber(value: unknown) {
-    const n = Number(value ?? 0);
-    return Number.isFinite(n) ? n : 0;
-}
-
-function roundMoney(value: number) {
-    return Math.round(value * 100) / 100;
-}
-
-function dayShort(dow: number) {
-    return WEEKDAYS[dow] ?? "Day";
-}

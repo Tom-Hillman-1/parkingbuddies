@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {Link, Navigate, useParams, useSearchParams} from "react-router-dom";
+import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { apiGet, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { ReceiptCard, ReceiptDivider, ReceiptRow } from "../components/ReceiptCard";
+import { formatDateRangeLocal, formatDateTimeLocal, toFiniteNumber } from "./pagesShared";
 
 type Booking = {
     id: string;
@@ -15,36 +17,20 @@ type Booking = {
     end_time?: string;
     created_at?: string;
     payment_provider_ref?: string | null;
+    payment_status?: string | null;
+    owner_contact_email?: string | null;
+    owner_contact_phone?: string | null;
+    owner_contact_info?: string | null;
 };
 
 type StripeReceiptDetails = {
     receipt_url: string | null;
+    amount_received_gbp?: number;
+    payment_intent_id?: string;
+    charge_id?: string | null;
 };
 
-function money(value: unknown) {
-    const n = Number(value ?? 0);
-    return Number.isFinite(n) ? n : 0;
-}
-
-function formatDateRange(start?: string | null, end?: string | null) {
-    if (!start || !end) return "Time on file";
-    try {
-        const from = new Date(start).toLocaleString();
-        const to = new Date(end).toLocaleString();
-        return `${from} → ${to}`;
-    } catch {
-        return "Time on file";
-    }
-}
-
-function formatDateTime(value?: string | null) {
-    if (!value) return "Time on file";
-    try {
-        return new Date(value).toLocaleString();
-    } catch {
-        return "Time on file";
-    }
-}
+const POUND = String.fromCharCode(163);
 
 export default function PayBookingPage() {
     const { bookingId } = useParams();
@@ -76,7 +62,11 @@ export default function PayBookingPage() {
 
     const requiresPayment = useMemo(() => {
         if (!booking) return false;
-        return booking.pay_method === "money" && booking.status === "pending" && money(booking.total_price_gbp) > 0;
+        return (
+            booking.pay_method === "money" &&
+            booking.status === "pending" &&
+            toFiniteNumber(booking.total_price_gbp) > 0
+        );
     }, [booking]);
 
     useEffect(() => {
@@ -104,13 +94,12 @@ export default function PayBookingPage() {
                 const needsPayment =
                     currentBooking.pay_method === "money" &&
                     currentBooking.status === "pending" &&
-                    money(currentBooking.total_price_gbp) > 0;
+                    toFiniteNumber(currentBooking.total_price_gbp) > 0;
                 const hasProviderRef =
                     typeof currentBooking.payment_provider_ref === "string" &&
                     currentBooking.payment_provider_ref.trim().length > 0;
                 const shouldFetchReceipt =
-                    currentBooking.pay_method === "money" &&
-                    (hasProviderRef || !needsPayment || successCheckout);
+                    currentBooking.pay_method === "money" && (hasProviderRef || !needsPayment || successCheckout);
 
                 if (shouldFetchReceipt) {
                     await refreshReceipt();
@@ -158,26 +147,29 @@ export default function PayBookingPage() {
     const hasStripeReceipt = Boolean(receipt?.receipt_url);
     const bookingTitle = booking?.spot_title ?? "Parking booking";
     const bookingAddress = booking?.spot_address ?? "Address on file";
-    const bookingWindow = booking ? formatDateRange(booking.start_time, booking.end_time) : "Time on file";
-    const bookedAt = formatDateTime(booking?.created_at);
+    const bookingWindow = booking ? formatDateRangeLocal(booking.start_time, booking.end_time) : "Time on file";
+    const bookedAt = formatDateTimeLocal(booking?.created_at);
+    const amountReceived = toFiniteNumber(receipt?.amount_received_gbp);
+    const ownerContactEmail = String(booking?.owner_contact_email ?? "").trim();
+    const ownerContactPhone = String(booking?.owner_contact_phone ?? "").trim();
+    const ownerContactInfo = String(booking?.owner_contact_info ?? "").trim();
+    const hasOwnerContact = Boolean(ownerContactEmail || ownerContactPhone || ownerContactInfo);
+    const paymentMarkedSucceeded = String(booking?.payment_status ?? "").toLowerCase() === "succeeded";
+    const paymentComplete =
+        booking?.pay_method !== "money" ||
+        paymentMarkedSucceeded ||
+        hasStripeReceipt ||
+        String(booking?.status ?? "").toLowerCase() === "confirmed" ||
+        toFiniteNumber(booking?.total_price_gbp) <= 0;
+    const contactLockedByPayment = booking?.pay_method === "money" && !paymentComplete;
+    const contactSyncing = booking?.pay_method === "money" && paymentComplete && !hasOwnerContact;
+
     const stripeSummary = hasStripeReceipt
         ? [
-              {
-                  label: "Amount received",
-                  value: `£${receipt!.amount_received_gbp.toFixed(2)}`,
-              },
-              {
-                  label: "Payment intent",
-                  value: receipt!.payment_intent_id,
-              },
-              {
-                  label: "Charge ID",
-                  value: receipt!.charge_id ?? "—",
-              },
-              {
-                  label: "Booked at",
-                  value: bookedAt,
-              },
+              { label: "Amount received", value: `${POUND}${amountReceived.toFixed(2)}` },
+              { label: "Payment intent", value: receipt?.payment_intent_id ?? "-" },
+              { label: "Charge ID", value: receipt?.charge_id ?? "-" },
+              { label: "Booked at", value: bookedAt },
           ]
         : [];
 
@@ -194,87 +186,105 @@ export default function PayBookingPage() {
 
             {!loading && !err && booking && (
                 <>
-                {requiresPayment && !successCheckout && (
-                    <div className="card formSection" style={{ marginBottom: 14 }}>
-                        <div className="h3">Continue in Stripe</div>
-                        <div className="muted" style={{ marginTop: 6 }}>
-                            You will complete payment on Stripe and receive the official receipt there.
-                        </div>
-                        <div className="rowInline" style={{ marginTop: 12 }}>
-                            <button className="btn btn-primary" onClick={goToStripeCheckout} disabled={busy}>
-                                {busy ? "Opening Stripe…" : "Continue to Stripe checkout"}
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {requiresPayment && successCheckout && (
-                    <div className="card formSection" style={{marginBottom: 14}}>
-                        <div className="h3">Payment Completed Successfully</div>
-                        <div className="muted" style={{ marginTop: 6 }}>
-                            Thanks for confirming payment on Stripe. We're syncing your official receipt now.
-                        </div>
-                    </div>
-                )}
-
-                {!requiresPayment && booking.pay_method === "money" && (
-                    <div className="card formSection">
-                        <div className="h3">Payment already completed</div>
-                        <div className="muted" style={{ marginTop: 6 }}>
-                            Open your official Stripe receipt below.
-                        </div>
-                    </div>
-                )}
-
-                {booking.pay_method === "money" && hasStripeReceipt && (
-                    <div className="card receiptCard receiptCard--confirm">
-                        <div className="receiptHeader">
-                            <div className="heroKicker">STRIPE RECEIPT</div>
-                            <div className="h3">Official summary</div>
-                            <div className="tiny muted">Details provided directly by Stripe.</div>
-                        </div>
-                        <div className="receiptBody">
-                            <div className="receiptRow">
-                                <span className="tiny muted">Booking</span>
-                                <span className="spotInfoValue">{bookingTitle}</span>
+                    {requiresPayment && !successCheckout && (
+                        <div className="card formSection" style={{ marginBottom: 14 }}>
+                            <div className="h3">Continue in Stripe</div>
+                            <div className="muted" style={{ marginTop: 6 }}>
+                                You will complete payment on Stripe and receive the official receipt there.
                             </div>
-                            <div className="receiptRow">
-                                <span className="tiny muted">Location</span>
-                                <span className="spotInfoValue">{bookingAddress}</span>
-                            </div>
-                            <div className="receiptRow">
-                                <span className="tiny muted">Window</span>
-                                <span className="spotInfoValue">{bookingWindow}</span>
-                            </div>
-                            <div className="receiptRow">
-                                <span className="tiny muted">Amount</span>
-                                <span className="spotInfoValue">
-                                    £{money(booking.total_price_gbp).toFixed(2)}
-                                </span>
-                            </div>
-                            <div style={{ borderTop: "1px dashed rgba(255,255,255,0.25)", margin: "6px 0" }} />
-                            {stripeSummary.map((row) => (
-                                <div className="receiptRow" key={row.label}>
-                                    <span className="tiny muted">{row.label}</span>
-                                    <span className="spotInfoValue">{row.value}</span>
-                                </div>
-                            ))}
                             <div className="rowInline" style={{ marginTop: 12 }}>
-                                <a
-                                    className="btn btn-primary"
-                                    href={receipt!.receipt_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                >
-                                    Open Stripe receipt
-                                </a>
-                                <Link to="/dashboard" className="btn">Back to dashboard</Link>
-                                <Link to="/about#contact-us" className="btn">Contact support</Link>
+                                <button className="btn btn-primary" onClick={goToStripeCheckout} disabled={busy}>
+                                    {busy ? "Opening Stripe..." : "Continue to Stripe checkout"}
+                                </button>
                             </div>
                         </div>
-                    </div>
-                )}
+                    )}
 
+                    {requiresPayment && successCheckout && (
+                        <div className="card formSection" style={{ marginBottom: 14 }}>
+                            <div className="h3">Payment completed successfully</div>
+                            <div className="muted" style={{ marginTop: 6 }}>
+                                Thanks for confirming payment on Stripe. We are syncing your official receipt now.
+                            </div>
+                        </div>
+                    )}
+
+                    {!requiresPayment && booking.pay_method === "money" && (
+                        <div className="card formSection">
+                            <div className="h3">Payment already completed</div>
+                            <div className="muted" style={{ marginTop: 6 }}>
+                                Open your official Stripe receipt below.
+                            </div>
+                        </div>
+                    )}
+
+                    {booking.pay_method === "money" && hasStripeReceipt && (
+                        <ReceiptCard
+                            kicker="STRIPE RECEIPT"
+                            title="Official summary"
+                            subtitle="Details provided directly by Stripe."
+                            className="receiptCard--confirm"
+                            actions={
+                                <>
+                                    <a
+                                        className="btn btn-primary"
+                                        href={receipt?.receipt_url ?? undefined}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        Open Stripe receipt
+                                    </a>
+                                    <Link to="/dashboard" className="btn">Back to dashboard</Link>
+                                    <Link to="/about#contact-us" className="btn">Contact support</Link>
+                                </>
+                            }
+                        >
+                            <ReceiptRow label="Booking" value={bookingTitle} />
+                            <ReceiptRow label="Location" value={bookingAddress} />
+                            <ReceiptRow label="Window" value={bookingWindow} />
+                            <ReceiptRow
+                                label="Amount"
+                                value={`${POUND}${toFiniteNumber(booking.total_price_gbp).toFixed(2)}`}
+                            />
+                            <ReceiptDivider />
+                            {stripeSummary.map((row) => (
+                                <ReceiptRow key={row.label} label={row.label} value={row.value} />
+                            ))}
+                        </ReceiptCard>
+                    )}
+
+                    {hasOwnerContact && (
+                        <div style={{ marginTop: 14 }}>
+                            <ReceiptCard
+                                kicker="HOST DETAILS"
+                                title="Owner contact"
+                                subtitle="Shared after your booking is placed."
+                                className="receiptCard--confirm"
+                            >
+                                {ownerContactEmail && <ReceiptRow label="Owner email" value={ownerContactEmail} />}
+                                {ownerContactPhone && <ReceiptRow label="Owner phone" value={ownerContactPhone} />}
+                                {ownerContactInfo && <ReceiptRow label="Arrival notes" value={ownerContactInfo} />}
+                            </ReceiptCard>
+                        </div>
+                    )}
+
+                    {contactLockedByPayment && (
+                        <div className="card formSection" style={{ marginTop: 14 }}>
+                            <div className="h3">Owner contact unlocks after payment</div>
+                            <div className="muted" style={{ marginTop: 6 }}>
+                                Private host details are shown once payment is fully completed.
+                            </div>
+                        </div>
+                    )}
+
+                    {contactSyncing && (
+                        <div className="card formSection" style={{ marginTop: 14 }}>
+                            <div className="h3">Payment confirmed, contact syncing</div>
+                            <div className="muted" style={{ marginTop: 6 }}>
+                                Your payment is complete. Owner contact details will appear here shortly.
+                            </div>
+                        </div>
+                    )}
                 </>
             )}
         </div>

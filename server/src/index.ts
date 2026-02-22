@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
+import * as dotenv from "dotenv";
 import { pool } from "./db";
 import authRoutes from "./routes/auth";
 import meRoutes from "./routes/me";

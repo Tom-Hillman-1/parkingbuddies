@@ -1,398 +1,86 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, ReactNode } from "react";
-import L from "leaflet";
+import type { ChangeEvent } from "react";
 import Lottie from "lottie-react";
-import { MapContainer, Marker, TileLayer, useMapEvents } from "react-leaflet";
-import { Link, Navigate, useBeforeUnload, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import SpotsMap from "../components/SpotsMap";
 import { apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import successAnimation from "../assets/Success.json";
 import type { ParkingSpot } from "../types";
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
+import { isTimeHHMM as isTime, toLocalDateInput } from "./pagesShared";
+import {
+    AvailabilityCalendarSection,
+    availabilityWindowIssue,
+    asString,
+    createAvailabilityWindow,
+    DEFAULT_AUCTION_START_PRICE,
+    DEFAULT_AVAILABILITY_END,
+    DEFAULT_AVAILABILITY_START,
+    DEFAULT_CENTER,
+    DEFAULT_POINTS_COST,
+    DEFAULT_SLOT_END,
+    DEFAULT_SLOT_START,
+    formatYmdLabel,
+    hasAvailabilityOverlap,
+    LONDON_VIEWBOX,
+    MIN_AUCTION_START_PRICE_GBP,
+    MIN_POINTS_COST,
+    modeLabel,
+    MODEL_CHOICES,
+    normalizeMode,
+    normalizePriceUnit,
+    normalizeWindow,
+    parseCoordinates,
+    PRICE_UNIT_CHOICES,
+    SelectionTile,
+    SheetActions,
+    SPACE_CHOICES,
+    STEP_COUNT,
+    STEP_META,
+    toAvailabilityPayload,
+    Tooltip,
+    validateAvailabilityWindows,
+    WizardSheet,
+} from "./createListingSupport";
+import type {
+    AvailabilityWindow,
+    DraftSnapshot,
+    FlowStep,
+    GeocodeSuggestion,
+    Mode,
+    PriceUnit,
+    SpaceChoice,
+    WizardSheetName,
+    WizardStep,
+} from "./createListingSupport";
 
-type Mode = "free" | "rent" | "auction";
-type PriceUnit = "hour" | "day" | "week";
-type AvailabilityPreset = "always" | "weekdays" | "weekends" | "custom";
-type WizardStep = 1 | 2 | 3 | 4 | 5 | 6;
-type FlowStep = Exclude<WizardStep, 1>;
-type SpaceChoice = "1" | "2" | "3plus";
-type Tone = "blue" | "lilac" | "mint" | "cream" | "sky";
-type PendingLeaveAction = { kind: "link"; path: string } | { kind: "history" } | { kind: "reload" } | null;
-
-type GeocodeSuggestion = { display_name: string; lat: string; lon: string };
-type AvailabilitySlot = { id: string; dow: number; start: string; end: string };
-type DraftSnapshot = { mode: Mode; title: string; description: string; capacityTotal: string; priceUnit: PriceUnit; price: string; auctionStartPrice: string; allowPoints: boolean; pointsCost: string; availabilityPreset: AvailabilityPreset; dateFrom: string; dateTo: string; customSlots: AvailabilitySlot[]; addressText: string; lat: string; lng: string; imageUrl: string };
-
-const STEP_COUNT = 6;
-const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const DEFAULT_CENTER: [number, number] = [51.5074, -0.1278];
-const LONDON_VIEWBOX = "-0.5103,51.6919,0.3340,51.2868";
-const MIN_AUCTION_START_PRICE_GBP = 0.1;
-const MIN_POINTS_COST = 1;
-const DEFAULT_AUCTION_START_PRICE = String(MIN_AUCTION_START_PRICE_GBP);
-const DEFAULT_POINTS_COST = String(MIN_POINTS_COST);
-const LEAVE_DRAFT_MESSAGE = "Are you sure you want to leave? Changes will not be saved.";
-const DRAFT_STORAGE_KEY = "parkingbuddies:create-listing-draft:v1";
-
-type StoredDraft = {
-    editId: string | null;
-    activeStep: WizardStep;
-    baselineSignature: string;
-    snapshot: DraftSnapshot;
-};
-
-const SPACE_CHOICES: Array<{ id: SpaceChoice; label: string; value: number }> = [
-    { id: "1", label: "1 space", value: 1 },
-    { id: "2", label: "2 spaces", value: 2 },
-    { id: "3plus", label: "3+ spaces", value: 4 },
-];
-
-const MODEL_CHOICES: Array<{ mode: Mode; title: string; copy: string; tone: Tone; help: string }> = [
-    { mode: "rent", title: "Rent", copy: "Fixed pricing for instant bookings.", tone: "blue", help: "Drivers can book instantly at the rate you set." },
-    { mode: "auction", title: "Auction", copy: "Drivers submit offers. You get to approve.", tone: "lilac", help: "Drivers send offers and you decide which bid to accept." },
-    { mode: "free", title: "Free", copy: "No payment required for this listing.", tone: "mint", help: "Bookings are free to drivers and no payment is collected." },
-];
-
-const STEP_META: Record<FlowStep, { panelTitle: string; panelCopy: string; panelTone: Tone; title: string; subtitle: string }> = {
-    2: { panelTitle: "Basics", panelCopy: "Set the core details so drivers quickly understand your space.", panelTone: "blue", title: "Listing basics", subtitle: "Keep this short, clear, and practical." },
-    3: { panelTitle: "Pricing", panelCopy: "Choose a simple pricing setup that matches your listing model.", panelTone: "mint", title: "Pricing", subtitle: "Set how drivers pay for this listing." },
-    4: { panelTitle: "Availability", panelCopy: "Define when drivers can request or book this space.", panelTone: "lilac", title: "Availability", subtitle: "Choose quick presets or custom day and time windows." },
-    5: { panelTitle: "Location", panelCopy: "Add a searchable address and confirm the exact map pin.", panelTone: "cream", title: "Location", subtitle: "Search once, then fine-tune by tapping on the map." },
-    6: { panelTitle: "Images", panelCopy: "A clear image improves trust and click-through for drivers.", panelTone: "sky", title: "Images", subtitle: "Optional, but strongly recommended." },
-};
-
-const AVAILABILITY_CHOICES: Array<{ id: AvailabilityPreset; title: string; copy: string; tone: "blue" | "lilac" | "mint" | "cream" }> = [
-    { id: "always", title: "24/7", copy: "Always available", tone: "blue" },
-    { id: "weekdays", title: "Weekdays", copy: "Mon-Fri", tone: "lilac" },
-    { id: "weekends", title: "Weekends", copy: "Sat-Sun", tone: "mint" },
-    { id: "custom", title: "Custom", copy: "Choose days and times", tone: "cream" },
-];
-
-const PRICE_UNIT_CHOICES: Array<{ id: PriceUnit; label: string }> = [{ id: "hour", label: "Hourly" }, { id: "day", label: "Daily" }, { id: "week", label: "Weekly" }];
-
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-    iconRetinaUrl: markerIcon2x,
-    iconUrl: markerIcon,
-    shadowUrl: markerShadow,
-});
-
-const defaultIcon = new L.Icon.Default();
-
-function isTime(value: string) {
-    return /^\d{2}:\d{2}$/.test(value);
+function readErrorMessage(error: unknown, fallback: string) {
+    return error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string"
+        ? (error as { message: string }).message
+        : fallback;
 }
 
-function minutes(value: string) {
-    const [h, m] = value.split(":").map(Number);
-    return h * 60 + m;
-}
-
-function parseCoordinates(lat: string, lng: string) {
-    const latNum = Number(lat);
-    const lngNum = Number(lng);
-    if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) return null;
-    if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) return null;
-    return { lat: latNum, lng: lngNum };
-}
-
-function pad2(value: number) {
-    return String(value).padStart(2, "0");
-}
-
-function toLocalDateInput(date: Date) {
-    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
-}
-
-function dateFromToday(daysAhead: number) {
-    const next = new Date();
-    next.setHours(0, 0, 0, 0);
-    next.setDate(next.getDate() + daysAhead);
-    return toLocalDateInput(next);
-}
-
-function createSlot(partial?: Partial<Omit<AvailabilitySlot, "id">>): AvailabilitySlot {
-    return {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        dow: partial?.dow ?? 1,
-        start: partial?.start ?? "09:00",
-        end: partial?.end ?? "17:00",
-    };
-}
-
-function areSlotsValid(slots: AvailabilitySlot[]) {
-    return slots.every(
-        (slot) =>
-            Number.isInteger(Number(slot.dow)) &&
-            Number(slot.dow) >= 0 &&
-            Number(slot.dow) <= 6 &&
-            isTime(slot.start) &&
-            isTime(slot.end) &&
-            minutes(slot.start) < minutes(slot.end)
-    );
-}
-
-function modeLabel(mode: Mode) {
-    return mode === "rent" ? "Rent" : mode === "auction" ? "Auction" : "Free";
-}
-
-function availabilityLabel(preset: AvailabilityPreset) {
-    return preset === "always" ? "24/7" : preset === "weekdays" ? "Weekdays" : preset === "weekends" ? "Weekends" : "Custom";
-}
-
-function draftSignature(snapshot: DraftSnapshot) {
-    return JSON.stringify({
-        mode: snapshot.mode,
-        title: snapshot.title.trim(),
-        description: snapshot.description.trim(),
-        capacityTotal: String(Math.max(1, Math.floor(Number(snapshot.capacityTotal) || 1))),
-        priceUnit: snapshot.priceUnit,
-        price: Number(snapshot.price || 0),
-        auctionStartPrice: Number(snapshot.auctionStartPrice || 0),
-        allowPoints: Boolean(snapshot.allowPoints),
-        pointsCost: Number(snapshot.pointsCost || 0),
-        availabilityPreset: snapshot.availabilityPreset,
-        dateFrom: snapshot.dateFrom || "",
-        dateTo: snapshot.dateTo || "",
-        customSlots: snapshot.customSlots.map((slot) => ({
-            dow: Number(slot.dow),
-            start: slot.start,
-            end: slot.end,
-        })),
-        addressText: snapshot.addressText.trim(),
-        lat: String(snapshot.lat),
-        lng: String(snapshot.lng),
-        imageUrl: snapshot.imageUrl.trim(),
-    });
-}
-
-function parseAvailabilityRules(rawRules: any): AvailabilitySlot[] {
-    if (!Array.isArray(rawRules)) return [createSlot()];
-
-    const parsed = rawRules
-        .map((rule) => ({
-            dow: Number(rule?.dow),
-            start: typeof rule?.start === "string" ? rule.start : "",
-            end: typeof rule?.end === "string" ? rule.end : "",
-        }))
-        .filter(
-            (rule) =>
-                Number.isInteger(rule.dow) &&
-                rule.dow >= 0 &&
-                rule.dow <= 6 &&
-                isTime(rule.start) &&
-                isTime(rule.end) &&
-                minutes(rule.start) < minutes(rule.end)
-        )
-        .map((rule) => createSlot(rule));
-
-    return parsed.length > 0 ? parsed : [createSlot()];
-}
-
-function quickPresetRules(preset: AvailabilityPreset) {
-    return (preset === "weekdays" ? [1, 2, 3, 4, 5] : [0, 6]).map((dow) => ({ dow, start: "00:00", end: "23:59" }));
-}
-
-function stepFromUnknown(value: unknown): WizardStep {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return 1;
-    if (numeric <= 1) return 1;
-    if (numeric >= STEP_COUNT) return STEP_COUNT as WizardStep;
-    return Math.floor(numeric) as WizardStep;
-}
-
-function readStoredDraft(expectedEditId: string | null): StoredDraft | null {
-    try {
-        const raw = window.localStorage.getItem(DRAFT_STORAGE_KEY);
-        if (!raw) return null;
-
-        const parsed = JSON.parse(raw) as Partial<StoredDraft>;
-        if ((parsed.editId ?? null) !== expectedEditId) return null;
-        if (!parsed.snapshot || typeof parsed.snapshot !== "object") return null;
-
-        const snapshot = parsed.snapshot as Partial<DraftSnapshot>;
-        const normalizedSnapshot: DraftSnapshot = {
-            mode: snapshot.mode === "auction" || snapshot.mode === "free" ? snapshot.mode : "rent",
-            title: typeof snapshot.title === "string" ? snapshot.title : "",
-            description: typeof snapshot.description === "string" ? snapshot.description : "",
-            capacityTotal: typeof snapshot.capacityTotal === "string" ? snapshot.capacityTotal : "1",
-            priceUnit:
-                snapshot.priceUnit === "day" || snapshot.priceUnit === "week" ? snapshot.priceUnit : "hour",
-            price: typeof snapshot.price === "string" ? snapshot.price : "5",
-            auctionStartPrice:
-                typeof snapshot.auctionStartPrice === "string"
-                    ? snapshot.auctionStartPrice
-                    : DEFAULT_AUCTION_START_PRICE,
-            allowPoints: Boolean(snapshot.allowPoints),
-            pointsCost: typeof snapshot.pointsCost === "string" ? snapshot.pointsCost : DEFAULT_POINTS_COST,
-            availabilityPreset:
-                snapshot.availabilityPreset === "weekdays" ||
-                snapshot.availabilityPreset === "weekends" ||
-                snapshot.availabilityPreset === "custom"
-                    ? snapshot.availabilityPreset
-                    : "always",
-            dateFrom: typeof snapshot.dateFrom === "string" ? snapshot.dateFrom : dateFromToday(0),
-            dateTo: typeof snapshot.dateTo === "string" ? snapshot.dateTo : dateFromToday(3),
-            customSlots:
-                Array.isArray(snapshot.customSlots) && snapshot.customSlots.length > 0
-                    ? snapshot.customSlots.map((slot) =>
-                          createSlot({
-                              dow: Number.isInteger(Number(slot?.dow)) ? Number(slot?.dow) : 1,
-                              start: typeof slot?.start === "string" ? slot.start : "09:00",
-                              end: typeof slot?.end === "string" ? slot.end : "17:00",
-                          })
-                      )
-                    : [createSlot()],
-            addressText: typeof snapshot.addressText === "string" ? snapshot.addressText : "",
-            lat: typeof snapshot.lat === "string" ? snapshot.lat : String(DEFAULT_CENTER[0]),
-            lng: typeof snapshot.lng === "string" ? snapshot.lng : String(DEFAULT_CENTER[1]),
-            imageUrl: typeof snapshot.imageUrl === "string" ? snapshot.imageUrl : "",
-        };
-
-        return {
-            editId: expectedEditId,
-            activeStep: stepFromUnknown(parsed.activeStep),
-            baselineSignature: typeof parsed.baselineSignature === "string" ? parsed.baselineSignature : "",
-            snapshot: normalizedSnapshot,
-        };
-    } catch {
-        return null;
-    }
-}
-
-function MapPickerPin({ position, onPick }: { position: [number, number] | null; onPick: (lat: number, lng: number) => void }) {
-    useMapEvents({
-        click(event) {
-            onPick(event.latlng.lat, event.latlng.lng);
-        },
-    });
-
-    if (!position) return null;
-    return <Marker position={position} icon={defaultIcon} />;
-}
-
-function Tooltip({ label, text }: { label: string; text: string }) {
-    return (
-        <span className="wizardTooltip">
-            <button
-                type="button"
-                className="wizardTooltipBtn"
-                aria-label={label}
-                title={text}
-                onClick={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
-            >
-                ?
-            </button>
-            <span role="tooltip" className="wizardTooltipBubble">
-                {text}
-            </span>
-        </span>
-    );
-}
-
-function SelectionTile({
-    title,
-    copy,
-    help,
-    tone,
-    active,
-    onClick,
-    spacesLabel,
-    onEditSpaces,
+function PricingUnitOptionCard({
+    id,
+    label,
+    selected,
+    onSelect,
 }: {
-    title: string;
-    copy: string;
-    help: string;
-    tone: Tone;
-    active: boolean;
-    onClick: () => void;
-    spacesLabel?: string;
-    onEditSpaces?: () => void;
+    id: PriceUnit;
+    label: string;
+    selected: boolean;
+    onSelect: (next: PriceUnit) => void;
 }) {
     return (
-        <article
-            className={`wizardTile wizardTile--${tone}${active ? " is-active" : ""}`}
-            role="button"
-            tabIndex={0}
-            aria-pressed={active}
-            onClick={onClick}
-            onKeyDown={(event) => {
-                if (event.target !== event.currentTarget) return;
-                if (event.key !== "Enter" && event.key !== " ") return;
-                event.preventDefault();
-                onClick();
-            }}
+        <button
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            className={`wizardOptionCard${selected ? " is-active" : ""}`}
+            onClick={() => onSelect(id)}
         >
-            <div className="wizardTileSelect">
-                <div className="wizardTileHead">
-                    <Tooltip label={`${title} mode help`} text={help} />
-                </div>
-                <span className="wizardTileTitle">{title}</span>
-                <span className="wizardTileCopy">{copy}</span>
-            </div>
-
-            {active && onEditSpaces && spacesLabel && (
-                <div className="wizardTileSpotsRow">
-                    <span className="wizardTileSpotsValue">{spacesLabel}</span>
-                    <button
-                        type="button"
-                        className="btn wizardTileSpotsBtn"
-                        onClick={(event) => {
-                            event.stopPropagation();
-                            onEditSpaces();
-                        }}
-                    >
-                        Edit spots
-                    </button>
-                </div>
-            )}
-        </article>
-    );
-}
-
-function WizardSheet({
-    open,
-    title,
-    subtitle,
-    onClose,
-    children,
-    wide = false,
-}: {
-    open: boolean;
-    title: string;
-    subtitle: string;
-    onClose: () => void;
-    children: ReactNode;
-    wide?: boolean;
-}) {
-    if (!open) return null;
-
-    return (
-        <div className="createSheetBackdrop" role="presentation" onClick={onClose}>
-            <section
-                className={`createSheet${wide ? " createSheet--wide" : ""}`}
-                role="dialog"
-                aria-modal="true"
-                aria-label={title}
-                onClick={(event) => event.stopPropagation()}
-            >
-                <div className="createSheetHead">
-                    <div>
-                        <div className="heroKicker">SETUP</div>
-                        <div className="h3">{title}</div>
-                        <div className="createFieldHint">{subtitle}</div>
-                    </div>
-                    <button type="button" className="btn" onClick={onClose}>
-                        Close
-                    </button>
-                </div>
-
-                {children}
-            </section>
-        </div>
+            <span className="wizardOptionTitle">{label}</span>
+        </button>
     );
 }
 
@@ -410,18 +98,27 @@ export default function CreateListingPage() {
     const [mode, setMode] = useState<Mode>("rent");
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
+    const [ownerContactEmail, setOwnerContactEmail] = useState("");
+    const [ownerContactPhone, setOwnerContactPhone] = useState("");
+    const [ownerContactInfo, setOwnerContactInfo] = useState("");
     const [capacityTotal, setCapacityTotal] = useState("1");
 
     const [priceUnit, setPriceUnit] = useState<PriceUnit>("hour");
     const [price, setPrice] = useState("5");
     const [auctionStartPrice, setAuctionStartPrice] = useState(DEFAULT_AUCTION_START_PRICE);
+    const [allowMoney, setAllowMoney] = useState(false);
     const [allowPoints, setAllowPoints] = useState(false);
     const [pointsCost, setPointsCost] = useState(DEFAULT_POINTS_COST);
 
-    const [availabilityPreset, setAvailabilityPreset] = useState<AvailabilityPreset>("always");
-    const [dateFrom, setDateFrom] = useState(() => dateFromToday(0));
-    const [dateTo, setDateTo] = useState(() => dateFromToday(3));
-    const [customSlots, setCustomSlots] = useState<AvailabilitySlot[]>([createSlot()]);
+    const [dateFrom, setDateFrom] = useState("");
+    const [dateTo, setDateTo] = useState("");
+    const [availabilityWindows, setAvailabilityWindows] = useState<AvailabilityWindow[]>([]);
+    const [calendarMonth, setCalendarMonth] = useState(() => {
+        const now = new Date();
+        return new Date(now.getFullYear(), now.getMonth(), 1);
+    });
+    const [draftSlotStart, setDraftSlotStart] = useState(DEFAULT_SLOT_START);
+    const [draftSlotEnd, setDraftSlotEnd] = useState(DEFAULT_SLOT_END);
 
     const [addressText, setAddressText] = useState("");
     const [addressSearchBusy, setAddressSearchBusy] = useState(false);
@@ -430,184 +127,58 @@ export default function CreateListingPage() {
     const [lng, setLng] = useState(String(DEFAULT_CENTER[1]));
 
     const [imageUrl, setImageUrl] = useState("");
-    const [spacesSheetOpen, setSpacesSheetOpen] = useState(false);
+    const [activeSheet, setActiveSheet] = useState<WizardSheetName | null>(null);
     const [pendingSpacesChoice, setPendingSpacesChoice] = useState<SpaceChoice>("1");
     const [pendingSpacesCustom, setPendingSpacesCustom] = useState("3");
-
-    const [customSheetOpen, setCustomSheetOpen] = useState(false);
-
-    const [confirmSheetOpen, setConfirmSheetOpen] = useState(false);
-    const [leaveSheetOpen, setLeaveSheetOpen] = useState(false);
-    const [pendingLeaveAction, setPendingLeaveAction] = useState<PendingLeaveAction>(null);
 
     const [loadingExisting, setLoadingExisting] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
+    const [slotSheetError, setSlotSheetError] = useState("");
     const [publishingOverlayOpen, setPublishingOverlayOpen] = useState(false);
-    const [baselineSignature, setBaselineSignature] = useState("");
-    const suppressNextPopGuardRef = useRef(false);
     const successTimerRef = useRef<number | null>(null);
 
     const imageInputRef = useRef<HTMLInputElement | null>(null);
+    const spacesSheetOpen = activeSheet === "spaces";
+    const customSheetOpen = activeSheet === "custom";
+    const confirmSheetOpen = activeSheet === "confirm";
 
     const parsedCoords = parseCoordinates(lat, lng);
-    const mapCenter: [number, number] = parsedCoords ? [parsedCoords.lat, parsedCoords.lng] : DEFAULT_CENTER;
-    const markerPosition: [number, number] | null = parsedCoords ? [parsedCoords.lat, parsedCoords.lng] : null;
-    const draftSnapshot: DraftSnapshot = useMemo(
-        () => ({
-            mode,
-            title,
-            description,
-            capacityTotal,
-            priceUnit,
-            price,
-            auctionStartPrice,
-            allowPoints,
-            pointsCost,
-            availabilityPreset,
-            dateFrom,
-            dateTo,
-            customSlots,
-            addressText,
-            lat,
-            lng,
-            imageUrl,
-        }),
-        [
-            mode,
-            title,
-            description,
-            capacityTotal,
-            priceUnit,
-            price,
-            auctionStartPrice,
-            allowPoints,
-            pointsCost,
-            availabilityPreset,
-            dateFrom,
-            dateTo,
-            customSlots,
-            addressText,
-            lat,
-            lng,
-            imageUrl,
-        ]
-    );
-    const currentSignature = draftSignature(draftSnapshot);
-    const hasUnsavedChanges = baselineSignature !== "" && currentSignature !== baselineSignature;
+    const mapCenter = parsedCoords ?? { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] };
 
     function applySnapshot(snapshot: DraftSnapshot) {
         setMode(snapshot.mode);
         setTitle(snapshot.title);
         setDescription(snapshot.description);
+        setOwnerContactEmail(snapshot.ownerContactEmail);
+        setOwnerContactPhone(snapshot.ownerContactPhone);
+        setOwnerContactInfo(snapshot.ownerContactInfo);
         setCapacityTotal(snapshot.capacityTotal);
         setPriceUnit(snapshot.priceUnit);
         setPrice(snapshot.price);
         setAuctionStartPrice(snapshot.auctionStartPrice);
+        const hasMoney =
+            snapshot.mode === "rent"
+                ? Number(snapshot.price) > 0
+                : snapshot.mode === "auction"
+                    ? Number(snapshot.auctionStartPrice) >= MIN_AUCTION_START_PRICE_GBP
+                    : false;
+        setAllowMoney(hasMoney);
         setAllowPoints(snapshot.allowPoints);
         setPointsCost(snapshot.pointsCost);
-        setAvailabilityPreset(snapshot.availabilityPreset);
-        setDateFrom(snapshot.dateFrom);
-        setDateTo(snapshot.dateTo);
-        setCustomSlots(snapshot.customSlots);
+        setDateFrom("");
+        setDateTo("");
+        setAvailabilityWindows(snapshot.availabilityWindows);
         setAddressText(snapshot.addressText);
         setLat(snapshot.lat);
         setLng(snapshot.lng);
         setImageUrl(snapshot.imageUrl);
+        const seedDate = snapshot.availabilityWindows[0]?.from;
+        const fromDate = seedDate ? new Date(`${seedDate}T00:00:00`) : null;
+        if (fromDate && !Number.isNaN(fromDate.getTime())) {
+            setCalendarMonth(new Date(fromDate.getFullYear(), fromDate.getMonth(), 1));
+        }
     }
-
-    useBeforeUnload(
-        (event) => {
-            if (!hasUnsavedChanges || saving) return;
-            event.preventDefault();
-            event.returnValue = "";
-        },
-        { capture: true }
-    );
-
-    useEffect(() => {
-        if (!hasUnsavedChanges || saving) return;
-
-        const onDocumentClick = (event: MouseEvent) => {
-            if (event.defaultPrevented) return;
-            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-
-            const source = event.target as Element | null;
-            const anchor = source?.closest?.("a[href]") as HTMLAnchorElement | null;
-            if (!anchor) return;
-            if (anchor.target && anchor.target !== "_self") return;
-            if (anchor.hasAttribute("download")) return;
-
-            const href = anchor.getAttribute("href");
-            if (!href || href.startsWith("#") || href.startsWith("javascript:")) return;
-
-            let nextUrl: URL;
-            try {
-                nextUrl = new URL(anchor.href, window.location.href);
-            } catch {
-                return;
-            }
-
-            if (nextUrl.origin !== window.location.origin) return;
-
-            const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-            const nextPath = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
-            if (currentPath === nextPath) return;
-
-            event.preventDefault();
-            event.stopPropagation();
-            setPendingLeaveAction({ kind: "link", path: nextPath });
-            setLeaveSheetOpen(true);
-        };
-
-        const onPopState = () => {
-            if (suppressNextPopGuardRef.current) {
-                suppressNextPopGuardRef.current = false;
-                return;
-            }
-            suppressNextPopGuardRef.current = true;
-            window.history.go(1);
-            setPendingLeaveAction({ kind: "history" });
-            setLeaveSheetOpen(true);
-        };
-
-        const onReloadShortcut = (event: KeyboardEvent) => {
-            const key = event.key.toLowerCase();
-            const wantsReload = key === "f5" || ((event.ctrlKey || event.metaKey) && key === "r");
-            if (!wantsReload) return;
-            event.preventDefault();
-            event.stopPropagation();
-            setPendingLeaveAction({ kind: "reload" });
-            setLeaveSheetOpen(true);
-        };
-
-        document.addEventListener("click", onDocumentClick, true);
-        window.addEventListener("popstate", onPopState);
-        window.addEventListener("keydown", onReloadShortcut, true);
-        return () => {
-            document.removeEventListener("click", onDocumentClick, true);
-            window.removeEventListener("popstate", onPopState);
-            window.removeEventListener("keydown", onReloadShortcut, true);
-        };
-    }, [hasUnsavedChanges, saving]);
-
-    useEffect(() => {
-        setBaselineSignature("");
-    }, [editId]);
-
-    useEffect(() => {
-        if (isEdit) return;
-        const stored = readStoredDraft(null);
-        if (!stored) return;
-        applySnapshot(stored.snapshot);
-        setActiveStep(stored.activeStep);
-        setBaselineSignature(stored.baselineSignature);
-    }, [isEdit]);
-
-    useEffect(() => {
-        if (isEdit || loadingExisting || baselineSignature) return;
-        setBaselineSignature(currentSignature);
-    }, [isEdit, loadingExisting, baselineSignature, currentSignature]);
 
     useEffect(() => {
         return () => {
@@ -620,81 +191,76 @@ export default function CreateListingPage() {
     useEffect(() => {
         if (!isEdit || !token || !editId) return;
 
-        const stored = readStoredDraft(editId);
-        if (stored) {
-            applySnapshot(stored.snapshot);
-            setActiveStep(stored.activeStep);
-            setBaselineSignature(stored.baselineSignature);
-            return;
-        }
-
         let active = true;
         setLoadingExisting(true);
         setError("");
 
         apiGet<{ parking_spot: ParkingSpot }>(`/parking-spots/${editId}`, token)
-            .then((res) => {
+            .then(async (res) => {
                 if (!active) return;
                 const listing = res.parking_spot;
+                let ownerContact: { owner_contact_email?: string | null; owner_contact_phone?: string | null; owner_contact_info?: string | null } = {};
+                try {
+                    const contactRes = await apiGet<{ owner_contact: { owner_contact_email?: string | null; owner_contact_phone?: string | null; owner_contact_info?: string | null } }>(
+                        `/parking-spots/${editId}/owner-contact`,
+                        token
+                    );
+                    ownerContact = contactRes.owner_contact ?? {};
+                } catch {
+                    ownerContact = {};
+                }
                 const av = (listing.availability_json ?? null) as any;
-                const nextMode = (listing.mode as Mode) ?? "rent";
-                const nextTitle = listing.title ?? "";
-                const nextDescription = listing.description ?? "";
-                const nextPrice = listing.mode === "rent" ? String(listing.price_gbp ?? "") : "";
-                const nextPriceUnit = (listing.price_unit as PriceUnit) ?? "hour";
-                const nextAllowPoints = Boolean(listing.allow_points);
-                const nextPointsCost = String(listing.points_cost ?? DEFAULT_POINTS_COST);
-                const nextAuctionStartPrice =
-                    listing.auction_start_price_gbp == null
-                        ? DEFAULT_AUCTION_START_PRICE
-                        : String(listing.auction_start_price_gbp);
-                const nextCapacityTotal = String(listing.capacity_total ?? 1);
-                const nextAddressText = listing.address_text ?? "";
-                const nextLat = String(listing.lat ?? "");
-                const nextLng = String(listing.lng ?? "");
-                const nextImageUrl = listing.image_url ?? "";
-                const nextDateFrom = typeof av?.date_from === "string" ? av.date_from : dateFromToday(0);
-                const nextDateTo = typeof av?.date_to === "string" ? av.date_to : dateFromToday(3);
+                const todayYmd = toLocalDateInput(new Date());
+                const plus30 = new Date();
+                plus30.setDate(plus30.getDate() + 30);
+                const fallbackFrom = typeof av?.date_from === "string" ? av.date_from : todayYmd;
+                const fallbackTo = typeof av?.date_to === "string" ? av.date_to : toLocalDateInput(plus30);
+                let nextAvailabilityWindows: AvailabilityWindow[] = [];
 
-                let nextAvailabilityPreset: AvailabilityPreset = "always";
-                let nextCustomSlots: AvailabilitySlot[] = [createSlot()];
-
-                if (av?.type === "custom_weekly") {
-                    nextAvailabilityPreset = "custom";
-                    nextCustomSlots = parseAvailabilityRules(av?.rules);
-                } else if (av?.type === "same_everyday") {
-                    const start = typeof av?.start === "string" && isTime(av.start) ? av.start : "09:00";
-                    const end = typeof av?.end === "string" && isTime(av.end) ? av.end : "17:00";
-                    nextAvailabilityPreset = "custom";
-                    nextCustomSlots = [0, 1, 2, 3, 4, 5, 6].map((dow) => createSlot({ dow, start, end }));
+                if (av?.type === "window_slots" && Array.isArray(av?.windows)) {
+                    nextAvailabilityWindows = av.windows
+                        .map((window: unknown) => normalizeWindow(window))
+                        .filter((window: AvailabilityWindow | null): window is AvailabilityWindow => Boolean(window));
+                }
+                if (!nextAvailabilityWindows.length) {
+                    nextAvailabilityWindows = [
+                        createAvailabilityWindow({
+                            from: fallbackFrom,
+                            to: fallbackTo,
+                            start: DEFAULT_AVAILABILITY_START,
+                            end: DEFAULT_AVAILABILITY_END,
+                        }),
+                    ];
                 }
 
                 const nextSnapshot: DraftSnapshot = {
-                    mode: nextMode,
-                    title: nextTitle,
-                    description: nextDescription,
-                    capacityTotal: nextCapacityTotal,
-                    priceUnit: nextPriceUnit,
-                    price: nextPrice,
-                    auctionStartPrice: nextAuctionStartPrice,
-                    allowPoints: nextAllowPoints,
-                    pointsCost: nextPointsCost,
-                    availabilityPreset: nextAvailabilityPreset,
-                    dateFrom: nextDateFrom,
-                    dateTo: nextDateTo,
-                    customSlots: nextCustomSlots,
-                    addressText: nextAddressText,
-                    lat: nextLat,
-                    lng: nextLng,
-                    imageUrl: nextImageUrl,
+                    mode: normalizeMode(listing.mode),
+                    title: asString(listing.title),
+                    description: asString(listing.description),
+                    ownerContactEmail: asString(ownerContact.owner_contact_email),
+                    ownerContactPhone: asString(ownerContact.owner_contact_phone),
+                    ownerContactInfo: asString(ownerContact.owner_contact_info),
+                    capacityTotal: String(listing.capacity_total ?? 1),
+                    priceUnit: normalizePriceUnit(listing.price_unit),
+                    price: listing.mode === "rent" ? String(listing.price_gbp ?? "") : "",
+                    auctionStartPrice:
+                        listing.auction_start_price_gbp == null
+                            ? DEFAULT_AUCTION_START_PRICE
+                            : String(listing.auction_start_price_gbp),
+                    allowPoints: Boolean(listing.allow_points),
+                    pointsCost: String(listing.points_cost ?? DEFAULT_POINTS_COST),
+                    availabilityWindows: nextAvailabilityWindows,
+                    addressText: asString(listing.address_text),
+                    lat: String(listing.lat ?? ""),
+                    lng: String(listing.lng ?? ""),
+                    imageUrl: asString(listing.image_url),
                 };
 
                 applySnapshot(nextSnapshot);
-                setBaselineSignature(draftSignature(nextSnapshot));
             })
-            .catch((e: any) => {
+            .catch((error: unknown) => {
                 if (!active) return;
-                setError(e?.message || "Could not load listing for editing.");
+                setError(readErrorMessage(error, "Could not load listing for editing."));
             })
             .finally(() => {
                 if (active) setLoadingExisting(false);
@@ -706,32 +272,20 @@ export default function CreateListingPage() {
     }, [isEdit, editId, token]);
 
     useEffect(() => {
-        const spaces = Math.max(1, Math.floor(Number(capacityTotal) || 1));
-        if (spaces >= 4) {
-            setPendingSpacesChoice("3plus");
-            setPendingSpacesCustom(String(spaces));
-            return;
-        }
-        setPendingSpacesChoice(String(spaces) as SpaceChoice);
-        setPendingSpacesCustom("4");
-    }, [capacityTotal]);
-
-    useEffect(() => {
         if (mode === "free") {
+            setAllowMoney(false);
             setAllowPoints(false);
             setPrice("0");
             return;
         }
         if (mode === "auction") {
             setPrice("0");
-            if (!auctionStartPrice || Number(auctionStartPrice) < MIN_AUCTION_START_PRICE_GBP) {
-                setAuctionStartPrice(DEFAULT_AUCTION_START_PRICE);
-            }
+            setAuctionStartPrice((prev) =>
+                !prev || Number(prev) < MIN_AUCTION_START_PRICE_GBP ? DEFAULT_AUCTION_START_PRICE : prev
+            );
             return;
         }
-        if (!price || Number(price) <= 0) {
-            setPrice("5");
-        }
+        setPrice((prev) => (!prev || Number(prev) <= 0 ? "5" : prev));
     }, [mode]);
 
     useEffect(() => {
@@ -741,33 +295,14 @@ export default function CreateListingPage() {
     }, [allowPoints, pointsCost]);
 
     useEffect(() => {
-        if (loadingExisting) return;
-        const payload: StoredDraft = {
-            editId,
-            activeStep,
-            baselineSignature,
-            snapshot: draftSnapshot,
-        };
-        try {
-            window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(payload));
-        } catch {
-            // localStorage unavailable; skip draft persistence quietly
-        }
-    }, [editId, activeStep, baselineSignature, currentSignature, draftSnapshot, loadingExisting]);
-
-    useEffect(() => {
-        if (!spacesSheetOpen && !customSheetOpen && !confirmSheetOpen && !leaveSheetOpen) return;
+        if (!activeSheet) return;
         const onEscape = (event: KeyboardEvent) => {
             if (event.key !== "Escape") return;
-            setSpacesSheetOpen(false);
-            setCustomSheetOpen(false);
-            setConfirmSheetOpen(false);
-            setLeaveSheetOpen(false);
-            setPendingLeaveAction(null);
+            closeSheet();
         };
         window.addEventListener("keydown", onEscape);
         return () => window.removeEventListener("keydown", onEscape);
-    }, [spacesSheetOpen, customSheetOpen, confirmSheetOpen, leaveSheetOpen]);
+    }, [activeSheet]);
 
     function applyPickedLocation(nextLat: number, nextLng: number, nextAddress?: string) {
         setLat(nextLat.toFixed(6));
@@ -815,8 +350,8 @@ export default function CreateListingPage() {
 
             applyPickedLocation(nextLat, nextLng, first.display_name);
             setAddressSearchMessage(`${matches.length} match${matches.length === 1 ? "" : "es"} found. Showing the closest result.`);
-        } catch (e: any) {
-            setAddressSearchMessage(e?.message || "Address search is unavailable right now.");
+        } catch (error: unknown) {
+            setAddressSearchMessage(readErrorMessage(error, "Address search is unavailable right now."));
         } finally {
             setAddressSearchBusy(false);
         }
@@ -836,7 +371,7 @@ export default function CreateListingPage() {
             setPendingSpacesChoice(String(spaces) as SpaceChoice);
             setPendingSpacesCustom("4");
         }
-        setSpacesSheetOpen(true);
+        setActiveSheet("spaces");
     }
 
     function applySpacesSheet() {
@@ -846,46 +381,87 @@ export default function CreateListingPage() {
                 : Number(pendingSpacesChoice);
 
         setCapacityTotal(String(selectedSpaces));
-        setSpacesSheetOpen(false);
+        closeSheet();
     }
 
-    function openCustomSheet() {
-        if (customSlots.length === 0) {
-            setCustomSlots([createSlot()]);
-        }
-        setCustomSheetOpen(true);
-    }
-
-    function updateCustomSlot(slotId: string, patch: Partial<Omit<AvailabilitySlot, "id">>) {
-        setCustomSlots((prev) => prev.map((slot) => (slot.id === slotId ? { ...slot, ...patch } : slot)));
-    }
-
-    function addCustomSlot() {
-        const last = customSlots[customSlots.length - 1];
-        setCustomSlots((prev) => [
-            ...prev,
-            createSlot({ dow: last?.dow ?? 1, start: last?.start ?? "09:00", end: last?.end ?? "17:00" }),
-        ]);
-    }
-
-    function removeCustomSlot(slotId: string) {
-        setCustomSlots((prev) => {
-            const next = prev.filter((slot) => slot.id !== slotId);
-            return next.length > 0 ? next : [createSlot()];
-        });
-    }
-
-    function applyCustomSheet() {
-        if (!areSlotsValid(customSlots)) {
-            setError("Each custom row needs a valid day and time range.");
+    function openCustomSheet(nextFrom = dateFrom, nextTo = dateTo) {
+        if (!nextFrom || !nextTo) {
+            setError("Pick start and end dates first.");
             return;
         }
+        setDraftSlotStart(availabilityWindows.at(-1)?.start ?? DEFAULT_SLOT_START);
+        setDraftSlotEnd(availabilityWindows.at(-1)?.end ?? DEFAULT_SLOT_END);
+        setSlotSheetError("");
+        setActiveSheet("custom");
         setError("");
-        setCustomSheetOpen(false);
+    }
+
+    function selectAvailabilityDate(ymd: string) {
+        const todayKey = toLocalDateInput(new Date());
+        if (ymd < todayKey) return;
+        setError("");
+        if (!dateFrom || (dateFrom && dateTo)) {
+            setDateFrom(ymd);
+            setDateTo("");
+            return;
+        }
+        if (ymd < dateFrom) {
+            setDateFrom(ymd);
+            return;
+        }
+        setDateTo(ymd);
+        openCustomSheet(dateFrom, ymd);
+    }
+
+    function shiftCalendarMonth(offset: number) {
+        setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
+    }
+
+    function removeAvailabilityWindow(windowId: string) {
+        setAvailabilityWindows((prev) => prev.filter((window) => window.id !== windowId));
+    }
+
+    function addAvailabilityWindow() {
+        if (!dateFrom || !dateTo) {
+            setSlotSheetError("Pick start and end dates first.");
+            return;
+        }
+        if (!isTime(draftSlotStart) || !isTime(draftSlotEnd)) {
+            setSlotSheetError("Choose valid start and end times.");
+            return;
+        }
+        const nextWindow = createAvailabilityWindow({
+            from: dateFrom,
+            to: dateTo,
+            start: draftSlotStart,
+            end: draftSlotEnd,
+        });
+        const issue = availabilityWindowIssue(nextWindow);
+        if (issue) {
+            setSlotSheetError(issue === "Each slot needs end time after start time." ? "Choose a valid start and end time." : issue);
+            return;
+        }
+
+        if (hasAvailabilityOverlap(availabilityWindows, nextWindow)) {
+            setSlotSheetError("This slot overlaps an existing slot. Change the date or time.");
+            return;
+        }
+
+        setAvailabilityWindows((prev) => [...prev, nextWindow]);
+        setDateFrom("");
+        setDateTo("");
+        setSlotSheetError("");
+        closeSheet();
+        setError("");
     }
 
     function openImagePicker() {
         imageInputRef.current?.click();
+    }
+
+    function closeSheet() {
+        setActiveSheet(null);
+        setSlotSheetError("");
     }
 
     function onImageFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -925,117 +501,90 @@ export default function CreateListingPage() {
         }, 4000);
     }
 
-    function buildAvailabilityPayload() {
-        const dateFields = dateFrom || dateTo ? { date_from: dateFrom || undefined, date_to: dateTo || undefined } : {};
+    const normalizedTitle = title.trim();
+    const normalizedDescription = description.trim();
+    const normalizedOwnerContactEmail = ownerContactEmail.trim();
+    const normalizedOwnerContactPhone = ownerContactPhone.trim();
+    const normalizedOwnerContactInfo = ownerContactInfo.trim();
+    const normalizedAddress = addressText.trim();
+    const setupCapacity = Math.max(0, Math.floor(Number(capacityTotal) || 0));
+    const priceNum = Number(price || 0);
+    const pointsNum = Number(pointsCost || 0);
+    const auctionStartNum = Number(auctionStartPrice || 0);
 
-        if (availabilityPreset === "always") {
-            return { type: "24_7", ...dateFields };
-        }
+    const capacityIssue = setupCapacity < 1 ? "Spaces must be at least 1." : "";
+    const titleIssue = normalizedTitle.length < 3 ? "Add a listing name with at least 3 characters." : "";
+    const descriptionIssue =
+        normalizedDescription.length > 0 && normalizedDescription.length < 5
+            ? "Description should be at least 5 characters, or leave it empty."
+            : "";
+    const pricingIssue =
+        mode !== "free" && !allowMoney && !allowPoints
+            ? "Enable at least one payment method."
+            : allowMoney && mode === "rent" && (!Number.isFinite(priceNum) || priceNum <= 0)
+                    ? "Rent listings need a valid price above 0."
+                    : allowMoney && mode === "auction" && (!Number.isFinite(auctionStartNum) || auctionStartNum < MIN_AUCTION_START_PRICE_GBP)
+                            ? "Auction start price must be at least GBP 0.10."
+                            : allowPoints && (!Number.isFinite(pointsNum) || pointsNum < MIN_POINTS_COST)
+                                ? "Points must be at least 1."
+                                : "";
 
-        if (availabilityPreset === "weekdays" || availabilityPreset === "weekends") {
-            return { type: "custom_weekly", rules: quickPresetRules(availabilityPreset), ...dateFields };
-        }
+    const availabilityPayloadResult = useMemo<{ payload: Record<string, any> | null; issue: string }>(() => {
+        const issue = validateAvailabilityWindows(availabilityWindows);
+        if (issue) return { payload: null, issue };
+        return { payload: toAvailabilityPayload(availabilityWindows), issue: "" };
+    }, [availabilityWindows]);
+    const availabilityIssue = availabilityPayloadResult.issue;
 
-        if (!areSlotsValid(customSlots)) {
-            throw new Error("Each custom row needs a valid day and time range.");
-        }
+    const locationIssue = !parsedCoords
+        ? "Set a map pin so drivers can find your listing."
+        : normalizedAddress.length < 5
+            ? "Add an address with at least 5 characters."
+            : "";
 
-        const rules = customSlots.map((slot) => ({ dow: Number(slot.dow), start: slot.start, end: slot.end }));
-        return { type: "custom_weekly", rules, ...dateFields };
-    }
+    const submitIssue = capacityIssue || titleIssue || descriptionIssue || pricingIssue || availabilityIssue || locationIssue;
+    const stepIssueByStep: Record<WizardStep, string> = {
+        1: capacityIssue,
+        2: titleIssue || descriptionIssue,
+        3: pricingIssue,
+        4: availabilityIssue,
+        5: locationIssue,
+        6: submitIssue,
+    };
+    const stepReady: Record<WizardStep, boolean> = {
+        1: !stepIssueByStep[1],
+        2: !stepIssueByStep[2],
+        3: !stepIssueByStep[3],
+        4: !stepIssueByStep[4],
+        5: !stepIssueByStep[5],
+        6: !stepIssueByStep[6],
+    };
+    const publishReady = stepReady[6];
 
-    function buildSubmitPayload() {
-        const coords = parseCoordinates(lat, lng);
-        const normalizedTitle = title.trim();
-        const normalizedDescription = description.trim();
-        const normalizedAddress = addressText.trim();
-
-        const priceNum = Number(price || 0);
-        const pointsNum = Number(pointsCost || 0);
-        const auctionStartNum = Number(auctionStartPrice || 0);
-        const capacityTotalNum = Math.floor(Number(capacityTotal || 1));
-
-        if (normalizedTitle.length < 3) {
-            setError("Listing name must be at least 3 characters.");
-            return null;
-        }
-
-        if (normalizedDescription.length > 0 && normalizedDescription.length < 5) {
-            setError("Description should be at least 5 characters, or leave it empty.");
-            return null;
-        }
-
-        if (!coords) {
-            setError("Pick a valid map point for latitude and longitude.");
-            return null;
-        }
-
-        if (normalizedAddress.length < 5) {
-            setError("Address must be at least 5 characters.");
-            return null;
-        }
-
-        if (!Number.isInteger(capacityTotalNum) || capacityTotalNum <= 0) {
-            setError("Spaces must be at least 1.");
-            return null;
-        }
-
-        if (mode === "rent" && (!Number.isFinite(priceNum) || priceNum <= 0)) {
-            setError("Rent listings need a price above 0.");
-            return null;
-        }
-
-        if (mode === "auction" && (!Number.isFinite(auctionStartNum) || auctionStartNum < MIN_AUCTION_START_PRICE_GBP)) {
-            setError("Auction start price must be at least GBP 0.10.");
-            return null;
-        }
-
-        if (allowPoints && (!Number.isFinite(pointsNum) || pointsNum < MIN_POINTS_COST)) {
-            setError("Points cost must be at least 1 when enabled.");
-            return null;
-        }
-
-        if (dateFrom && dateTo && dateFrom > dateTo) {
-            setError("Availability end date must be after start date.");
-            return null;
-        }
-
-        let availability;
-        try {
-            availability = buildAvailabilityPayload();
-        } catch (e: any) {
-            setError(e?.message || "Availability is invalid.");
-            return null;
-        }
-
-        const payload: Record<string, any> = {
-            title: normalizedTitle,
-            description: normalizedDescription || "No description provided.",
-            mode,
-            price_gbp: mode === "rent" ? priceNum : 0,
-            price_unit: priceUnit,
-            allow_points: mode === "free" ? false : allowPoints,
-            points_cost: mode === "free" ? 0 : allowPoints ? pointsNum : 0,
-            address_text: normalizedAddress,
-            lat: coords.lat,
-            lng: coords.lng,
-            image_url: imageUrl.trim() || null,
-            availability,
-            parking_type: "private",
-            capacity_total: capacityTotalNum,
-            capacity_available: capacityTotalNum,
-        };
-
-        if (mode === "auction") {
-            if (!dateFrom || !dateTo) {
-                setError("Auction listings need availability start and end dates.");
-                return null;
-            }
-            payload.auction_start_price_gbp = auctionStartNum;
-        }
-
-        return payload;
-    }
+    const submitPayload: Record<string, any> | null =
+        !submitIssue && parsedCoords && availabilityPayloadResult.payload
+            ? {
+                  title: normalizedTitle,
+                  description: normalizedDescription || "No description provided.",
+                  mode,
+                  price_gbp: mode === "rent" && allowMoney ? priceNum : 0,
+                  price_unit: priceUnit,
+                  allow_points: mode === "free" ? false : allowPoints,
+                  points_cost: mode === "free" ? 0 : allowPoints ? pointsNum : 0,
+                  address_text: normalizedAddress,
+                  lat: parsedCoords.lat,
+                  lng: parsedCoords.lng,
+                  image_url: imageUrl.trim() || null,
+                  owner_contact_email: normalizedOwnerContactEmail || null,
+                  owner_contact_phone: normalizedOwnerContactPhone || null,
+                  owner_contact_info: normalizedOwnerContactInfo || null,
+                  availability: availabilityPayloadResult.payload,
+                  parking_type: "private",
+                  capacity_total: setupCapacity,
+                  capacity_available: setupCapacity,
+                  ...(mode === "auction" ? { auction_start_price_gbp: allowMoney ? auctionStartNum : 0 } : {}),
+              }
+            : null;
 
     async function submitListing() {
         if (!token) {
@@ -1044,101 +593,44 @@ export default function CreateListingPage() {
         }
 
         setError("");
-
-        const payload = buildSubmitPayload();
-        if (!payload) return;
+        if (!submitPayload) {
+            setError(submitIssue || "Please review your listing details.");
+            return;
+        }
 
         setSaving(true);
         try {
             const response =
                 isEdit && editId
-                    ? await apiPatch<{ parking_spot: ParkingSpot }>(`/parking-spots/${editId}`, payload, token)
-                    : await apiPost<{ parking_spot: ParkingSpot }>("/parking-spots", payload, token);
+                    ? await apiPatch<{ parking_spot: ParkingSpot }>(`/parking-spots/${editId}`, submitPayload, token)
+                    : await apiPost<{ parking_spot: ParkingSpot }>("/parking-spots", submitPayload, token);
             const nextId = response.parking_spot?.id || editId;
-            setBaselineSignature(currentSignature);
-            setConfirmSheetOpen(false);
-            try {
-                window.localStorage.removeItem(DRAFT_STORAGE_KEY);
-            } catch {
-                // ignore storage errors
-            }
+            closeSheet();
             showPublishSuccess(nextId ? `/spots/${nextId}` : "/dashboard");
-        } catch (e: any) {
-            setError(e?.message || (isEdit ? "Failed to save listing." : "Failed to publish listing."));
+        } catch (error: unknown) {
+            setError(readErrorMessage(error, isEdit ? "Failed to save listing." : "Failed to publish listing."));
         } finally {
             setSaving(false);
         }
     }
 
-    const setupCapacity = Math.max(0, Math.floor(Number(capacityTotal) || 0));
-    const titleValid = title.trim().length >= 3;
-    const descriptionValid = description.trim().length === 0 || description.trim().length >= 5;
-    const capacityValid = setupCapacity >= 1;
-
-    const rentPriceValid = mode !== "rent" || Number(price) > 0;
-    const auctionPriceValid = mode !== "auction" || Number(auctionStartPrice) >= MIN_AUCTION_START_PRICE_GBP;
-    const pointsValid = !allowPoints || Number(pointsCost) >= MIN_POINTS_COST;
-    const pricingValid = rentPriceValid && auctionPriceValid && pointsValid;
-
-    const dateRangeValid = !dateFrom || !dateTo || dateFrom <= dateTo;
-    const customSlotsValid = availabilityPreset !== "custom" || areSlotsValid(customSlots);
-    const availabilityValid = dateRangeValid && customSlotsValid;
-
-    const addressValid = addressText.trim().length >= 5;
-    const hasCoordinates = Boolean(parsedCoords);
-    const locationValid = addressValid && hasCoordinates;
-    const publishReady = titleValid && descriptionValid && pricingValid && availabilityValid && locationValid;
-
-    const stepReady: Record<WizardStep, boolean> = {
-        1: capacityValid,
-        2: titleValid && descriptionValid,
-        3: pricingValid,
-        4: availabilityValid,
-        5: locationValid,
-        6: publishReady,
-    };
-
-    const pricingIssue = !rentPriceValid
-        ? "Rent listings need a valid price above 0."
-        : !auctionPriceValid
-            ? "Auction start price must be at least GBP 0.10."
-            : !pointsValid
-                ? "Points cost must be at least 1."
-                : "";
-
-    const availabilityIssue = !dateRangeValid
-        ? "End date must be after start date."
-        : !customSlotsValid
-            ? "Each custom row needs a valid day and time range."
-            : "";
-
-    const stepHintByStep: Record<WizardStep, string> = {
-        1: "",
-        2: !titleValid
-            ? "Add a listing name with at least 3 characters."
-            : !descriptionValid
-                ? "Description should be at least 5 characters, or leave it empty."
-                : "",
-        3: pricingIssue,
-        4: availabilityIssue,
-        5: !addressValid ? "Add an address with at least 5 characters." : !hasCoordinates ? "Set a map pin so drivers can find your listing." : "",
-        6: "",
-    };
-    const stepHint = stepHintByStep[activeStep];
+    const stepHint = stepIssueByStep[activeStep];
 
     const currentStepReady = stepReady[activeStep];
 
     const priceSummary =
-        mode === "rent"
-            ? `GBP ${Number(price || 0).toFixed(2)} / ${priceUnit}`
-            : mode === "auction"
-                ? `Bid from GBP ${Number(auctionStartPrice || 0).toFixed(2)} / hour`
-                : "Free listing";
-    const customSummary = customSlots
-        .map((slot) => `${DAY_LABELS[slot.dow]} ${slot.start}-${slot.end}`)
-        .join(" | ");
-    const availabilitySummary =
-        availabilityPreset === "custom" ? customSummary || "Custom schedule not set" : availabilityLabel(availabilityPreset);
+        mode === "free"
+            ? "Free listing"
+            : allowMoney
+                ? mode === "rent"
+                    ? `GBP ${Number(price || 0).toFixed(2)} / ${priceUnit}`
+                    : `Bid from GBP ${Number(auctionStartPrice || 0).toFixed(2)} / ${priceUnit}`
+                : allowPoints
+                    ? `Points only / ${priceUnit}`
+                    : "No payment method";
+    const availabilitySummary = availabilityWindows.length
+        ? `${availabilityWindows.length} slot${availabilityWindows.length === 1 ? "" : "s"} configured`
+        : "No availability set";
     const confirmRows: Array<{ label: string; value: string }> = [
         { label: "Model", value: modeLabel(mode) },
         { label: "Spaces", value: `${setupCapacity || 1} ${setupCapacity === 1 ? "space" : "spaces"}` },
@@ -1146,12 +638,14 @@ export default function CreateListingPage() {
         { label: "Availability", value: availabilitySummary },
         { label: "Address", value: addressText.trim() || "Address not set" },
     ];
+    const draftStartLabel = dateFrom ? formatYmdLabel(dateFrom) : "selected start date";
+    const draftEndLabel = dateTo ? formatYmdLabel(dateTo) : "selected end date";
 
     function goNext() {
         if (!currentStepReady) return;
         if (activeStep === 6) {
             setError("");
-            setConfirmSheetOpen(true);
+            setActiveSheet("confirm");
             return;
         }
         if (activeStep >= STEP_COUNT) return;
@@ -1165,32 +659,9 @@ export default function CreateListingPage() {
         setActiveStep((prev) => Math.max(1, prev - 1) as WizardStep);
     }
 
-    function stayOnPage() {
-        setLeaveSheetOpen(false);
-        setPendingLeaveAction(null);
-    }
-
-    function leavePage() {
-        const action = pendingLeaveAction;
-        setLeaveSheetOpen(false);
-        setPendingLeaveAction(null);
-
-        if (!action) return;
-        if (action.kind === "link") {
-            navigate(action.path);
-            return;
-        }
-        if (action.kind === "reload") {
-            window.location.reload();
-            return;
-        }
-
-        suppressNextPopGuardRef.current = true;
-        window.history.back();
-    }
-
     function renderStepBody(step: FlowStep) {
-        if (step === 2) {
+        switch (step) {
+            case 2:
             return (
                 <div className="stack">
                     <label>
@@ -1202,7 +673,7 @@ export default function CreateListingPage() {
                             placeholder="Example: Secure driveway near station"
                         />
                         <div className="createFieldHint">Use a clear name drivers can scan quickly.</div>
-                        {!titleValid && title.length > 0 && <div className="createInlineError">Use at least 3 characters.</div>}
+                        {titleIssue && title.length > 0 && <div className="createInlineError">Use at least 3 characters.</div>}
                     </label>
 
                     <label>
@@ -1215,74 +686,76 @@ export default function CreateListingPage() {
                             placeholder="Access notes, gate details, size limits, and nearby landmarks."
                         />
                         <div className="createFieldHint">Leave blank, or write at least 5 characters.</div>
-                        {!descriptionValid && description.length > 0 && (
+                        {descriptionIssue && description.length > 0 && (
                             <div className="createInlineError">Use at least 5 characters, or leave blank.</div>
                         )}
                     </label>
+
+                    <label>
+                        <span>Owner email (private)</span>
+                        <input
+                            className="input"
+                            type="email"
+                            value={ownerContactEmail}
+                            onChange={(event) => setOwnerContactEmail(event.target.value)}
+                            placeholder="owner@email.com"
+                        />
+                        <div className="createFieldHint">Only shown to drivers after they book this spot.</div>
+                    </label>
+
+                    <label>
+                        <span>Owner phone (private)</span>
+                        <input
+                            className="input"
+                            value={ownerContactPhone}
+                            onChange={(event) => setOwnerContactPhone(event.target.value)}
+                            placeholder="07123 456789"
+                        />
+                        <div className="createFieldHint">Use a number drivers can call or message on booking day.</div>
+                    </label>
+
+                    <label>
+                        <span>Additional booking info (private)</span>
+                        <textarea
+                            className="input"
+                            rows={3}
+                            value={ownerContactInfo}
+                            onChange={(event) => setOwnerContactInfo(event.target.value)}
+                            placeholder="Gate code, where to park, or arrival notes."
+                        />
+                        <div className="createFieldHint">This is hidden from public listing pages.</div>
+                    </label>
                 </div>
             );
-        }
-
-        if (step === 3) {
+            case 3:
             return (
                 <div className="wizardSection wizardSection--pricing">
-                    <div className="wizardSectionHead">
+                    <div className="wizardLabelRow">
                         <div className="wizardSubTitle">Pricing setup</div>
                         <Tooltip
                             label="Pricing help"
-                            text="Rent uses fixed prices. Auction accepts driver offers that you approve."
+                            text="Hourly means pay per hour (best for maximizing profits). Daily means one booking per day. Weekly means one booking per week (least headache)."
                         />
                     </div>
 
-                    {mode === "rent" && (
-                        <div className="wizardPointsRow wizardPointsRow--pricing wizardPricingRow">
-                            <label className="wizardPricingAmount">
-                                <span>Price (GBP)</span>
-                                <input
-                                    className="input wizardPricingInput"
-                                    type="number"
-                                    min="0"
-                                    step="0.5"
-                                    value={price}
-                                    onChange={(event) => setPrice(event.target.value)}
-                                />
-                            </label>
-
-                            <label className="wizardPricingUnit">
-                                <span>Charge by</span>
-                                <div className="createSegmented wizardPricingSegmented" role="radiogroup" aria-label="Price unit">
-                                    {PRICE_UNIT_CHOICES.map((unit) => (
-                                        <button
-                                            key={unit.id}
-                                            type="button"
-                                            className={`createSegmentedBtn wizardPricingUnitBtn createSegmentedBtn--${unit.id}${priceUnit === unit.id ? " is-active" : ""}`}
-                                            aria-pressed={priceUnit === unit.id}
-                                            onClick={() => setPriceUnit(unit.id)}
-                                        >
-                                            {unit.label}
-                                        </button>
-                                    ))}
-                                </div>
-                            </label>
+                    {mode !== "free" && (
+                        <div className="wizardPricingBlock">
+                            <div className="wizardLabelRow wizardLabelRow--small">
+                                <span className="wizardPricingHead">Charging method</span>
+                            </div>
+                            <div className="wizardOptionGrid" role="radiogroup" aria-label="Price unit">
+                                {PRICE_UNIT_CHOICES.map((unit) => (
+                                    <PricingUnitOptionCard
+                                        key={unit.id}
+                                        id={unit.id}
+                                        label={unit.label}
+                                        selected={priceUnit === unit.id}
+                                        onSelect={setPriceUnit}
+                                    />
+                                ))}
+                            </div>
                         </div>
                     )}
-
-                    {mode === "auction" && (
-                        <label>
-                            <span>Starting bid per hour (GBP)</span>
-                            <input
-                                className="input"
-                                type="number"
-                                min="0.1"
-                                step="0.1"
-                                value={auctionStartPrice}
-                                onChange={(event) => setAuctionStartPrice(event.target.value)}
-                            />
-                            <div className="createFieldHint">Auction closes when the listing end date is reached.</div>
-                        </label>
-                    )}
-
-                    {mode === "free" && <div className="wizardInlineText">Free listing selected, so no money price is required.</div>}
 
                     <div className="wizardPointsRow wizardPointsRow--points">
                         <label className={`createSwitch${mode === "free" ? " is-disabled" : ""}`}>
@@ -1298,7 +771,7 @@ export default function CreateListingPage() {
 
                         {allowPoints && mode !== "free" && (
                             <label className="wizardPointsInput">
-                                <span>Points cost</span>
+                                <span>Points per {priceUnit}</span>
                                 <input
                                     className="input"
                                     type="number"
@@ -1311,67 +784,60 @@ export default function CreateListingPage() {
                         )}
                     </div>
 
-                    {pricingIssue && <div className="createInlineError">{pricingIssue}</div>}
-                </div>
-            );
-        }
-
-        if (step === 4) {
-            return (
-                <div className="wizardSection">
-                    <div className="wizardSectionHead">
-                        <div className="wizardSubTitle">Availability style</div>
-                        <Tooltip
-                            label="Availability help"
-                            text="Pick a quick preset or choose custom day and time windows."
-                        />
-                    </div>
-
-                    <div className="wizardQuickGrid">
-                        {AVAILABILITY_CHOICES.map((choice) => (
-                            <button
-                                key={choice.id}
-                                type="button"
-                                className={`wizardQuickCard wizardQuickCard--${choice.tone}${availabilityPreset === choice.id ? " is-active" : ""}`}
-                                onClick={() => setAvailabilityPreset(choice.id)}
-                                aria-pressed={availabilityPreset === choice.id}
-                            >
-                                <span className="wizardQuickTitle">{choice.title}</span>
-                                <span className="wizardQuickCopy">{choice.copy}</span>
-                            </button>
-                        ))}
-                    </div>
-
-                    <div className="wizardFieldGrid">
-                        <label>
-                            <span>Start date</span>
-                            <input className="input" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-                        </label>
-
-                        <label>
-                            <span>End date</span>
-                            <input className="input" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
-                        </label>
-                    </div>
-
-                    {availabilityPreset === "custom" && (
-                        <div className="wizardInlineRow">
-                            <div>
-                                <div className="wizardInlineTitle">Custom schedule</div>
-                                <div className="wizardInlineValue">{customSummary || "No custom slots set yet"}</div>
-                            </div>
-                            <button type="button" className="btn" onClick={openCustomSheet}>
-                                Edit custom times
-                            </button>
+                    {mode !== "free" && (
+                        <div className="wizardPointsRow wizardPointsRow--money">
+                            <label className="createSwitch">
+                                <input
+                                    type="checkbox"
+                                    checked={allowMoney}
+                                    onChange={(event) => setAllowMoney(event.target.checked)}
+                                />
+                                <span className="createSwitchTrack" aria-hidden="true" />
+                                <span className="createSwitchLabel">Allow money payment</span>
+                            </label>
+                            {allowMoney && (
+                                <label className="wizardPointsInput wizardPointsInput--money">
+                                    <span>{mode === "auction" ? `Starting bid per ${priceUnit} (\u00A3)` : `Price per ${priceUnit} (\u00A3)`}</span>
+                                    <div className="wizardMoneyInput">
+                                        <input
+                                            className="input wizardMoneyInputField"
+                                            type="number"
+                                            min={mode === "auction" ? "0.1" : "0"}
+                                            step={mode === "auction" ? "0.1" : "0.5"}
+                                            value={mode === "auction" ? auctionStartPrice : price}
+                                            onChange={(event) => {
+                                                if (mode === "auction") {
+                                                    setAuctionStartPrice(event.target.value);
+                                                    return;
+                                                }
+                                                setPrice(event.target.value);
+                                            }}
+                                        />
+                                    </div>
+                                </label>
+                            )}
                         </div>
                     )}
 
-                    {availabilityIssue && <div className="createInlineError">{availabilityIssue}</div>}
+                    {mode === "free" && <div className="wizardInlineText">Free listing selected, so no money price is required.</div>}
+
+                    {pricingIssue && <div className="createInlineError">{pricingIssue}</div>}
                 </div>
             );
-        }
-
-        if (step === 5) {
+            case 4:
+            return (
+                <AvailabilityCalendarSection
+                    month={calendarMonth}
+                    dateFrom={dateFrom}
+                    dateTo={dateTo}
+                    windows={availabilityWindows}
+                    issue={availabilityIssue}
+                    onSelectDate={selectAvailabilityDate}
+                    onShiftMonth={shiftCalendarMonth}
+                    onRemoveWindow={removeAvailabilityWindow}
+                />
+            );
+            case 5:
             return (
                 <>
                     <div className="addressLookupWrap">
@@ -1409,25 +875,20 @@ export default function CreateListingPage() {
                     </div>
 
                     <div className="mapWrap mapWrap--pin wizardMap">
-                        <div className="leafletShell">
-                            <MapContainer key={`${mapCenter[0]}-${mapCenter[1]}`} center={mapCenter} zoom={13} className="leafletMap">
-                                <TileLayer
-                                    attribution="&copy; OpenStreetMap contributors"
-                                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                                />
-                                <MapPickerPin position={markerPosition} onPick={onMapPick} />
-                            </MapContainer>
-                        </div>
+                        <SpotsMap
+                            spots={[]}
+                            center={mapCenter}
+                            pickerPosition={parsedCoords}
+                            onMapPick={onMapPick}
+                        />
                     </div>
 
-                    {(!addressValid || !hasCoordinates) && (
+                    {locationIssue && (
                         <div className="createInlineError">Add a valid address and map pin before publishing.</div>
                     )}
                 </>
             );
-        }
-
-        if (step === 6) {
+            case 6:
             return (
                 <>
                     <input
@@ -1458,9 +919,9 @@ export default function CreateListingPage() {
                     )}
                 </>
             );
+            default:
+                return null;
         }
-
-        return null;
     }
 
     const actionHint = error || (!currentStepReady && stepHint ? stepHint : "");
@@ -1571,7 +1032,7 @@ export default function CreateListingPage() {
                 open={spacesSheetOpen}
                 title="Choose spaces"
                 subtitle="Select how many spaces drivers can book at once."
-                onClose={() => setSpacesSheetOpen(false)}
+                onClose={closeSheet}
             >
                 <div className="createSheetSpaceGrid">
                     {SPACE_CHOICES.map((choice) => (
@@ -1600,93 +1061,61 @@ export default function CreateListingPage() {
                     </label>
                 )}
 
-                <div className="createSheetActions">
-                    <button type="button" className="btn" onClick={() => setSpacesSheetOpen(false)}>
-                        Cancel
-                    </button>
-                    <button type="button" className="btn btn-primary" onClick={applySpacesSheet}>
-                        Apply spaces
-                    </button>
-                </div>
+                <SheetActions
+                    secondaryLabel="Cancel"
+                    onSecondary={closeSheet}
+                    primaryLabel="Apply spaces"
+                    onPrimary={applySpacesSheet}
+                />
             </WizardSheet>
 
             <WizardSheet
                 open={customSheetOpen}
-                title="Custom availability"
-                subtitle="Set day and time ranges for bookings."
-                onClose={() => setCustomSheetOpen(false)}
-                wide
+                title="Add slot"
+                subtitle="Set times for this date range."
+                onClose={closeSheet}
             >
-                <div className="stack">
-                    {customSlots.map((slot) => (
-                        <div className="customSlotCard" key={slot.id}>
-                            <div className="customSlotRow">
-                                <label>
-                                    <span>Day</span>
-                                    <select
-                                        className="input"
-                                        value={slot.dow}
-                                        onChange={(event) => updateCustomSlot(slot.id, { dow: Number(event.target.value) })}
-                                    >
-                                        {DAY_LABELS.map((dayLabel, dayIndex) => (
-                                            <option key={`${slot.id}-${dayLabel}`} value={dayIndex}>
-                                                {dayLabel}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
-
-                                <label>
-                                    <span>Start</span>
-                                    <input
-                                        className="input"
-                                        type="time"
-                                        value={slot.start}
-                                        onChange={(event) => updateCustomSlot(slot.id, { start: event.target.value })}
-                                    />
-                                </label>
-
-                                <label>
-                                    <span>End</span>
-                                    <input
-                                        className="input"
-                                        type="time"
-                                        value={slot.end}
-                                        onChange={(event) => updateCustomSlot(slot.id, { end: event.target.value })}
-                                    />
-                                </label>
-
-                                <button
-                                    type="button"
-                                    className="btn btn-ghost"
-                                    onClick={() => removeCustomSlot(slot.id)}
-                                    disabled={customSlots.length === 1}
-                                >
-                                    Remove
-                                </button>
-                            </div>
+                <div className="slotSheet">
+                    <div className="slotSheetSummary">
+                        <div className="slotSheetSummaryLabel">Selected range</div>
+                        <div className="slotSheetSummaryValue">
+                            {draftStartLabel} {" -> "} {draftEndLabel}
                         </div>
-                    ))}
-
-                    <div className="rowInline">
-                        <button type="button" className="btn" onClick={addCustomSlot}>
-                            + Add day window
-                        </button>
                     </div>
 
-                    {!areSlotsValid(customSlots) && (
-                        <div className="createInlineError">Each row needs a valid day and time range.</div>
-                    )}
+                    <div className="slotSheetFields">
+                        <label className="slotSheetField">
+                            <span>Start time</span>
+                            <input
+                                className="input"
+                                type="time"
+                                step={900}
+                                value={draftSlotStart}
+                                onChange={(event) => setDraftSlotStart(event.target.value)}
+                            />
+                            <div className="slotSheetFieldNote">{draftStartLabel}</div>
+                        </label>
+                        <label className="slotSheetField">
+                            <span>End time</span>
+                            <input
+                                className="input"
+                                type="time"
+                                step={900}
+                                value={draftSlotEnd}
+                                onChange={(event) => setDraftSlotEnd(event.target.value)}
+                            />
+                            <div className="slotSheetFieldNote">{draftEndLabel}</div>
+                        </label>
+                    </div>
+                    {slotSheetError && <div className="createInlineError">{slotSheetError}</div>}
                 </div>
 
-                <div className="createSheetActions">
-                    <button type="button" className="btn" onClick={() => setCustomSheetOpen(false)}>
-                        Cancel
-                    </button>
-                    <button type="button" className="btn btn-primary" onClick={applyCustomSheet}>
-                        Apply custom times
-                    </button>
-                </div>
+                <SheetActions
+                    secondaryLabel="Cancel"
+                    onSecondary={closeSheet}
+                    primaryLabel="Add slot"
+                    onPrimary={addAvailabilityWindow}
+                />
             </WizardSheet>
 
             <WizardSheet
@@ -1694,7 +1123,7 @@ export default function CreateListingPage() {
                 title={isEdit ? "Confirm save" : "Confirm publish"}
                 subtitle="Review your final details and publish when ready."
                 onClose={() => {
-                    setConfirmSheetOpen(false);
+                    closeSheet();
                     setError("");
                 }}
             >
@@ -1712,46 +1141,17 @@ export default function CreateListingPage() {
 
                 {error && <div className="createInlineError">{error}</div>}
 
-                <div className="createSheetActions">
-                    <button
-                        type="button"
-                        className="btn"
-                        onClick={() => {
-                            setConfirmSheetOpen(false);
-                            setError("");
-                        }}
-                        disabled={saving}
-                    >
-                        Back
-                    </button>
-                    <button
-                        type="button"
-                        className="btn btn-primary"
-                        onClick={() => void submitListing()}
-                        disabled={!publishReady || saving}
-                    >
-                        {saving ? "Saving..." : isEdit ? "Save listing" : "Publish listing"}
-                    </button>
-                </div>
-            </WizardSheet>
-
-            <WizardSheet
-                open={leaveSheetOpen}
-                title="Leave create listing?"
-                subtitle="You have unsaved changes in this draft."
-                onClose={stayOnPage}
-            >
-                <div className="createFieldHint">
-                    {LEAVE_DRAFT_MESSAGE}
-                </div>
-                <div className="createSheetActions">
-                    <button type="button" className="btn" onClick={stayOnPage}>
-                        Stay here
-                    </button>
-                    <button type="button" className="btn btn-primary" onClick={leavePage}>
-                        Leave page
-                    </button>
-                </div>
+                <SheetActions
+                    secondaryLabel="Back"
+                    onSecondary={() => {
+                        closeSheet();
+                        setError("");
+                    }}
+                    secondaryDisabled={saving}
+                    primaryLabel={saving ? "Saving..." : isEdit ? "Save listing" : "Publish listing"}
+                    onPrimary={() => void submitListing()}
+                    primaryDisabled={!publishReady || saving}
+                />
             </WizardSheet>
 
             {publishingOverlayOpen && (
@@ -1766,4 +1166,3 @@ export default function CreateListingPage() {
         </div>
     );
 }
-

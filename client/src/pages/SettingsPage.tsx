@@ -1,29 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
-import { apiGet, apiPatch, apiPost } from "../lib/api";
-import { useAuth } from "../lib/auth";
-
-type Me = {
-    id: string;
-    email: string;
-    name: string;
-    points_balance: number;
-    stripe_account_id?: string | null;
-    stripe_charges_enabled?: boolean;
-    stripe_payouts_enabled?: boolean;
-    stripe_details_submitted?: boolean;
-};
-
-type ConnectStatus = {
-    account_id: string | null;
-    charges_enabled: boolean;
-    payouts_enabled: boolean;
-    details_submitted: boolean;
-    onboarding_complete: boolean;
-    dashboard_enabled: boolean;
-    demo_bypass: boolean;
-    demo_available: boolean;
-};
+import { apiGet, apiPatch } from "../lib/api";
+import { useAuth, useStripeConnect } from "../lib/auth";
+import type { User } from "../types";
 
 type SettingsPayload = {
     name?: string;
@@ -39,10 +18,9 @@ function isStrongPassword(password: string) {
 }
 
 export default function SettingsPage() {
-    const { token, user, logout } = useAuth();
+    const { token, logout } = useAuth();
     const navigate = useNavigate();
 
-    const [me, setMe] = useState<Me | null>(null);
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
     const [homeAddress, setHomeAddress] = useState("");
@@ -57,8 +35,13 @@ export default function SettingsPage() {
     const [err, setErr] = useState<string | null>(null);
     const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
     const [passwordErr, setPasswordErr] = useState<string | null>(null);
-    const [connect, setConnect] = useState<ConnectStatus | null>(null);
-    const [connectBusy, setConnectBusy] = useState(false);
+    const {
+        connect,
+        connectBusy,
+        refreshConnectStatus,
+        beginConnectOnboarding,
+        openConnectDashboard,
+    } = useStripeConnect(token);
 
     useEffect(() => {
         if (!token) return;
@@ -70,8 +53,7 @@ export default function SettingsPage() {
 
             try {
                 // 1) Load base user info
-                const r1 = await apiGet<{ user: Me }>("/me", token);
-                setMe(r1.user);
+                const r1 = await apiGet<{ user: User }>("/me", token);
 
                 // 2) Load settings (if your backend returns extra fields like home_address)
                 // If your backend doesn't have GET /settings, comment this out and just use /me.
@@ -90,19 +72,14 @@ export default function SettingsPage() {
                     setHomeAddress("");
                 }
 
-                try {
-                    const connectR = await apiGet<{ connect: ConnectStatus }>("/payments/connect/status", token);
-                    setConnect(connectR.connect);
-                } catch {
-                    setConnect(null);
-                }
+                await refreshConnectStatus(true);
             } catch (e: any) {
                 setErr(e.message || "Failed to load settings");
             } finally {
                 setLoading(false);
             }
         })();
-    }, [token]);
+    }, [token, refreshConnectStatus]);
 
     if (!token) {
         return <Navigate to="/" replace />;
@@ -123,55 +100,24 @@ export default function SettingsPage() {
                 ? "badge badge--green"
                 : "badge badge--warm";
 
-    async function refreshConnectStatus() {
-        if (!token) return;
-        try {
-            const r = await apiGet<{ connect: ConnectStatus }>("/payments/connect/status", token);
-            setConnect(r.connect);
-        } catch (e: any) {
-            setErr(e?.message || "Failed to load Stripe Connect status");
+    async function handleBeginConnectOnboarding(mode: "stripe" | "demo" = "stripe") {
+        setErr(null);
+        setMsg(null);
+        const result = await beginConnectOnboarding(mode);
+        if (!result.ok && result.error) {
+            setErr(result.error);
+            return;
+        }
+        if (result.ok && result.message) {
+            setMsg(result.message);
         }
     }
 
-    async function beginConnectOnboarding(mode: "stripe" | "demo" = "stripe") {
-        if (!token) return;
-        setConnectBusy(true);
+    async function handleOpenStripeDashboard() {
         setErr(null);
-        try {
-            const r = await apiPost<{ url?: string; connect: ConnectStatus }>(
-                "/payments/connect/onboard",
-                { mode },
-                token
-            );
-            setConnect(r.connect);
-            if (r.connect?.demo_bypass) {
-                setMsg("Demo payout mode is enabled. Stripe onboarding is skipped.");
-                return;
-            }
-            if (r.url) {
-                window.location.href = r.url;
-            } else {
-                setErr("Stripe onboarding link was missing.");
-            }
-        } catch (e: any) {
-            setErr(e?.message || "Unable to start Stripe onboarding");
-        } finally {
-            setConnectBusy(false);
-        }
-    }
-
-    async function openStripeDashboard() {
-        if (!token) return;
-        setConnectBusy(true);
-        setErr(null);
-        try {
-            const r = await apiPost<{ url: string; connect: ConnectStatus }>("/payments/connect/dashboard-link", {}, token);
-            setConnect(r.connect);
-            window.open(r.url, "_blank", "noopener,noreferrer");
-        } catch (e: any) {
-            setErr(e?.message || "Unable to open Stripe dashboard");
-        } finally {
-            setConnectBusy(false);
+        const result = await openConnectDashboard();
+        if (!result.ok) {
+            setErr(result.error);
         }
     }
 
@@ -189,7 +135,7 @@ export default function SettingsPage() {
 
             await apiPatch<{ user: any }>("/settings/profile", body, token ?? undefined);
 
-            setMsg("Saved ✅");
+            setMsg("Saved");
         } catch (e: any) {
             setErr(e.message || "Save failed");
         } finally {
@@ -251,7 +197,6 @@ export default function SettingsPage() {
         }
     }
 
-
     return (
         <div className="container settingsPage">
             <div className="pageHeader">
@@ -260,7 +205,6 @@ export default function SettingsPage() {
                 <div className="heroSub muted">Update your profile and preferences.</div>
             </div>
 
-            {loading && <div className="card formSection">Loading…</div>}
             {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
             {msg && <div className="card formSection settingsSavedNotice">{msg}</div>}
 
@@ -388,7 +332,6 @@ export default function SettingsPage() {
 
                     <div className="settingsStack">
 
-
                         <div className="card formSection settingsPanel settingsPanel--payouts">
                             <div className="sectionHeader sectionHeader--payments">
                                 <div className="sectionHeaderTitle">
@@ -429,7 +372,7 @@ export default function SettingsPage() {
                             <div className="rowInline">
                                 <button
                                     className="btn btn-primary"
-                                    onClick={() => beginConnectOnboarding("stripe")}
+                                    onClick={() => handleBeginConnectOnboarding("stripe")}
                                     disabled={connectBusy}
                                 >
                                     {connectBusy
@@ -445,7 +388,7 @@ export default function SettingsPage() {
                                 {connect?.demo_available && !connect?.demo_bypass && !connect?.account_id && (
                                     <button
                                         className="btn"
-                                        onClick={() => beginConnectOnboarding("demo")}
+                                        onClick={() => handleBeginConnectOnboarding("demo")}
                                         disabled={connectBusy}
                                     >
                                         Use demo payouts
@@ -453,12 +396,11 @@ export default function SettingsPage() {
                                 )}
                                 <button
                                     className="btn"
-                                    onClick={openStripeDashboard}
+                                    onClick={handleOpenStripeDashboard}
                                     disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}
                                 >
                                     Open Stripe dashboard
                                 </button>
-
 
                             </div>
                         </div>

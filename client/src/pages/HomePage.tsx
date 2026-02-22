@@ -4,28 +4,24 @@ import { Link } from "react-router-dom";
 import SpotsMap from "../components/SpotsMap";
 import { apiGet } from "../lib/api";
 import type { ParkingSpot } from "../types";
+import { capitalizeLabel, toFiniteNumber } from "./pagesShared";
 
 type SortMode = "distance" | "price_low" | "price_high";
 type ModeFilter = Record<ParkingSpot["mode"], boolean>;
 
 const LONDON = { lat: 51.5074, lng: -0.1278 };
-const HOME_HERO_BACKGROUND_URL = new URL("../assets/loading (2).json", import.meta.url).href;
+const HOME_HERO_BACKGROUND_URL = new URL("../assets/loading_hero.json", import.meta.url).href;
 const HOME_HERO_CITY_URL = new URL("../assets/city.json", import.meta.url).href;
-
-function toNumber(value: unknown) {
-    const n = Number(value ?? 0);
-    return Number.isFinite(n) ? n : 0;
-}
 
 function priceValue(spot: ParkingSpot) {
     if (spot.mode === "free") return 0;
-    return Math.max(0, toNumber(spot.price_gbp));
+    return Math.max(0, toFiniteNumber(spot.price_gbp));
 }
 
 function priceLabel(spot: ParkingSpot) {
     const price = priceValue(spot);
     const unit = String(spot.price_unit ?? "hour");
-    const points = Math.max(0, toNumber(spot.points_cost));
+    const points = Math.max(0, toFiniteNumber(spot.points_cost));
     const pointsText = Number.isInteger(points) ? points.toFixed(0) : points.toFixed(1);
     const pointsLabel = spot.allow_points && points > 0 ? `${pointsText} pts` : null;
     let main = "";
@@ -39,10 +35,6 @@ function priceLabel(spot: ParkingSpot) {
     }
 
     return { main, pointsLabel };
-}
-
-function modeLabel(mode: ParkingSpot["mode"]) {
-    return mode.charAt(0).toUpperCase() + mode.slice(1);
 }
 
 function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
@@ -327,7 +319,7 @@ export default function HomePage() {
                                     className={`mode-toggle-btn${modeFilter[mode] ? " is-active" : ""}`}
                                     onClick={() => toggleMode(mode)}
                                 >
-                                    {modeLabel(mode)}
+                                    {capitalizeLabel(mode)}
                                 </button>
                             ))}
                         </div>
@@ -388,13 +380,11 @@ export default function HomePage() {
                                         </span>
                                     </div>
 
-                                    <p className="spot-copy">
-                                        {spot.description || "Quick access and clear arrival details."}
-                                    </p>
+                                    <div className="spot-divider" aria-hidden="true" />
 
                                     <div className="spot-foot">
                                         <div className="spot-meta">
-                                            <span className="badge">{modeLabel(spot.mode)}</span>
+                                            <span className="badge">{capitalizeLabel(spot.mode)}</span>
                                             <span className="badge">{distKm.toFixed(1)} km</span>
                                         </div>
 
@@ -428,9 +418,3 @@ export default function HomePage() {
         </div>
     );
 }
-
-
-
-
-
-

@@ -25,6 +25,9 @@ export type ParkingSpot = {
     lng: number;
 
     image_url: string | null;
+    owner_contact_email?: string | null;
+    owner_contact_phone?: string | null;
+    owner_contact_info?: string | null;
 
     // OLD fields (keep if your DB still has them)
     availability_start: string | null;
@@ -70,6 +73,9 @@ export type Booking = {
 
     total_price_gbp: number;
     total_points_cost?: number | null;
+    owner_contact_email?: string | null;
+    owner_contact_phone?: string | null;
+    owner_contact_info?: string | null;
 
     created_at: string;
 };

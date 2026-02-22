@@ -1,214 +1,176 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { apiGet, apiPatch, apiPost } from "../lib/api";
-import { useAuth } from "../lib/auth";
+import { useAuth, useStripeConnect } from "../lib/auth";
+import { capitalizeLabel, formatDateTimeLocal, toFiniteNumber } from "./pagesShared";
+import type { Booking as SharedBooking, ParkingSpot, RewardTransaction, User } from "../types";
 
-type Me = {
-    id: string;
-    email: string;
-    name: string;
-    points_balance: number;
-    stripe_account_id?: string | null;
-    stripe_charges_enabled?: boolean;
-    stripe_payouts_enabled?: boolean;
-    stripe_details_submitted?: boolean;
-};
-
-type Booking = {
-    id: string;
-    parking_spot_id: string;
-    driver_user_id: string;
-    owner_user_id: string;
-    status: "pending" | "confirmed" | "cancelled";
-    pay_method: "money" | "points";
-    total_price_gbp: any;
-    total_points: number | null;
-    start_time: string;
-    end_time: string;
-    created_at: string;
-    spot_mode?: "free" | "rent" | "auction";
-};
-
-type ParkingSpot = {
-    id: string;
-    owner_user_id: string;
-    title: string;
-    address_text: string;
-    mode: string;
-    price_gbp: any;
-    image_url?: string | null;
-    is_active?: boolean;
-    created_at?: string;
-    auction_start_price_gbp?: number | null;
-    auction_highest_pending_gbp?: number | null;
-    auction_sold_out?: boolean;
-};
-
-type RewardTx = {
-    id: string;
-    user_id: string;
-    type: "earn" | "spend";
-    amount: number;
-    reason: string;
-    created_at: string;
-};
-
-type Payment = {
-    id: string;
-    booking_id: string;
-    provider: string;
-    status: string;
-    direction?: "incoming" | "outgoing";
-    amount_gbp: any;
-    created_at: string;
-    start_time: string;
-    end_time: string;
-    spot_title: string;
-    spot_address: string;
-};
-
-type AuctionBid = {
-    id: string;
-    parking_spot_id: string;
-    amount_gbp: any;
-    amount_points?: number | null;
-    pay_method?: "money" | "points";
-    status: string;
-    created_at: string;
-    start_time?: string;
-    end_time?: string;
-    bidder_name?: string;
-    bidder_email?: string;
-    spot_title?: string;
-};
-
-type MyAuctionBid = {
-    id: string;
-    parking_spot_id: string;
-    amount_gbp: any;
-    amount_points?: number | null;
-    pay_method?: "money" | "points";
-    status: string;
-    created_at: string;
-    start_time?: string;
-    end_time?: string;
-    spot_title?: string;
-};
-
-type ConnectStatus = {
-    account_id: string | null;
-    charges_enabled: boolean;
-    payouts_enabled: boolean;
-    details_submitted: boolean;
-    onboarding_complete: boolean;
-    dashboard_enabled: boolean;
-    demo_bypass: boolean;
-    demo_available: boolean;
-};
-
+type Me = User;
+type Booking = SharedBooking & { owner_user_id: string; total_points: number | null; spot_mode?: "free" | "rent" | "auction" };
+type RewardTx = RewardTransaction;
 type DashboardSection = "manageBookings" | "manageListings" | "transactions";
+type SectionTone = "driver" | "owner" | "rewards" | "payments";
+type BadgeItem = { label: ReactNode; className?: string } | null | false | undefined;
+type SectionCardKey =
+    | "driverBookings"
+    | "driverPendingBids"
+    | "driverUpcoming"
+    | "ownerListings"
+    | "ownerConfirmed"
+    | "ownerPending"
+    | "ownerUpcoming"
+    | "txRewards"
+    | "txPayments"
+    | "txStripe";
+type AmountValue = number | string | null | undefined;
+type Payment = { id: string; booking_id: string; provider: string; status: string; direction?: "incoming" | "outgoing"; amount_gbp: AmountValue; created_at: string; start_time: string; end_time: string; spot_title: string; spot_address: string };
+type AuctionBid = { id: string; parking_spot_id: string; amount_gbp: AmountValue; amount_points?: number | null; pay_method?: "money" | "points"; status: string; created_at: string; start_time?: string; end_time?: string; bidder_name?: string; bidder_email?: string; spot_title?: string };
 
-function toMoney(x: any) {
-    const n = Number(x ?? 0);
-    return Number.isFinite(n) ? n : 0;
-}
+const POUND = String.fromCharCode(163);
+const NAV_SECTIONS: Array<{ key: DashboardSection; title: string; subtitle: string; tone: "driver" | "owner" | "payments" }> = [
+    { key: "manageBookings", title: "Manage bookings", subtitle: "Driver activity", tone: "driver" },
+    { key: "manageListings", title: "Manage listings", subtitle: "Owner activity", tone: "owner" },
+    { key: "transactions", title: "Transactions", subtitle: "Payments and rewards", tone: "payments" },
+];
 
-function formatModeLabel(mode: string) {
-    if (!mode) return "Unknown";
-    return mode.charAt(0).toUpperCase() + mode.slice(1);
-}
-
-function dt(s: string) {
-    // simple readable local time
-    try {
-        return new Date(s).toLocaleString();
-    } catch {
-        return s;
-    }
-}
-
-function shortAddress(raw: string | null | undefined, maxLen = 46) {
+const shortAddress = (raw: string | null | undefined, maxLen = 46) => {
     const address = String(raw ?? "").trim();
     if (!address) return "Address on file";
-
-    const parts = address
-        .split(",")
-        .map((p) => p.trim())
-        .filter(Boolean);
+    const parts = address.split(",").map((p) => p.trim()).filter(Boolean);
     if (parts.length >= 2) {
         const compact = `${parts[0]}, ${parts[1]}`;
         if (compact.length <= maxLen) return compact;
     }
-
-    if (address.length <= maxLen) return address;
-    return `${address.slice(0, Math.max(0, maxLen - 3)).trimEnd()}...`;
-}
+    return address.length <= maxLen ? address : `${address.slice(0, Math.max(0, maxLen - 3)).trimEnd()}...`;
+};
+const sortNewest = <T extends { created_at?: string }>(items: T[]) => [...items].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
+const readErrorMessage = (error: unknown, fallback: string) =>
+    error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string"
+        ? (error as { message: string }).message
+        : fallback;
 
 function bookingStatusView(status?: string) {
-    const s = String(status ?? "").toLowerCase();
-    if (s === "pending") {
-        return {
-            label: "Pending",
-            badgeClass: "badge badge--warm",
-            itemClass: "dashItem--status-pending",
-            rank: 0,
-        };
-    }
-    if (s === "confirmed" || s === "approved" || s === "accepted") {
-        return {
-            label: "Approved",
-            badgeClass: "badge badge--green",
-            itemClass: "dashItem--status-approved",
-            rank: 1,
-        };
-    }
-    if (s === "cancelled" || s === "rejected" || s === "declined") {
-        return {
-            label: "Rejected",
-            badgeClass: "badge badge--rose",
-            itemClass: "dashItem--status-rejected",
-            rank: 2,
-        };
-    }
-    return {
-        label: formatModeLabel(s || "unknown"),
-        badgeClass: "badge",
-        itemClass: "",
-        rank: 3,
-    };
+    const value = String(status ?? "").toLowerCase();
+    if (value === "pending") return { label: "Pending", badgeClass: "badge badge--warm" };
+    if (value === "confirmed" || value === "approved" || value === "accepted") return { label: "Approved", badgeClass: "badge badge--green" };
+    if (value === "cancelled" || value === "rejected" || value === "declined") return { label: "Rejected", badgeClass: "badge badge--rose" };
+    return { label: capitalizeLabel(value || "unknown"), badgeClass: "badge" };
 }
 
 function moneyFlowView(direction?: string) {
-    if (direction === "incoming") {
-        return {
-            label: "Earned / Incoming",
-            badgeClass: "badge badge--green",
-            amountClass: "dashAmount dashAmount--incoming",
-            sign: "+",
-            cardClass: "dashItem--money-incoming",
-        };
-    }
-    return {
-        label: "Spent / Outgoing",
-        badgeClass: "badge badge--rose",
-        amountClass: "dashAmount dashAmount--outgoing",
-        sign: "-",
-        cardClass: "dashItem--money-outgoing",
-    };
+    return direction === "incoming"
+        ? { label: "Earned / Incoming", badgeClass: "badge badge--green", amountClass: "dashAmount dashAmount--incoming", sign: "+", cardClass: "dashItem--money-incoming" }
+        : { label: "Spent / Outgoing", badgeClass: "badge badge--rose", amountClass: "dashAmount dashAmount--outgoing", sign: "-", cardClass: "dashItem--money-outgoing" };
 }
 
-const DEFAULT_SEEN_COUNTS = {
-    myBookings: 0,
-    myAuctionBids: 0,
-    driverUpcoming: 0,
-    myListings: 0,
-    ownerConfirmed: 0,
-    ownerUpcoming: 0,
-    ownerPending: 0,
-    rewards: 0,
-    payments: 0,
-    payouts: 0,
-};
+const renderBadges = (items: BadgeItem[]) =>
+    items
+        .filter((item): item is { label: ReactNode; className?: string } => !!item && item.label != null)
+        .map((item, idx) => (
+            <span key={idx} className={item.className ?? "badge"}>
+                {item.label}
+            </span>
+        ));
+
+function TimeRow({ label = "Time", start, end, value }: { label?: string; start?: string | null; end?: string | null; value?: string }) {
+    const text = value ?? (start && end ? `${formatDateTimeLocal(start)} -> ${formatDateTimeLocal(end)}` : "");
+    return text ? (
+        <div className="dashField">
+            <div className="dashLabel">{label}</div>
+            <div className="tiny muted">{text}</div>
+        </div>
+    ) : null;
+}
+
+function OwnerContactDetails({ email, phone, info }: { email?: string | null; phone?: string | null; info?: string | null }) {
+    const contactEmail = String(email ?? "").trim();
+    const contactPhone = String(phone ?? "").trim();
+    const contactInfo = String(info ?? "").trim();
+    if (!contactEmail && !contactPhone && !contactInfo) return null;
+    return (
+        <div className="dashField">
+            <div className="dashLabel">Owner contact</div>
+            {contactEmail && <div className="tiny muted">Email: {contactEmail}</div>}
+            {contactPhone && <div className="tiny muted">Phone: {contactPhone}</div>}
+            {contactInfo && <div className="tiny muted">{contactInfo}</div>}
+        </div>
+    );
+}
+
+function EmptyState({ text, linkTo, linkLabel }: { text: string; linkTo?: string; linkLabel?: string }) {
+    return (
+        <div className="muted">
+            {text}
+            {linkTo && linkLabel ? (
+                <>
+                    {" "}
+                    <Link to={linkTo}>{linkLabel}</Link>.
+                </>
+            ) : null}
+        </div>
+    );
+}
+
+function SectionCard({
+    title,
+    subtitle,
+    badge,
+    tone,
+    children,
+    style,
+    collapsed,
+    onToggle,
+}: {
+    title: string;
+    subtitle: string;
+    badge?: ReactNode;
+    tone: SectionTone;
+    children: ReactNode;
+    style?: React.CSSProperties;
+    collapsed?: boolean;
+    onToggle?: () => void;
+}) {
+    const isCollapsed = !!collapsed;
+    return (
+        <div className="card formSection" style={style}>
+            <button type="button" className={`sectionHeader sectionHeader--${tone} collapsibleHeader`} onClick={onToggle} disabled={!onToggle}>
+                <div className="sectionHeaderTitle">
+                    <span className="sectionDot" />
+                    <div className="h3">{title}</div>
+                </div>
+                {(badge || onToggle) && (
+                    <span className="sectionHeaderBadge rowInline" style={{ gap: 8 }}>
+                        {badge}
+                        {onToggle && <span className="badge">{isCollapsed ? "Show" : "Hide"}</span>}
+                    </span>
+                )}
+            </button>
+            <div className="sectionSub muted">{subtitle}</div>
+            {!isCollapsed && children}
+        </div>
+    );
+}
+
+function DashItemCard({ className, thumb, title, subtitle, amount, amountClassName, badges, fields, actions, footer }: { className?: string; thumb: ReactNode; title: ReactNode; subtitle?: ReactNode; amount?: ReactNode; amountClassName?: string; badges?: BadgeItem[]; fields?: ReactNode; actions?: ReactNode; footer?: ReactNode }) {
+    return (
+        <div className={`card dashItem ${className ?? ""}`.trim()}>
+            <div className="dashItemHeader">
+                {thumb}
+                <div className="dashItemText">
+                    <div className="dashItemTitle">{title}</div>
+                    {subtitle ? <div className="dashItemSubtitle">{subtitle}</div> : null}
+                </div>
+                {amount !== undefined && amount !== null ? <div className={`dashItemPrice ${amountClassName ?? ""}`.trim()}>{amount}</div> : null}
+            </div>
+            {badges?.length ? <div className="dashMetaRow">{renderBadges(badges)}</div> : null}
+            {fields}
+            {actions ? <div className="rowInline" style={{ marginTop: 8 }}>{actions}</div> : null}
+            {footer}
+        </div>
+    );
+}
 
 export default function DashboardPage() {
     const { token } = useAuth();
@@ -221,113 +183,45 @@ export default function DashboardPage() {
     const [rewards, setRewards] = useState<RewardTx[]>([]);
     const [payments, setPayments] = useState<Payment[]>([]);
     const [auctionBids, setAuctionBids] = useState<AuctionBid[]>([]);
-    const [myAuctionBids, setMyAuctionBids] = useState<MyAuctionBid[]>([]);
-    const [connect, setConnect] = useState<ConnectStatus | null>(null);
-    const [receiptLoadingId, setReceiptLoadingId] = useState<string | null>(null);
-    const [paymentReceiptErrors, setPaymentReceiptErrors] = useState<Record<string, string | null>>({});
+    const [myAuctionBids, setMyAuctionBids] = useState<AuctionBid[]>([]);
 
     const [loading, setLoading] = useState(true);
-    const [msg, setMsg] = useState<string | null>(null);
     const [err, setErr] = useState<string | null>(null);
+    const [msg, setMsg] = useState<string | null>(null);
     const [busyId, setBusyId] = useState<string | null>(null);
-    const [connectBusy, setConnectBusy] = useState(false);
-    const [seenCounts, setSeenCounts] = useState(DEFAULT_SEEN_COUNTS);
-    const [seenHydrated, setSeenHydrated] = useState(false);
+    const [receiptLoadingId, setReceiptLoadingId] = useState<string | null>(null);
+    const [paymentReceiptErrors, setPaymentReceiptErrors] = useState<Record<string, string | null>>({});
+    const {
+        connect,
+        connectBusy,
+        refreshConnectStatus,
+        beginConnectOnboarding,
+        openConnectDashboard,
+    } = useStripeConnect(token);
     const [activeSection, setActiveSection] = useState<DashboardSection>("manageBookings");
-    const [open, setOpen] = useState({
-        ownerConfirmed: false,
-        ownerPending: false,
-        payouts: false,
-        myBookings: false,
-        myListings: false,
-        myAuctionBids: false,
-        driverUpcoming: false,
-        ownerUpcoming: false,
-        payments: false,
-        rewards: false,
+    const [collapsedSections, setCollapsedSections] = useState<Record<SectionCardKey, boolean>>({
+        driverBookings: true,
+        driverPendingBids: true,
+        driverUpcoming: true,
+        ownerListings: true,
+        ownerConfirmed: true,
+        ownerPending: true,
+        ownerUpcoming: true,
+        txRewards: true,
+        txPayments: true,
+        txStripe: true,
     });
     const payoutsRef = useRef<HTMLDivElement | null>(null);
 
-    const isLoggedIn = !!token;
-    const seenCountsStorageKey = useMemo(
-        () => (token ? `parkingbuddies.dashboard.seen-counts.v2.${token}` : null),
-        [token]
-    );
+    const toggleSection = (key: SectionCardKey) => {
+        setCollapsedSections((prev) => ({ ...prev, [key]: !prev[key] }));
+    };
 
-    useEffect(() => {
-        setSeenHydrated(false);
-        if (!seenCountsStorageKey) {
-            setSeenCounts(DEFAULT_SEEN_COUNTS);
-            setSeenHydrated(true);
-            return;
-        }
-        try {
-            const raw = window.localStorage.getItem(seenCountsStorageKey);
-            if (!raw) {
-                setSeenCounts(DEFAULT_SEEN_COUNTS);
-                setSeenHydrated(true);
-                return;
-            }
-            const parsed = JSON.parse(raw) as Partial<typeof DEFAULT_SEEN_COUNTS>;
-            setSeenCounts({
-                ...DEFAULT_SEEN_COUNTS,
-                ...parsed,
-            });
-        } catch {
-            setSeenCounts(DEFAULT_SEEN_COUNTS);
-        } finally {
-            setSeenHydrated(true);
-        }
-    }, [seenCountsStorageKey]);
-
-    useEffect(() => {
-        if (!seenCountsStorageKey || !seenHydrated) return;
-        try {
-            window.localStorage.setItem(seenCountsStorageKey, JSON.stringify(seenCounts));
-        } catch {
-            // no-op if storage is unavailable
-        }
-    }, [seenCounts, seenCountsStorageKey, seenHydrated]);
-
-    function markSectionSeen(section: "manageBookings" | "manageListings" | "transactions") {
-        setSeenCounts((p) => {
-            if (section === "manageBookings") {
-                return {
-                    ...p,
-                    myBookings: Math.max(p.myBookings, myBookings.length),
-                    myAuctionBids: Math.max(p.myAuctionBids, myAuctionBids.length),
-                    driverUpcoming: Math.max(p.driverUpcoming, driverUpcoming.length),
-                };
-            }
-            if (section === "manageListings") {
-                return {
-                    ...p,
-                    myListings: Math.max(p.myListings, myListings.length),
-                    ownerConfirmed: Math.max(p.ownerConfirmed, confirmedOwnerBookings.length),
-                    ownerUpcoming: Math.max(p.ownerUpcoming, ownerUpcoming.length),
-                    ownerPending: Math.max(p.ownerPending, pendingOwnerCount),
-                };
-            }
-            return {
-                ...p,
-                rewards: Math.max(p.rewards, rewards.length),
-                payments: Math.max(p.payments, payments.length),
-                payouts: Math.max(p.payouts, payoutsSignal),
-            };
-        });
-    }
-
-    function showSection(section: DashboardSection) {
-        setActiveSection(section);
-        markSectionSeen(section);
-    }
-
-    async function loadAll() {
+    const loadAll = useCallback(async () => {
         if (!token) return;
         setLoading(true);
         setErr(null);
         setMsg(null);
-
         try {
             const [meRes, bookingsRes, ownerBookingsRes, rewardsRes, spotsRes, paymentsRes, bidsRes, myBidsRes] = await Promise.all([
                 apiGet<{ user: Me }>("/me", token),
@@ -337,9 +231,8 @@ export default function DashboardPage() {
                 apiGet<{ parking_spots: ParkingSpot[] }>("/parking-spots"),
                 apiGet<{ payments: Payment[] }>("/payments/me", token),
                 apiGet<{ bids: AuctionBid[] }>("/auctions/owner/bids", token),
-                apiGet<{ bids: MyAuctionBid[] }>("/auctions/me/pending", token),
+                apiGet<{ bids: AuctionBid[] }>("/auctions/me/pending", token),
             ]);
-
             setMe(meRes.user);
             setBookings(bookingsRes.bookings ?? []);
             setOwnerBookings(ownerBookingsRes.bookings ?? []);
@@ -348,321 +241,173 @@ export default function DashboardPage() {
             setPayments(paymentsRes.payments ?? []);
             setAuctionBids(bidsRes.bids ?? []);
             setMyAuctionBids(myBidsRes.bids ?? []);
-            try {
-                const connectRes = await apiGet<{ connect: ConnectStatus }>("/payments/connect/status", token);
-                setConnect(connectRes.connect ?? null);
-            } catch {
-                setConnect(null);
-            }
-        } catch (e: any) {
-            setErr(e.message || "Failed to load dashboard");
+            await refreshConnectStatus(true);
+        } catch (error: unknown) {
+            setErr(readErrorMessage(error, "Failed to load dashboard"));
         } finally {
             setLoading(false);
         }
-    }
+    }, [token, refreshConnectStatus]);
 
     useEffect(() => {
         if (!token) return;
-        loadAll();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [token]);
+        void loadAll();
+    }, [token, loadAll]);
 
     useEffect(() => {
         const tab = searchParams.get("tab");
         if (!tab) return;
         const tabToSection: Record<string, DashboardSection> = {
-            myBookings: "manageBookings",
-            myAuctionBids: "manageBookings",
-            driverUpcoming: "manageBookings",
-            myListings: "manageListings",
-            ownerConfirmed: "manageListings",
-            ownerPending: "manageListings",
-            ownerUpcoming: "manageListings",
-            rewards: "transactions",
-            payments: "transactions",
-            payouts: "transactions",
+            myBookings: "manageBookings", myAuctionBids: "manageBookings", driverUpcoming: "manageBookings",
+            myListings: "manageListings", ownerConfirmed: "manageListings", ownerPending: "manageListings", ownerUpcoming: "manageListings",
+            rewards: "transactions", payments: "transactions", payouts: "transactions",
         };
-        const nextSection = tabToSection[tab];
-        if (nextSection) {
-            setActiveSection(nextSection);
+        const section = tabToSection[tab];
+        if (!section) return;
+        setActiveSection(section);
+        if (tab === "payouts") {
+            expandAndScrollPayouts();
         }
-        setOpen((p) => ({
-            ...p,
-            myBookings: tab === "myBookings" ? true : p.myBookings,
-            myAuctionBids: tab === "myAuctionBids" ? true : p.myAuctionBids,
-            ownerPending: tab === "ownerPending" ? true : p.ownerPending,
-            ownerConfirmed: tab === "ownerConfirmed" ? true : p.ownerConfirmed,
-            driverUpcoming: tab === "driverUpcoming" ? true : p.driverUpcoming,
-            ownerUpcoming: tab === "ownerUpcoming" ? true : p.ownerUpcoming,
-            payouts: tab === "payouts" ? true : p.payouts,
-            myListings: tab === "myListings" ? true : p.myListings,
-            rewards: tab === "rewards" ? true : p.rewards,
-            payments: tab === "payments" ? true : p.payments,
-        }));
     }, [searchParams]);
 
-    const myListings = useMemo(() => {
-        if (!me) return [];
-        return spots.filter((s) => s.owner_user_id === me.id);
-    }, [spots, me]);
-
-    const spotById = useMemo(() => {
-        return new Map(spots.map((s) => [s.id, s]));
-    }, [spots]);
-
-    const spotByTitle = useMemo(() => {
-        return new Map(spots.map((s) => [s.title, s]));
-    }, [spots]);
-
-    const myBookings = useMemo(() => {
-        if (!me) return [];
-        // bookings/me should already be mine; we keep it as-is
-        return bookings;
-    }, [bookings, me]);
-
-    const pendingOwnerCount = useMemo(() => {
-        return auctionBids.filter((b) => String(b.status ?? "").toLowerCase() === "pending").length;
-    }, [auctionBids]);
-
-    const confirmedOwnerBookings = useMemo(() => {
-        return ownerBookings.filter((b) => b.status === "confirmed");
-    }, [ownerBookings]);
-
-    const connectLabel = connect?.demo_bypass
-        ? "Demo mode active"
-        : !connect?.account_id
-            ? "Not connected"
-            : connect.onboarding_complete
-                ? "Stripe Connected"
-                : "Onboarding incomplete";
-    const connectBadgeClass = connect?.demo_bypass
-        ? "badge badge--cool"
-        : !connect?.account_id
-            ? "badge badge--rose"
-            : connect.onboarding_complete
-                ? "badge badge--green"
-                : "badge badge--warm";
+    const myListings = useMemo(() => (me ? spots.filter((spot) => spot.owner_user_id === me.id) : []), [spots, me]);
+    const spotById = useMemo(() => new Map(spots.map((spot) => [spot.id, spot])), [spots]);
+    const sortedMyBookings = useMemo(() => sortNewest(bookings), [bookings]);
+    const sortedMyAuctionBids = useMemo(() => sortNewest(myAuctionBids), [myAuctionBids]);
+    const sortedMyListings = useMemo(() => sortNewest(myListings), [myListings]);
+    const sortedRewards = useMemo(() => sortNewest(rewards), [rewards]);
+    const pendingOwnerBids = useMemo(() => auctionBids.filter((bid) => String(bid.status ?? "").toLowerCase() === "pending"), [auctionBids]);
+    const confirmedOwnerBookings = useMemo(() => ownerBookings.filter((booking) => String(booking.status ?? "").toLowerCase() === "confirmed"), [ownerBookings]);
 
     const driverUpcoming = useMemo(() => {
         const now = Date.now();
-        return myBookings
-            .filter((b) => new Date(b.start_time).getTime() >= now)
-            .filter((b) => b.status !== "cancelled")
+        return bookings
+            .filter((booking) => new Date(booking.start_time).getTime() >= now)
+            .filter((booking) => String(booking.status ?? "").toLowerCase() !== "cancelled")
             .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
             .slice(0, 8);
-    }, [myBookings]);
+    }, [bookings]);
 
     const ownerUpcoming = useMemo(() => {
         const now = Date.now();
         return ownerBookings
-            .filter((b) => new Date(b.start_time).getTime() >= now && b.status === "confirmed")
+            .filter((booking) => new Date(booking.start_time).getTime() >= now)
+            .filter((booking) => String(booking.status ?? "").toLowerCase() === "confirmed")
             .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
             .slice(0, 8);
     }, [ownerBookings]);
 
-    const payoutsSignal = useMemo(() => {
-        if (!connect) return 0;
-        let score = 0;
-        if (connect.account_id) score += 1;
-        if (connect.onboarding_complete) score += 1;
-        if (connect.payouts_enabled) score += 1;
-        return score;
-    }, [connect]);
+    const totalEarned = useMemo(
+        () => ownerBookings.filter((booking) => booking.status === "confirmed" && booking.pay_method === "money").reduce((sum, booking) => sum + toFiniteNumber(booking.total_price_gbp), 0),
+        [ownerBookings]
+    );
 
-    useEffect(() => {
-        if (!open.myBookings) return;
-        setSeenCounts((p) => ({ ...p, myBookings: Math.max(p.myBookings, myBookings.length) }));
-    }, [open.myBookings, myBookings.length]);
+    const connectLabel = connect?.demo_bypass ? "Demo mode active" : !connect?.account_id ? "Not connected" : connect.onboarding_complete ? "Stripe Connected" : "Onboarding incomplete";
+    const connectBadgeClass = connect?.demo_bypass ? "badge badge--cool" : !connect?.account_id ? "badge badge--rose" : connect.onboarding_complete ? "badge badge--green" : "badge badge--warm";
 
-    useEffect(() => {
-        if (!open.myAuctionBids) return;
-        setSeenCounts((p) => ({ ...p, myAuctionBids: Math.max(p.myAuctionBids, myAuctionBids.length) }));
-    }, [open.myAuctionBids, myAuctionBids.length]);
-
-    useEffect(() => {
-        if (!open.driverUpcoming) return;
-        setSeenCounts((p) => ({ ...p, driverUpcoming: Math.max(p.driverUpcoming, driverUpcoming.length) }));
-    }, [open.driverUpcoming, driverUpcoming.length]);
-
-    useEffect(() => {
-        if (!open.myListings) return;
-        setSeenCounts((p) => ({ ...p, myListings: Math.max(p.myListings, myListings.length) }));
-    }, [open.myListings, myListings.length]);
-
-    useEffect(() => {
-        if (!open.ownerConfirmed) return;
-        setSeenCounts((p) => ({ ...p, ownerConfirmed: Math.max(p.ownerConfirmed, confirmedOwnerBookings.length) }));
-    }, [open.ownerConfirmed, confirmedOwnerBookings.length]);
-
-    useEffect(() => {
-        if (!open.ownerUpcoming) return;
-        setSeenCounts((p) => ({ ...p, ownerUpcoming: Math.max(p.ownerUpcoming, ownerUpcoming.length) }));
-    }, [open.ownerUpcoming, ownerUpcoming.length]);
-
-    useEffect(() => {
-        if (!open.ownerPending) return;
-        setSeenCounts((p) => ({ ...p, ownerPending: Math.max(p.ownerPending, pendingOwnerCount) }));
-    }, [open.ownerPending, pendingOwnerCount]);
-
-    useEffect(() => {
-        if (!open.rewards) return;
-        setSeenCounts((p) => ({ ...p, rewards: Math.max(p.rewards, rewards.length) }));
-    }, [open.rewards, rewards.length]);
-
-    useEffect(() => {
-        if (!open.payments) return;
-        setSeenCounts((p) => ({ ...p, payments: Math.max(p.payments, payments.length) }));
-    }, [open.payments, payments.length]);
-
-    useEffect(() => {
-        if (!open.payouts) return;
-        setSeenCounts((p) => ({ ...p, payouts: Math.max(p.payouts, payoutsSignal) }));
-    }, [open.payouts, payoutsSignal]);
-
-    const tabHasNew = {
-        myBookings: myBookings.length > seenCounts.myBookings,
-        myAuctionBids: myAuctionBids.length > seenCounts.myAuctionBids,
-        driverUpcoming: driverUpcoming.length > seenCounts.driverUpcoming,
-        myListings: myListings.length > seenCounts.myListings,
-        ownerConfirmed: confirmedOwnerBookings.length > seenCounts.ownerConfirmed,
-        ownerUpcoming: ownerUpcoming.length > seenCounts.ownerUpcoming,
-        ownerPending: pendingOwnerCount > seenCounts.ownerPending,
-        rewards: rewards.length > seenCounts.rewards,
-        payments: payments.length > seenCounts.payments,
-        payouts: payoutsSignal > seenCounts.payouts,
-    };
-
-    const sectionHasNew = {
-        manageBookings: tabHasNew.myBookings || tabHasNew.myAuctionBids || tabHasNew.driverUpcoming,
-        manageListings: tabHasNew.myListings || tabHasNew.ownerConfirmed || tabHasNew.ownerUpcoming || tabHasNew.ownerPending,
-        transactions: tabHasNew.rewards || tabHasNew.payments || tabHasNew.payouts,
-    };
-    const navSections: Array<{
-        key: DashboardSection;
-        title: string;
-        subtitle: string;
-        tone: "driver" | "owner" | "payments";
-    }> = [
-        { key: "manageBookings", title: "Manage bookings", subtitle: "Driver activity", tone: "driver" },
-        { key: "manageListings", title: "Manage listings", subtitle: "Owner activity", tone: "owner" },
-        { key: "transactions", title: "Transactions", subtitle: "Payments and rewards", tone: "payments" },
+    const headerStats = [
+        { label: "My bookings", value: String(bookings.length) },
+        { label: "Pending bids", value: String(pendingOwnerBids.length + myAuctionBids.length) },
+        { label: "My listings", value: String(myListings.length) },
+        { label: "Points", value: `${me?.points_balance ?? 0} pts` },
+        { label: "Total earned", value: `${POUND}${totalEarned.toFixed(2)}` },
     ];
+    const receiptDate = useMemo(() => new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date()), []);
 
-    async function cancelBooking(id: string) {
+    const renderThumb = (imageUrl: string | null | undefined, label: string) => {
+        const letter = (label || "P").slice(0, 1).toUpperCase();
+        return <div className="thumb">{imageUrl ? <img src={imageUrl} alt={label} /> : <div className="thumbFallback">{letter}</div>}</div>;
+    };
+
+    const renderList = <T,>(items: T[], emptyText: string, render: (item: T) => ReactNode, className = "dashItemGrid") =>
+        items.length ? <div className={className}>{items.map(render)}</div> : <EmptyState text={emptyText} />;
+    const viewListingAction = (spotId: string) => (
+        <Link to={`/spots/${spotId}`} className="btn">
+            View listing
+        </Link>
+    );
+    const receiptErrorFooter = (bookingId: string) =>
+        paymentReceiptErrors[bookingId] ? <div className="tiny muted" style={{ marginTop: 6 }}>{paymentReceiptErrors[bookingId]}</div> : null;
+    const resolveBookingSpot = (booking: Booking) => {
+        const spot = spotById.get(booking.parking_spot_id);
+        return {
+            spot,
+            title: spot?.title ?? "Parking spot",
+            address: shortAddress(spot?.address_text),
+        };
+    };
+
+    async function runBusyAction(id: string, successMessage: string, fallbackError: string, action: (authToken: string) => Promise<void>) {
         if (!token) return;
+        const authToken = token;
         setBusyId(id);
-        setMsg(null);
         setErr(null);
-
+        setMsg(null);
         try {
-            await apiPatch<{ booking: Booking }>(`/bookings/${id}/cancel`, {}, token);
-            setMsg("Booking cancelled.");
+            await action(authToken);
+            setMsg(successMessage);
             await loadAll();
-        } catch (e: any) {
-            setErr(e.message || "Cancel failed");
+        } catch (error: unknown) {
+            setErr(readErrorMessage(error, fallbackError));
         } finally {
             setBusyId(null);
         }
     }
 
-    if (!isLoggedIn) {
-        return <Navigate to="/" replace />;
+    async function cancelBooking(id: string) {
+        await runBusyAction(id, "Booking cancelled.", "Cancel failed", async (authToken) => {
+            await apiPatch<{ booking: Booking }>(`/bookings/${id}/cancel`, {}, authToken);
+        });
     }
 
     async function acceptBid(spotId: string, bidId: string) {
-        if (!token) return;
-        setBusyId(bidId);
-        setMsg(null);
-        setErr(null);
-        try {
-            await apiPost(`/auctions/${spotId}/accept`, { bid_id: bidId }, token);
-            setMsg("Bid accepted.");
-            await loadAll();
-        } catch (e: any) {
-            setErr(e.message || "Accept failed");
-        } finally {
-            setBusyId(null);
-        }
+        await runBusyAction(bidId, "Bid accepted.", "Accept failed", async (authToken) => {
+            await apiPost(`/auctions/${spotId}/accept`, { bid_id: bidId }, authToken);
+        });
     }
 
     async function rejectBid(spotId: string, bidId: string) {
-        if (!token) return;
-        setBusyId(bidId);
+        await runBusyAction(bidId, "Bid rejected.", "Reject failed", async (authToken) => {
+            await apiPost(`/auctions/${spotId}/reject`, { bid_id: bidId }, authToken);
+        });
+    }
+
+    async function handleRefreshConnectStatus() {
+        const result = await refreshConnectStatus();
+        if (!result.ok && result.error) {
+            setErr(result.error);
+        }
+    }
+
+    async function handleBeginConnectOnboarding(mode: "stripe" | "demo" = "stripe") {
+        setErr(null);
         setMsg(null);
-        setErr(null);
-        try {
-            await apiPost(`/auctions/${spotId}/reject`, { bid_id: bidId }, token);
-            setMsg("Bid rejected.");
-            await loadAll();
-        } catch (e: any) {
-            setErr(e.message || "Reject failed");
-        } finally {
-            setBusyId(null);
+        const result = await beginConnectOnboarding(mode);
+        if (!result.ok && result.error) {
+            setErr(result.error);
+            return;
+        }
+        if (result.ok && result.message) {
+            setMsg(result.message);
         }
     }
 
-    async function refreshConnectStatus() {
-        if (!token) return;
-        try {
-            const r = await apiGet<{ connect: ConnectStatus }>("/payments/connect/status", token);
-            setConnect(r.connect ?? null);
-        } catch (e: any) {
-            setErr(e?.message || "Failed to refresh Stripe status");
+    async function handleOpenConnectDashboard() {
+        setErr(null);
+        const result = await openConnectDashboard();
+        if (!result.ok) {
+            setErr(result.error);
         }
     }
 
-    async function beginConnectOnboarding(mode: "stripe" | "demo" = "stripe") {
-        if (!token) return;
-        setConnectBusy(true);
-        setErr(null);
-        try {
-            const r = await apiPost<{ url?: string; connect: ConnectStatus }>(
-                "/payments/connect/onboard",
-                { mode },
-                token
-            );
-            setConnect(r.connect ?? null);
-            if (r.connect?.demo_bypass) {
-                setMsg("Demo payout mode is enabled. Stripe onboarding is skipped.");
-                return;
-            }
-            if (r.url) {
-                window.location.href = r.url;
-            } else {
-                setErr("Stripe onboarding link was missing.");
-            }
-        } catch (e: any) {
-            setErr(e?.message || "Unable to start Stripe onboarding");
-        } finally {
-            setConnectBusy(false);
-        }
-    }
-
-    async function openConnectDashboard() {
-        if (!token) return;
-        setConnectBusy(true);
-        setErr(null);
-        try {
-            const r = await apiPost<{ url: string; connect: ConnectStatus }>("/payments/connect/dashboard-link", {}, token);
-            setConnect(r.connect ?? null);
-            window.open(r.url, "_blank", "noopener,noreferrer");
-        } catch (e: any) {
-            setErr(e?.message || "Unable to open Stripe dashboard");
-        } finally {
-            setConnectBusy(false);
-        }
+    function expandAndScrollPayouts() {
+        setCollapsedSections((prev) => ({ ...prev, txStripe: false }));
+        window.setTimeout(() => payoutsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
     }
 
     function focusStripePayoutsCard() {
         setActiveSection("transactions");
-        markSectionSeen("transactions");
-        setOpen((prev) => ({
-            ...prev,
-            payouts: true,
-        }));
-        window.setTimeout(() => {
-            payoutsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 80);
+        expandAndScrollPayouts();
     }
 
     async function handleTopStripeDashboard() {
@@ -670,7 +415,7 @@ export default function DashboardPage() {
             focusStripePayoutsCard();
             return;
         }
-        await openConnectDashboard();
+        await handleOpenConnectDashboard();
     }
 
     async function openPaymentReceipt(bookingId: string) {
@@ -678,57 +423,365 @@ export default function DashboardPage() {
         setPaymentReceiptErrors((prev) => ({ ...prev, [bookingId]: null }));
         setReceiptLoadingId(bookingId);
         try {
-            const receiptRes = await apiGet<{ receipt: { receipt_url: string | null } }>(
-                `/payments/booking/${bookingId}/receipt`,
-                token
-            );
-            const url = receiptRes.receipt?.receipt_url;
-            if (url) {
-                window.open(url, "_blank", "noopener,noreferrer");
-            } else {
-                setPaymentReceiptErrors((prev) => ({
-                    ...prev,
-                    [bookingId]: "Stripe receipt link is not available yet.",
-                }));
+            const response = await apiGet<{ receipt: { receipt_url: string | null } }>(`/payments/booking/${bookingId}/receipt`, token);
+            const url = response.receipt?.receipt_url;
+            if (!url) {
+                setPaymentReceiptErrors((prev) => ({ ...prev, [bookingId]: "Stripe receipt link is not available yet." }));
+                return;
             }
-        } catch (e: any) {
-            setPaymentReceiptErrors((prev) => ({
-                ...prev,
-                [bookingId]: e?.message || "Failed to load Stripe receipt.",
-            }));
+            window.open(url, "_blank", "noopener,noreferrer");
+        } catch (error: unknown) {
+            setPaymentReceiptErrors((prev) => ({ ...prev, [bookingId]: readErrorMessage(error, "Failed to load Stripe receipt.") }));
         } finally {
             setReceiptLoadingId((prev) => (prev === bookingId ? null : prev));
         }
     }
 
-    function renderThumb(imageUrl: string | null | undefined, label: string) {
-        const letter = (label || "P").slice(0, 1).toUpperCase();
-        return (
-            <div className="thumb">
-                {imageUrl ? (
-                    <img src={imageUrl} alt={label} />
-                ) : (
-                    <div className="thumbFallback">{letter}</div>
-                )}
+    const renderDriverBookings = () => (
+        <SectionCard
+            tone="driver"
+            title="My Bookings"
+            subtitle="Your own bookings as a driver."
+            badge={<span className="badge badge--cool">{bookings.length} bookings</span>}
+            collapsed={collapsedSections.driverBookings}
+            onToggle={() => toggleSection("driverBookings")}
+        >
+            {renderList(sortedMyBookings, "No bookings yet.", (booking) => {
+                const status = bookingStatusView(booking.status);
+                const { spot, title, address } = resolveBookingSpot(booking);
+                return (
+                    <DashItemCard
+                        key={booking.id}
+                        className="dashItem--driver"
+                        thumb={renderThumb(spot?.image_url, title)}
+                        title={title}
+                        subtitle={address}
+                        amount={booking.pay_method === "money" ? `-${POUND}${toFiniteNumber(booking.total_price_gbp).toFixed(2)}` : `-${booking.total_points ?? 0} pts`}
+                        amountClassName="dashAmount dashAmount--outgoing"
+                        badges={[{ label: status.label, className: status.badgeClass }, { label: capitalizeLabel(booking.pay_method) }]}
+                        fields={
+                            <>
+                                <TimeRow start={booking.start_time} end={booking.end_time} />
+                                <OwnerContactDetails
+                                    email={booking.owner_contact_email}
+                                    phone={booking.owner_contact_phone}
+                                    info={booking.owner_contact_info}
+                                />
+                            </>
+                        }
+                        actions={
+                            <>
+                                {booking.pay_method === "money" && (
+                                    <>
+                                        <button className="btn btn-primary" onClick={() => openPaymentReceipt(booking.id)} disabled={receiptLoadingId === booking.id}>
+                                            {receiptLoadingId === booking.id ? "Loading receipt..." : "Open Stripe receipt"}
+                                        </button>
+                                        <Link to={`/pay/${booking.id}`} className="btn">Booking confirmation</Link>
+                                    </>
+                                )}
+                                {booking.status === "pending" && <button onClick={() => cancelBooking(booking.id)} disabled={busyId === booking.id} className="btn">Cancel</button>}
+                            </>
+                        }
+                        footer={receiptErrorFooter(booking.id)}
+                    />
+                );
+            })}
+        </SectionCard>
+    );
+
+    const renderMyPendingBids = () => (
+        <SectionCard
+            tone="driver"
+            title="My Pending Bids"
+            subtitle="Pending bids waiting for owner approval."
+            badge={<span className="badge badge--cool">{myAuctionBids.length} pending</span>}
+            collapsed={collapsedSections.driverPendingBids}
+            onToggle={() => toggleSection("driverPendingBids")}
+        >
+            {renderList(sortedMyAuctionBids, "No pending bids.", (bid) => {
+                const isPoints = (bid.pay_method ?? "money") === "points";
+                return (
+                    <DashItemCard
+                        key={bid.id}
+                        className="dashItem--driver"
+                        thumb={renderThumb(undefined, bid.spot_title ?? "Auction listing")}
+                        title={bid.spot_title ?? "Auction listing"}
+                        subtitle={isPoints ? `${bid.amount_points ?? 0} pts` : `${POUND}${toFiniteNumber(bid.amount_gbp).toFixed(2)}`}
+                        badges={[{ label: capitalizeLabel(bid.status) }, { label: "Owner review" }]}
+                        fields={bid.start_time && bid.end_time ? <TimeRow start={bid.start_time} end={bid.end_time} /> : null}
+                        actions={<><Link to={`/bids/${bid.id}`} className="btn btn-primary">View local receipt</Link><Link to={`/spots/${bid.parking_spot_id}`} className="btn">View listing</Link></>}
+                    />
+                );
+            })}
+        </SectionCard>
+    );
+
+    const renderDriverUpcoming = () => (
+        <SectionCard
+            tone="driver"
+            title="Upcoming Schedule"
+            subtitle="Upcoming time slots you booked from other owners."
+            badge={<span className="badge badge--cool">{driverUpcoming.length} upcoming</span>}
+            collapsed={collapsedSections.driverUpcoming}
+            onToggle={() => toggleSection("driverUpcoming")}
+        >
+            {renderList(driverUpcoming, "No upcoming driver bookings.", (booking) => {
+                const { spot, title, address } = resolveBookingSpot(booking);
+                return (
+                    <DashItemCard
+                        key={booking.id}
+                        className="dashItem--driver"
+                        thumb={renderThumb(spot?.image_url, title)}
+                        title={title}
+                        subtitle={address}
+                        amount={booking.pay_method === "points" ? `-${booking.total_points ?? 0} pts` : `-${POUND}${toFiniteNumber(booking.total_price_gbp).toFixed(2)}`}
+                        amountClassName="dashAmount dashAmount--outgoing"
+                        badges={[{ label: "Upcoming", className: "badge badge--cool" }]}
+                        fields={
+                            <>
+                                <TimeRow start={booking.start_time} end={booking.end_time} />
+                                <OwnerContactDetails
+                                    email={booking.owner_contact_email}
+                                    phone={booking.owner_contact_phone}
+                                    info={booking.owner_contact_info}
+                                />
+                            </>
+                        }
+                        actions={viewListingAction(booking.parking_spot_id)}
+                    />
+                );
+            })}
+        </SectionCard>
+    );
+
+    const renderMyListings = () => (
+        <SectionCard
+            tone="owner"
+            title="My Listings"
+            subtitle="Parking spaces you've published."
+            badge={<span className="badge badge--warm">{myListings.length} listings</span>}
+            collapsed={collapsedSections.ownerListings}
+            onToggle={() => toggleSection("ownerListings")}
+        >
+            {myListings.length === 0 ? <EmptyState text="No listings yet." linkTo="/create-listing" linkLabel="Create one" /> : renderList(sortedMyListings, "No listings yet.", (spot) => {
+                const price = toFiniteNumber(spot.price_gbp);
+                const auctionStart = Number(spot.auction_start_price_gbp ?? 0);
+                const priceLabel = spot.mode === "auction" ? `Min bid ${POUND}${auctionStart.toFixed(2)}` : price > 0 ? `${POUND}${price.toFixed(2)}` : "Free";
+                return (
+                    <DashItemCard
+                        key={spot.id}
+                        className="dashItem--listings"
+                        thumb={renderThumb(spot.image_url, spot.title)}
+                        title={spot.title}
+                        subtitle={shortAddress(spot.address_text)}
+                        amount={priceLabel}
+                        badges={[{ label: capitalizeLabel(spot.mode) }, spot.is_active === false ? { label: "Inactive", className: "badge badge--warm" } : null]}
+                        actions={<><Link to={`/spots/${spot.id}`} className="btn">View listing</Link><Link to={`/create-listing?edit=${spot.id}`} className="btn btn-primary">Edit listing</Link></>}
+                    />
+                );
+            })}
+        </SectionCard>
+    );
+
+    const renderOwnerConfirmed = () => (
+        <SectionCard
+            tone="owner"
+            title="Booked Slots"
+            subtitle="Confirmed bookings made by other users on your spaces."
+            badge={<span className="badge badge--warm">{confirmedOwnerBookings.length} confirmed</span>}
+            collapsed={collapsedSections.ownerConfirmed}
+            onToggle={() => toggleSection("ownerConfirmed")}
+        >
+            {renderList(confirmedOwnerBookings, "No confirmed bookings yet.", (booking) => {
+                const { spot, title, address } = resolveBookingSpot(booking);
+                return (
+                    <DashItemCard
+                        key={booking.id}
+                        className="dashItem--owner"
+                        thumb={renderThumb(spot?.image_url, title)}
+                        title={title}
+                        subtitle={address}
+                        amount={booking.pay_method === "money" ? `+${POUND}${toFiniteNumber(booking.total_price_gbp).toFixed(2)}` : undefined}
+                        amountClassName="dashAmount dashAmount--incoming"
+                        badges={[{ label: "Confirmed", className: "badge badge--green" }, { label: capitalizeLabel(booking.pay_method) }]}
+                        fields={<TimeRow start={booking.start_time} end={booking.end_time} />}
+                        actions={viewListingAction(booking.parking_spot_id)}
+                    />
+                );
+            })}
+        </SectionCard>
+    );
+
+    const renderOwnerPendingBids = () => (
+        <SectionCard
+            tone="owner"
+            title="Pending Bids"
+            subtitle="Approve or reject pending offers on your listings."
+            badge={<span className="badge badge--warm">{pendingOwnerBids.length} pending</span>}
+            collapsed={collapsedSections.ownerPending}
+            onToggle={() => toggleSection("ownerPending")}
+        >
+            {renderList(pendingOwnerBids, "No bids yet.", (bid) => {
+                const isPoints = (bid.pay_method ?? "money") === "points";
+                return (
+                    <DashItemCard
+                        key={bid.id}
+                        className="dashItem--owner"
+                        thumb={renderThumb(undefined, bid.spot_title ?? "Auction listing")}
+                        title={bid.spot_title ?? "Auction listing"}
+                        subtitle={bid.bidder_name ?? bid.bidder_email ?? "Bidder"}
+                        amount={isPoints ? `${bid.amount_points ?? 0} pts` : `${POUND}${toFiniteNumber(bid.amount_gbp).toFixed(2)}`}
+                        badges={[{ label: "Action required", className: "badge badge--warm" }, { label: isPoints ? "Points" : "Money" }]}
+                        fields={bid.start_time && bid.end_time ? <TimeRow start={bid.start_time} end={bid.end_time} /> : null}
+                        actions={<><Link to={`/bids/${bid.id}`} className="btn">View local receipt</Link><button onClick={() => acceptBid(bid.parking_spot_id, bid.id)} disabled={busyId === bid.id} className="btn btn-primary">Accept</button><button onClick={() => rejectBid(bid.parking_spot_id, bid.id)} disabled={busyId === bid.id} className="btn">Reject</button></>}
+                    />
+                );
+            })}
+        </SectionCard>
+    );
+
+    const renderOwnerUpcoming = () => (
+        <SectionCard
+            tone="owner"
+            title="Owner Upcoming"
+            subtitle="Upcoming confirmed bookings on your own listings."
+            badge={<span className="badge badge--warm">{ownerUpcoming.length} upcoming</span>}
+            collapsed={collapsedSections.ownerUpcoming}
+            onToggle={() => toggleSection("ownerUpcoming")}
+        >
+            {renderList(ownerUpcoming, "No upcoming owner bookings.", (booking) => {
+                const { spot, title, address } = resolveBookingSpot(booking);
+                const isPoints = booking.pay_method === "points";
+                return (
+                    <DashItemCard
+                        key={booking.id}
+                        className="dashItem--owner"
+                        thumb={renderThumb(spot?.image_url, title)}
+                        title={title}
+                        subtitle={address}
+                        amount={isPoints ? `+${booking.total_points ?? 0} pts` : `+${POUND}${toFiniteNumber(booking.total_price_gbp).toFixed(2)}`}
+                        amountClassName="dashAmount dashAmount--incoming"
+                        badges={[{ label: "Upcoming", className: "badge badge--green" }]}
+                        fields={<TimeRow start={booking.start_time} end={booking.end_time} />}
+                        actions={viewListingAction(booking.parking_spot_id)}
+                    />
+                );
+            })}
+        </SectionCard>
+    );
+
+    const renderRewards = () => (
+        <SectionCard
+            tone="rewards"
+            title="Rewards History"
+            subtitle="Points earned and spent across the platform."
+            badge={<span className="badge badge--accent">Points</span>}
+            collapsed={collapsedSections.txRewards}
+            onToggle={() => toggleSection("txRewards")}
+        >
+            {renderList(sortedRewards, "No reward activity yet.", (reward) => {
+                const incoming = String(reward.type ?? "").toLowerCase() === "earn";
+                const flow = incoming ? "Earned" : "Spent";
+                return (
+                    <DashItemCard
+                        key={reward.id}
+                        className="dashItem--rewards"
+                        thumb={renderThumb(undefined, reward.reason)}
+                        title={reward.reason}
+                        subtitle={`${flow} points`}
+                        amount={`${incoming ? "+" : "-"}${reward.amount} pts`}
+                        amountClassName={incoming ? "dashAmount dashAmount--incoming" : "dashAmount dashAmount--outgoing"}
+                        badges={[{ label: flow, className: `badge ${incoming ? "badge--green" : "badge--rose"}` }]}
+                        fields={<TimeRow label="Date" value={formatDateTimeLocal(reward.created_at)} />}
+                    />
+                );
+            })}
+        </SectionCard>
+    );
+
+    const renderPayments = () => (
+        <SectionCard
+            tone="payments"
+            title="Transaction History"
+            subtitle="Incoming and outgoing payment records."
+            badge={<span className="badge badge--green">Total earned: {POUND}{totalEarned.toFixed(2)}</span>}
+            collapsed={collapsedSections.txPayments}
+            onToggle={() => toggleSection("txPayments")}
+        >
+            {renderList(payments, "No payments yet.", (payment) => {
+                const flow = moneyFlowView(payment.direction);
+                const title = payment.spot_title || "Parking spot";
+                return (
+                    <DashItemCard
+                        key={payment.id}
+                        className={`dashItem--payments ${flow.cardClass}`}
+                        thumb={renderThumb(undefined, title)}
+                        title={title}
+                        subtitle={shortAddress(payment.spot_address)}
+                        amount={`${flow.sign}${POUND}${toFiniteNumber(payment.amount_gbp).toFixed(2)}`}
+                        amountClassName={flow.amountClass}
+                        badges={[{ label: flow.label, className: flow.badgeClass }, { label: capitalizeLabel(payment.status) }]}
+                        fields={<><TimeRow label="Booking window" start={payment.start_time} end={payment.end_time} /><TimeRow label="Paid at" value={formatDateTimeLocal(payment.created_at)} /></>}
+                        actions={<>{payment.direction === "outgoing" && <><button className="btn btn-primary" onClick={() => openPaymentReceipt(payment.booking_id)} disabled={receiptLoadingId === payment.booking_id}>{receiptLoadingId === payment.booking_id ? "Loading receipt..." : "Open Stripe receipt"}</button><Link to={`/pay/${payment.booking_id}`} className="btn">Booking confirmation</Link></>}{payment.direction === "incoming" && <button className="btn btn-primary" onClick={handleOpenConnectDashboard} disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}>Open Stripe dashboard</button>}</>}
+                        footer={receiptErrorFooter(payment.booking_id)}
+                    />
+                );
+            })}
+        </SectionCard>
+    );
+
+    const renderStripeAccount = () => (
+        <SectionCard
+            tone="payments"
+            title="Stripe Account"
+            subtitle={connect?.demo_bypass ? "Demo payouts are simulated. No Stripe onboarding required." : "Connect Stripe to withdraw your earnings."}
+            badge={<span className={connectBadgeClass}>{connectLabel}</span>}
+            style={{ gridColumn: "1 / -1" }}
+            collapsed={collapsedSections.txStripe}
+            onToggle={() => toggleSection("txStripe")}
+        >
+            <div ref={payoutsRef} className="stack">
+                <div className="settingRow"><div className="settingRowTitle"><div className="tiny muted">Connected account</div><div className="spotInfoValue">{connect?.demo_bypass ? "Demo simulation" : connect?.account_id ?? "Not connected"}</div></div><span className={connect?.charges_enabled ? "badge badge--green" : "badge badge--warm"}>{connect?.charges_enabled ? "Charges enabled" : "Charges pending"}</span></div>
+                <div className="settingRow"><div className="settingRowTitle"><div className="tiny muted">Payout capability</div><div className="spotInfoValue">{connect?.payouts_enabled ? "Enabled" : "Pending"}</div></div><span className={connect?.details_submitted ? "badge badge--cool" : "badge badge--warm"}>{connect?.details_submitted ? "Details submitted" : "Details required"}</span></div>
+                <div className="rowInline">
+                    {connect?.demo_available && !connect?.demo_bypass && !connect?.account_id && <button className="btn" onClick={() => handleBeginConnectOnboarding("demo")} disabled={connectBusy}>Use demo payouts</button>}
+                    <button className="btn btn-primary" onClick={handleOpenConnectDashboard} disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}>Open Stripe dashboard</button>
+                    <button className="btn" onClick={() => handleBeginConnectOnboarding("stripe")} disabled={connectBusy}>{connectBusy ? "Opening..." : connect?.demo_bypass ? "Connect Stripe instead" : !connect?.account_id ? "Connect Stripe" : connect.onboarding_complete ? "Update Stripe details" : "Continue onboarding"}</button>
+                    <button className="btn" onClick={handleRefreshConnectStatus} disabled={connectBusy}>Refresh status</button>
+                </div>
             </div>
-        );
-    }
+        </SectionCard>
+    );
+
+    if (!token) return <Navigate to="/" replace />;
 
     return (
         <div className="container dashboardPage">
-            <div className="rowInline" style={{ alignItems: "flex-end", justifyContent: "space-between", gap: 20, marginTop: 10 }}>
-                <div className="pageHeader" style={{ textAlign: "left", marginBottom: 0 }}>
-                    <div className="heroKicker">DASHBOARD</div>
-                    <div className="heroTitle">Your activity</div>
-                    <div className="heroSub muted">Manage bookings, listings, and rewards.</div>
+            <div className="pageHeader dashboardHero">
+                <div className="dashboardHeroMain">
+                    <div className="dashboardHeroCopy">
+                        <div className="heroKicker">DASHBOARD</div>
+                        <div className="heroTitle">Your dashboard</div>
+                        <div className="heroSub muted">Bookings, listings, payouts, and points in one place.</div>
+                    </div>
+                    <div className="dashboardHeroReceipt" aria-label="Activity summary">
+                        <div className="dashboardHeroReceiptHead">
+                            <span className="dashboardHeroReceiptTitle">Activity receipt</span>
+                            <span className="dashboardHeroReceiptDate">{receiptDate}</span>
+                        </div>
+                        <div className="dashboardHeroReceiptBody">
+                            {headerStats.map((stat) => (
+                                <div key={stat.label} className="dashboardHeroReceiptRow">
+                                    <span>{stat.label}</span>
+                                    <strong>{stat.value}</strong>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 </div>
             </div>
             <div className="dashboardTopActions">
-                <button
-                    className="btn btn-primary"
-                    onClick={handleTopStripeDashboard}
-                    disabled={connectBusy}
-                >
+                <button className="btn btn-primary" onClick={handleTopStripeDashboard} disabled={connectBusy}>
                     {connectBusy ? "Opening..." : "Open Stripe dashboard"}
                 </button>
             </div>
@@ -738,772 +791,19 @@ export default function DashboardPage() {
 
             <div className="dashboardLayout" aria-busy={loading}>
                 <aside className="dashboardRail" aria-label="Dashboard sections">
-                    {navSections.map((section) => (
-                        <button
-                            key={section.key}
-                            type="button"
-                            className={`dashboardNavBtn dashboardNavBtn--${section.tone}${
-                                activeSection === section.key ? " is-active" : ""
-                            }`}
-                            onClick={() => showSection(section.key)}
-                        >
-                            <div className="dashboardNavText">
-                                <span className="dashboardNavTitle">{section.title}</span>
-                                <span className="dashboardNavSub">{section.subtitle}</span>
-                            </div>
-                            {sectionHasNew[section.key] && <span className="badge badge--cool">New</span>}
+                    {NAV_SECTIONS.map((section) => (
+                        <button key={section.key} type="button" className={`dashboardNavBtn dashboardNavBtn--${section.tone}${activeSection === section.key ? " is-active" : ""}`} onClick={() => setActiveSection(section.key)}>
+                            <div className="dashboardNavText"><span className="dashboardNavTitle">{section.title}</span><span className="dashboardNavSub">{section.subtitle}</span></div>
                         </button>
                     ))}
                 </aside>
 
                 <div className="dashboardPanel">
-            {activeSection === "manageBookings" && (
-            <div className="dashboardGroup dashboardGroup--bookings">
-                    <div className="dashGrid dashGrid--withinGroup">
-                <div className="card formSection">
-                    <button
-                        type="button"
-                        className="sectionHeader sectionHeader--driver collapsibleHeader"
-                        onClick={() => setOpen((p) => ({ ...p, myBookings: !p.myBookings }))}
-                    >
-                        <div className="sectionHeaderTitle">
-                            <span className="sectionDot" />
-                            <div className="h3">My Bookings</div>
-                        </div>
-                        <span className="badge badge--cool sectionHeaderBadge">{myBookings.length} Bookings</span>
-                    </button>
-                    <div className="sectionSub muted">
-                        Your own bookings as a driver.
-                    </div>
-
-                    {open.myBookings && (myBookings.length === 0 ? (
-                        <div className="muted">No bookings yet.</div>
-                    ) : (
-                        <div className="dashItemGrid">
-                            {myBookings
-                                .slice()
-                                .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
-                                .map((b) => {
-                                    const price = toMoney(b.total_price_gbp);
-                                    const spot = spotById.get(b.parking_spot_id);
-                                    const title = spot?.title ?? "Parking spot";
-                                    const address = shortAddress(spot?.address_text);
-                                    const statusView = bookingStatusView(b.status);
-                                    const amountLabel = b.pay_method === "money"
-                                        ? `-£${price.toFixed(2)}`
-                                        : `-${b.total_points ?? 0} pts`;
-                                    return (
-                                        <div key={b.id} className="card dashItem dashItem--driver">
-                                            <div className="dashItemHeader">
-                                                {renderThumb(spot?.image_url, title)}
-                                                <div className="dashItemText">
-                                                    <div className="dashItemTitle">{title}</div>
-                                                    <div className="dashItemSubtitle">{address}</div>
-                                                </div>
-                                                <div className="dashItemPrice dashAmount dashAmount--outgoing">
-                                                    {amountLabel}
-                                                </div>
-                                            </div>
-                                            <div className="dashMetaRow">
-                                                <span className={statusView.badgeClass}>{statusView.label}</span>
-                                                <span className="badge">{formatModeLabel(b.pay_method)}</span>
-                                                <span className="badge badge--cool">Other listing</span>
-                                            </div>
-                                            <div className="dashField">
-                                                <div className="dashLabel">Time</div>
-                                                <div className="tiny muted">{dt(b.start_time)} → {dt(b.end_time)}</div>
-                                            </div>
-
-                                            <div className="rowInline" style={{ marginTop: 8 }}>
-                                                {b.pay_method === "money" && (
-                                                    <>
-                                                        <button
-                                                            className="btn btn-primary"
-                                                            onClick={() => openPaymentReceipt(b.id)}
-                                                            disabled={receiptLoadingId === b.id}
-                                                        >
-                                                            {receiptLoadingId === b.id ? "Loading receipt…" : "Open Stripe receipt"}
-                                                        </button>
-                                                        <Link to={`/pay/${b.id}`} className="btn">
-                                                            Booking confirmation
-                                                        </Link>
-                                                    </>
-                                                )}
-
-                                                {b.status === "pending" && (
-                                                    <button
-                                                        onClick={() => cancelBooking(b.id)}
-                                                        disabled={busyId === b.id}
-                                                        className="btn"
-                                                    >
-                                                        Cancel
-                                                    </button>
-                                                )}
-                                            </div>
-                                            {paymentReceiptErrors[b.id] && (
-                                                <div className="tiny muted" style={{ marginTop: 6 }}>
-                                                    {paymentReceiptErrors[b.id]}
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                        </div>
-                    ))}
-                </div>
-
-                <div className="card formSection">
-                    <button
-                        type="button"
-                        className="sectionHeader sectionHeader--driver collapsibleHeader"
-                        onClick={() => setOpen((p) => ({ ...p, myAuctionBids: !p.myAuctionBids }))}
-                    >
-                        <div className="sectionHeaderTitle">
-                            <span className="sectionDot" />
-                            <div className="h3">My Pending Bids</div>
-                        </div>
-                        <span className="badge badge--cool sectionHeaderBadge">{myAuctionBids.length} Pending</span>
-                    </button>
-                    <div className="sectionSub muted">
-                        Pending bids waiting for owner approval.
-                    </div>
-
-                    {open.myAuctionBids && (myAuctionBids.length === 0 ? (
-                        <div className="muted">No pending bids.</div>
-                    ) : (
-                        <div className="dashItemGrid">
-                            {myAuctionBids
-                                .slice()
-                                .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
-                                .map((b) => {
-                                    const title = b.spot_title ?? "Auction listing";
-                                    const isPoints = (b.pay_method ?? "money") === "points";
-                                    return (
-                                        <div key={b.id} className="card dashItem dashItem--driver">
-                                            <div className="dashItemHeader">
-                                                {renderThumb(undefined, title)}
-                                                <div className="dashItemText">
-                                                    <div className="dashItemTitle">{title}</div>
-                                                    <div className="dashItemSubtitle">Pending owner approval</div>
-                                                </div>
-                                                <div className="dashItemPrice">
-                                                    {isPoints ? `${b.amount_points ?? 0} pts` : `£${toMoney(b.amount_gbp).toFixed(2)}`}
-                                                </div>
-                                            </div>
-                                            <div className="dashMetaRow">
-                                                <span className="badge">{b.status}</span>
-                                                <span className="badge">Auction Bid</span>
-                                                <span className="badge">{isPoints ? "Points" : "Money"}</span>
-                                            </div>
-                                            {(b.start_time && b.end_time) && (
-                                                <div className="dashField">
-                                                    <div className="dashLabel">Time</div>
-                                                    <div className="tiny muted">{dt(b.start_time)} → {dt(b.end_time)}</div>
-                                                </div>
-                                            )}
-                                            <div className="rowInline" style={{ marginTop: 8 }}>
-                                                <Link to={`/bids/${b.id}`} className="btn btn-primary">
-                                                    View local receipt
-                                                </Link>
-                                                <Link to={`/spots/${b.parking_spot_id}`} className="btn">
-                                                    View listing
-                                                </Link>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                        </div>
-                    ))}
-                </div>
-
-                <div className="card formSection">
-                    <button
-                        type="button"
-                        className="sectionHeader sectionHeader--driver collapsibleHeader"
-                        onClick={() => setOpen((p) => ({ ...p, driverUpcoming: !p.driverUpcoming }))}
-                    >
-                        <div className="sectionHeaderTitle">
-                            <span className="sectionDot" />
-                            <div className="h3">Upcoming Schedule</div>
-                        </div>
-                        <span className="badge badge--cool sectionHeaderBadge">{driverUpcoming.length} Upcoming</span>
-                    </button>
-                    <div className="sectionSub muted">
-                        Upcoming time slots you booked from other owners.
-                    </div>
-
-                    {open.driverUpcoming && (driverUpcoming.length === 0 ? (
-                        <div className="muted">No upcoming driver bookings.</div>
-                    ) : (
-                        <div className="dashItemGrid">
-                            {driverUpcoming.map((b) => {
-                                const spot = spotById.get(b.parking_spot_id);
-                                const title = spot?.title ?? "Parking spot";
-                                const address = shortAddress(spot?.address_text);
-                                const isPoints = b.pay_method === "points";
-                                const statusView = bookingStatusView(b.status);
-                                return (
-                                    <div key={b.id} className={`card dashItem dashItem--driver ${statusView.itemClass}`}>
-                                        <div className="dashItemHeader">
-                                            {renderThumb(spot?.image_url, title)}
-                                            <div className="dashItemText">
-                                                <div className="dashItemTitle">{title}</div>
-                                                <div className="dashItemSubtitle">{address}</div>
-                                            </div>
-                                            <div className="dashItemPrice dashAmount dashAmount--outgoing">
-                                                {isPoints
-                                                    ? `-${b.total_points ?? 0} pts`
-                                                    : `-£${toMoney(b.total_price_gbp).toFixed(2)}`}
-                                            </div>
-                                        </div>
-                                        <div className="dashMetaRow">
-                                            <span className={statusView.badgeClass}>{statusView.label}</span>
-                                            <span className="badge">{isPoints ? "Points" : "Money"}</span>
-                                            <span className="badge badge--cool">Driver booking</span>
-                                        </div>
-                                        <div className="dashField">
-                                            <div className="dashLabel" style={{marginTop:4}}>Time</div>
-                                            <div className="tiny muted">{dt(b.start_time)} → {dt(b.end_time)}</div>
-                                        </div>
-                                        <div className="rowInline" style={{ marginTop: 8 }}>
-                                            <Link to={`/spots/${b.parking_spot_id}`} className="btn">
-                                                View Listing
-                                            </Link>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    ))}
-                </div>
-                    </div>
-            </div>
-            )}
-
-            {activeSection === "manageListings" && (
-            <div className="dashboardGroup dashboardGroup--listings">
-                    <div className="dashGrid dashGrid--withinGroup">
-                        <div className="card formSection">
-                    <button
-                        type="button"
-                        className="sectionHeader sectionHeader--owner collapsibleHeader"
-                        onClick={() => setOpen((p) => ({ ...p, myListings: !p.myListings }))}
-                    >
-                        <div className="sectionHeaderTitle">
-                            <span className="sectionDot" />
-                            <div className="h3">My Listings</div>
-                        </div>
-                        <span className="badge badge--warm sectionHeaderBadge">{myListings.length} Listings</span>
-                    </button>
-                    <div className="sectionSub muted">
-                        Parking spaces you’ve published.
-                    </div>
-
-                    {open.myListings && (myListings.length === 0 ? (
-                        <div className="muted">
-                            No listings yet. <Link to="/create-listing">Create one</Link>.
-                        </div>
-                    ) : (
-                        <div className="dashItemGrid">
-                            {myListings
-                                .slice()
-                                .sort((a, b) => ((a.created_at ?? "") < (b.created_at ?? "") ? 1 : -1))
-                                .map((s) => {
-                                const price = toMoney(s.price_gbp);
-                                const auctionStart = Number(s.auction_start_price_gbp ?? 0);
-                                const priceLabel = s.mode === "auction"
-                                    ? `Min bid £${auctionStart.toFixed(2)}`
-                                    : price > 0 ? `£${price.toFixed(2)}` : "Free";
-                                return (
-                                    <div key={s.id} className={`card dashItem dashItem--listings dashItem--listings-${s.mode}`}>
-                                        <div className="dashItemHeader">
-                                            {renderThumb(s.image_url, s.title)}
-                                            <div className="dashItemText">
-                                                <div className="dashItemTitle">{s.title}</div>
-                                                <div className="dashItemSubtitle">{shortAddress(s.address_text)}</div>
-                                            </div>
-                                            <div className="dashItemPrice">
-                                                {priceLabel}
-                                            </div>
-                                        </div>
-                                        <div className="dashMetaRow">
-                                            <span className="badge badge--green">My listing</span>
-                                            <span className="badge">{formatModeLabel(s.mode)}</span>
-                                            {s.mode === "auction" && s.auction_sold_out && (
-                                                <span className="badge badge--rose">Sold out</span>
-                                            )}
-                                            {s.is_active === false && <span className="badge">Inactive</span>}
-                                        </div>
-                                        <div className="rowInline" style={{ marginTop: 8 }}>
-                                            <Link
-                                                to={`/spots/${s.id}`}
-                                                className="btn"
-                                            >
-                                                View listing
-                                            </Link>
-                                            <Link
-                                                to={`/create-listing?edit=${s.id}`}
-                                                className="btn btn-primary"
-                                            >
-                                                Edit listing
-                                            </Link>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    ))}
-                </div>
-                <div className="card formSection">
-                    <button
-                        type="button"
-                        className="sectionHeader sectionHeader--owner collapsibleHeader"
-                        onClick={() => setOpen((p) => ({ ...p, ownerConfirmed: !p.ownerConfirmed }))}
-                    >
-                        <div className="sectionHeaderTitle">
-                            <span className="sectionDot" />
-                            <div className="h3">Booked Slots</div>
-                        </div>
-                        <span className="badge badge--warm sectionHeaderBadge">
-                            {confirmedOwnerBookings.length} Confirmed
-                        </span>
-                    </button>
-                    <div className="sectionSub muted">
-                        Confirmed bookings made by other users on your spaces.
-                    </div>
-
-                    {open.ownerConfirmed && (confirmedOwnerBookings.length === 0 ? (
-                        <div className="muted">No confirmed bookings yet.</div>
-                    ) : (
-                        <div className="dashItemGrid">
-                            {confirmedOwnerBookings.map((b) => {
-                                    const spot = spotById.get(b.parking_spot_id);
-                                    const title = spot?.title ?? "Parking spot";
-                                    const address = shortAddress(spot?.address_text);
-                                    return (
-                                        <div key={b.id} className="card dashItem dashItem--owner">
-                                            <div className="dashItemHeader">
-                                                {renderThumb(spot?.image_url, title)}
-                                                <div className="dashItemText">
-                                                    <div className="dashItemTitle">{title}</div>
-                                                    <div className="dashItemSubtitle">{address}</div>
-                                                </div>
-                                                {b.pay_method === "money" && (
-                                                    <div className="dashItemPrice dashAmount dashAmount--incoming">+£{toMoney(b.total_price_gbp).toFixed(2)}</div>
-                                                )}
-                                            </div>
-                                            <div className="dashMetaRow">
-                                                <span className="badge badge--green">Earned / Incoming</span>
-                                                <span className="badge badge--green">My listing</span>
-                                                <span className="badge badge--green">Confirmed</span>
-                                                <span className="badge">{formatModeLabel(b.pay_method)}</span>
-                                            </div>
-                                            <div className="dashField">
-                                                <div className="dashLabel">Time</div>
-                                                <div className="tiny muted">{dt(b.start_time)} → {dt(b.end_time)}</div>
-                                            </div>
-                                            <div className="rowInline" style={{ marginTop: 8 }}>
-                                                <Link to={`/spots/${b.parking_spot_id}`} className="btn">
-                                                    View Listing
-                                                </Link>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                        </div>
-                    ))}
-                </div>
-
-
-
-                <div className="card formSection">
-                    <button
-                        type="button"
-                        className="sectionHeader sectionHeader--owner collapsibleHeader"
-                        onClick={() => setOpen((p) => ({ ...p, ownerPending: !p.ownerPending }))}
-                    >
-                        <div className="sectionHeaderTitle">
-                            <span className="sectionDot" />
-                            <div className="h3">Pending Bids</div>
-                        </div>
-                        <span className="badge badge--warm sectionHeaderBadge">{pendingOwnerCount} Pending</span>
-                    </button>
-                    <div className="sectionSub muted">
-                        Review bids and approve any that fit your available slots. Charges are captured on approval.
-                    </div>
-
-                    {open.ownerPending && (
-                        <div className="dashItemGrid" style={{ marginTop: 10 }}>
-
-                            {auctionBids.filter((b) => {
-                                const s = String(b.status ?? "").toLowerCase();
-                                return s === "pending";
-                            }).length === 0 ? (
-                                <div className="muted">No bids yet.</div>
-                            ) : (
-                                auctionBids
-                                    .filter((b) => {
-                                        const s = String(b.status ?? "").toLowerCase();
-                                        return s === "pending";
-                                    })
-                                    .map((b) => {
-                                        const title = b.spot_title ?? "Auction listing";
-                                        const isPoints = (b.pay_method ?? "money") === "points";
-                                        return (
-                                            <div key={b.id} className="card dashItem dashItem--owner">
-                                                <div className="dashItemHeader">
-                                                    {renderThumb(undefined, title)}
-                                                    <div className="dashItemText">
-                                                        <div className="dashItemTitle">{title}</div>
-                                                        <div className="dashItemSubtitle">{b.bidder_name ?? b.bidder_email ?? "Bidder"}</div>
-                                                    </div>
-                                                    <div className="dashItemPrice">
-                                                        {isPoints ? `${b.amount_points ?? 0} pts` : `£${toMoney(b.amount_gbp).toFixed(2)}`}
-                                                    </div>
-                                                </div>
-                                                <div className="dashMetaRow">
-                                                    <span className="badge">{b.status}</span>
-                                                    <span className="badge">Auction Bid</span>
-                                                    <span className="badge">{isPoints ? "Points" : "Money"}</span>
-                                                </div>
-                                                <div className="ownerActionRequired">Action Required</div>
-                                                {(b.start_time && b.end_time) && (
-                                                    <div className="dashField">
-                                                        <div className="dashLabel">Time</div>
-                                                        <div className="tiny muted">{dt(b.start_time)} → {dt(b.end_time)}</div>
-                                                    </div>
-                                                )}
-                                                <div className="rowInline" style={{ marginTop: 8 }}>
-                                                    <Link to={`/bids/${b.id}`} className="btn">
-                                                        View local receipt
-                                                    </Link>
-                                                    <button
-                                                        onClick={() => acceptBid(b.parking_spot_id, b.id)}
-                                                        disabled={busyId === b.id}
-                                                        className="btn btn-primary"
-                                                    >
-                                                        Accept
-                                                    </button>
-                                                    <button
-                                                        onClick={() => rejectBid(b.parking_spot_id, b.id)}
-                                                        disabled={busyId === b.id}
-                                                        className="btn"
-                                                    >
-                                                        Reject
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        );
-                                    })
-                            )}
-                        </div>
-                    )}
-                </div>
-                <div className="card formSection">
-                        <button
-                            type="button"
-                            className="sectionHeader sectionHeader--owner collapsibleHeader"
-                            onClick={() => setOpen((p) => ({ ...p, ownerUpcoming: !p.ownerUpcoming }))}
-                        >
-                            <div className="sectionHeaderTitle">
-                                <span className="sectionDot" />
-                                <div className="h3">Upcoming Schedule</div>
-                            </div>
-                            <span className="badge badge--warm sectionHeaderBadge">{ownerUpcoming.length} Upcoming</span>
-                        </button>
-                        <div className="sectionSub muted">
-                            Upcoming confirmed bookings on your own listings.
-                        </div>
-
-                        {open.ownerUpcoming && (ownerUpcoming.length === 0 ? (
-                            <div className="muted">No upcoming owner bookings.</div>
-                        ) : (
-                            <div className="dashItemGrid">
-                                {ownerUpcoming.map((b) => {
-                                    const spot = spotById.get(b.parking_spot_id);
-                                    const title = spot?.title ?? "Parking spot";
-                                    const address = shortAddress(spot?.address_text);
-                                    const isPoints = b.pay_method === "points";
-                                    return (
-                                        <div key={b.id} className="card dashItem dashItem--owner">
-                                            <div className="dashItemHeader">
-                                                {renderThumb(spot?.image_url, title)}
-                                                <div className="dashItemText">
-                                                    <div className="dashItemTitle">{title}</div>
-                                                    <div className="dashItemSubtitle">{address}</div>
-                                                </div>
-                                                <div className="dashItemPrice dashAmount dashAmount--incoming">
-                                                    {isPoints ? `+${b.total_points ?? 0} pts` : `+£${toMoney(b.total_price_gbp).toFixed(2)}`}
-                                                </div>
-                                            </div>
-                                            <div className="dashMetaRow">
-                                                <span className="badge badge--green">Earned / Incoming</span>
-                                                <span className="badge badge--green">Owner schedule</span>
-                                                <span className="badge">{isPoints ? "Points" : "Money"}</span>
-                                            </div>
-                                            <div className="dashField">
-                                                <div className="dashLabel">Time</div>
-                                                <div className="tiny muted">{dt(b.start_time)} → {dt(b.end_time)}</div>
-                                            </div>
-                                            <div className="rowInline" style={{ marginTop: 8 }}>
-                                                <Link to={`/spots/${b.parking_spot_id}`} className="btn">
-                                                    View Listing
-                                                </Link>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        ))}
-                    </div>
-                    </div>
-            </div>
-            )}
-
-            {activeSection === "transactions" && (
-            <div className="dashboardGroup dashboardGroup--transactions">
-                        <div className="dashGrid dashGrid--withinGroup">
-                            <div className="card formSection">
-                                <button
-                                    type="button"
-                                    className="sectionHeader sectionHeader--rewards collapsibleHeader"
-                                    onClick={() => setOpen((p) => ({ ...p, rewards: !p.rewards }))}
-                                >
-                                    <div className="sectionHeaderTitle">
-                                        <span className="sectionDot" />
-                                        <div className="h3">Rewards History</div>
-                                    </div>
-                                    <span className="badge badge--accent sectionHeaderBadge">Points</span>
-                                </button>
-                                <div className="sectionSub muted">
-                                    Points earned and spent across the platform.
-                                </div>
-
-                                {open.rewards && (rewards.length === 0 ? (
-                                    <div className="muted">No reward activity yet.</div>
-                                ) : (
-                                    <div className="dashItemGrid">
-                                        {rewards
-                                            .slice()
-                                            .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
-                                            .map((r) => {
-                                                const incoming = String(r.type ?? "").toLowerCase() === "earn";
-                                                const flowLabel = incoming ? "Earned / Incoming" : "Spent / Outgoing";
-                                                const amountPrefix = incoming ? "+" : "-";
-                                                return (
-                                                    <div
-                                                        key={r.id}
-                                                        className={`card dashItem dashItem--rewards ${incoming ? "dashItem--rewards-incoming" : "dashItem--rewards-outgoing"}`}
-                                                    >
-                                                        <div className="dashItemHeader">
-                                                            {renderThumb(undefined, r.reason)}
-                                                            <div className="dashItemText">
-                                                                <div className="dashItemTitle">{r.reason}</div>
-                                                                <div className="dashItemSubtitle">{flowLabel} points</div>
-                                                            </div>
-                                                            <div className={`dashItemPrice ${incoming ? "dashAmount dashAmount--incoming" : "dashAmount dashAmount--outgoing"}`}>
-                                                                {amountPrefix}{r.amount} pts
-                                                            </div>
-                                                        </div>
-                                                        <div className="dashMetaRow">
-                                                            <span className={`badge ${incoming ? "badge--green" : "badge--rose"}`}>{flowLabel}</span>
-                                                            <span className="badge badge--accent">Rewards</span>
-                                                        </div>
-                                                        <div className="dashField">
-                                                            <div className="dashLabel">Date</div>
-                                                            <div className="tiny muted">{dt(r.created_at)}</div>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                    </div>
-                                ))}
-                            </div>
-
-                            <div className="card formSection">
-                                <button
-                                    type="button"
-                                    className="sectionHeader sectionHeader--payments collapsibleHeader"
-                                    onClick={() => setOpen((p) => ({ ...p, payments: !p.payments }))}
-                                >
-                                    <div className="sectionHeaderTitle">
-                                        <span className="sectionDot" />
-                                        <div className="h3">Transaction History</div>
-                                    </div>
-
-                                    <div className="dashMetaRow">
-                                    <span className="badge badge--green">
-                                      Total earned: £{ownerBookings
-                                      .filter((b) => b.status === "confirmed" && b.pay_method === "money")
-                                      .reduce((sum, b) => sum + toMoney(b.total_price_gbp), 0)
-                                      .toFixed(2)}
-                                  </span>
-
-                                    </div>
-                                </button>
-                                <div className="sectionSub muted">
-                                    Your transaction history across your bookings and your listings.
-                                </div>
-
-                                {open.payments && (payments.length === 0 ? (
-                                    <div className="muted">No payments yet.</div>
-                                ) : (
-                                    <div className="dashItemGrid">
-                                        {payments.map((p) => {
-                                            const flow = moneyFlowView(p.direction);
-                                            const spot = p.spot_title ? spotByTitle.get(p.spot_title) : undefined;
-                                            const title = p.spot_title || "Parking spot";
-                                            return (
-                                                <div key={p.id} className={`card dashItem dashItem--payments ${flow.cardClass}`}>
-                                                    <div className="dashItemHeader">
-                                                        {renderThumb(spot?.image_url, title)}
-                                                        <div className="dashItemText">
-                                                            <div className="dashItemTitle">{title}</div>
-                                                            <div className="dashItemSubtitle">{shortAddress(p.spot_address)}</div>
-                                                        </div>
-                                                        <div className={`dashItemPrice ${flow.amountClass}`}>
-                                                            {flow.sign}£{toMoney(p.amount_gbp).toFixed(2)}
-                                                        </div>
-                                                    </div>
-                                                    <div className="dashMetaRow">
-                                                        <span className={flow.badgeClass}>{flow.label}</span>
-                                                        <span className="badge">{p.status}</span>
-                                                        <span className="badge">{p.provider}</span>
-                                                        <span className="badge badge--rose">Payment</span>
-                                                    </div>
-                                                    <div className="dashField">
-                                                        <div className="dashLabel">Booking window</div>
-                                                        <div className="tiny muted">{dt(p.start_time)} → {dt(p.end_time)}</div>
-                                                    </div>
-                                                    <div className="dashField">
-                                                        <div className="dashLabel">Paid at</div>
-                                                        <div className="tiny muted">{dt(p.created_at)}</div>
-                                                    </div>
-                                                    <div className="rowInline" style={{ marginTop: 12 }}>
-                                                        {p.direction === "outgoing" && (
-                                                            <>
-                                                                <button
-                                                                    className="btn btn-primary"
-                                                                    onClick={() => openPaymentReceipt(p.booking_id)}
-                                                                    disabled={receiptLoadingId === p.booking_id}
-                                                                >
-                                                                    {receiptLoadingId === p.booking_id ? "Loading receipt…" : "Open Stripe receipt"}
-                                                                </button>
-                                                                <Link to={`/pay/${p.booking_id}`} className="btn">
-                                                                    Booking confirmation
-                                                                </Link>
-                                                            </>
-                                                        )}
-                                                        {p.direction === "incoming" && (
-                                                            <button
-                                                                className="btn btn-primary"
-                                                                onClick={openConnectDashboard}
-                                                                disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}
-                                                            >
-                                                                Open Stripe dashboard
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                    {paymentReceiptErrors[p.booking_id] && (
-                                                        <div className="tiny muted" style={{ marginTop: 6 }}>
-                                                            {paymentReceiptErrors[p.booking_id]}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="dashGrid" style={{ marginTop: 2 }}>
-                            <div ref={payoutsRef} className="card formSection">
-                                <button
-                                    type="button"
-                                    className="sectionHeader sectionHeader--payments collapsibleHeader"
-                                    onClick={() => setOpen((p) => ({ ...p, payouts: !p.payouts }))}
-                                >
-                                    <div className="sectionHeaderTitle">
-                                        <span className="sectionDot" />
-                                        <div className="h3">Stripe Account</div>
-                                    </div>
-                                    <span className={`${connectBadgeClass} sectionHeaderBadge`}>{connectLabel}</span>
-                                </button>
-                                <div className="sectionSub muted">
-                                    {connect?.demo_bypass
-                                        ? "Demo bypass mode is active. Owner payouts are simulated and no Stripe onboarding is required."
-                                        : "Connect Stripe to withdraw your earnings"}
-                                </div>
-
-                                {open.payouts && (
-                                    <div className="stack">
-                                        <div className="settingRow">
-                                            <div className="settingRowTitle">
-                                                <div className="tiny muted">Connected account</div>
-                                                <div className="spotInfoValue">
-                                                    {connect?.demo_bypass
-                                                        ? "Demo simulation (no connected Stripe account)"
-                                                        : connect?.account_id ?? "Not connected"}
-                                                </div>
-                                            </div>
-                                            <span className={connect?.charges_enabled ? "badge badge--green" : "badge badge--warm"}>
-                                                {connect?.charges_enabled ? "Charges enabled" : "Charges pending"}
-                                            </span>
-                                        </div>
-                                        <div className="settingRow">
-                                            <div className="settingRowTitle">
-                                                <div className="tiny muted">Payout capability</div>
-                                                <div className="spotInfoValue">{connect?.payouts_enabled ? "Enabled" : "Pending"}</div>
-                                            </div>
-                                            <span className={connect?.details_submitted ? "badge badge--cool" : "badge badge--warm"}>
-                                                {connect?.details_submitted ? "Details submitted" : "Details required"}
-                                            </span>
-                                        </div>
-                                        <div className="rowInline">
-
-                                            {connect?.demo_available && !connect?.demo_bypass && !connect?.account_id && (
-                                                <button className="btn" onClick={() => beginConnectOnboarding("demo")} disabled={connectBusy}>
-                                                    Use demo payouts
-                                                </button>
-                                            )}
-
-                                            <button
-                                                className="btn btn-primary"
-                                                onClick={openConnectDashboard}
-                                                disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}
-                                            >
-                                                Open Stripe dashboard
-                                            </button>
-                                            <button
-                                                className="btn"
-                                                onClick={() => beginConnectOnboarding("stripe")}
-                                                disabled={connectBusy}
-                                            >
-                                                {connectBusy
-                                                    ? "Opening..."
-                                                    : connect?.demo_bypass
-                                                        ? "Connect Stripe instead"
-                                                        : !connect?.account_id
-                                                            ? "Connect Stripe"
-                                                            : connect.onboarding_complete
-                                                                ? "Update Stripe details"
-                                                                : "Continue onboarding"}
-                                            </button>
-                                            <button className="btn" onClick={refreshConnectStatus} disabled={connectBusy}>
-                                                Refresh status
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-            </div>
-            )}
+                    {activeSection === "manageBookings" && <div className="dashGrid dashGrid--withinGroup">{renderDriverBookings()}{renderMyPendingBids()}{renderDriverUpcoming()}</div>}
+                    {activeSection === "manageListings" && <div className="dashGrid dashGrid--withinGroup">{renderMyListings()}{renderOwnerConfirmed()}{renderOwnerPendingBids()}{renderOwnerUpcoming()}</div>}
+                    {activeSection === "transactions" && <div className="dashGrid dashGrid--withinGroup">{renderRewards()}{renderPayments()}{renderStripeAccount()}</div>}
                 </div>
             </div>
-
-            {/* Owner-side bookings now use /bookings/owner */}
         </div>
     );
 }

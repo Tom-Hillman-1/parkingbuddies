@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-
-const HELP_EMAIL = "parkingbuddiesproject@gmail.com";
+import { SUPPORT_EMAIL } from "./pagesShared";
 
 type ShowcaseCard = {
     id: string;
@@ -190,7 +189,7 @@ export default function AboutPage() {
                     observer.unobserve(entry.target);
                 }
             },
-            { threshold: 0.2, rootMargin: "0px 0px -8% 0px" }
+            { threshold: 0.05, rootMargin: "0px 0px 16% 0px" }
         );
 
         nodes.forEach((node) => observer.observe(node));
@@ -262,7 +261,7 @@ export default function AboutPage() {
         formData.append("_template", "table");
 
         try {
-            const res = await fetch(`https://formsubmit.co/ajax/${HELP_EMAIL}`, {
+            const res = await fetch(`https://formsubmit.co/ajax/${SUPPORT_EMAIL}`, {
                 method: "POST",
                 headers: { Accept: "application/json" },
                 body: formData,
@@ -356,7 +355,7 @@ export default function AboutPage() {
                     <h2 className="aboutPremiumInfoTitle">Need help with booking or listings?</h2>
                     <p className="aboutPremiumHeadCopy">
                         Send a message below. If needed, email us directly at{" "}
-                        <a href={`mailto:${HELP_EMAIL}`} className="aboutPremiumInlineLink">{HELP_EMAIL}</a>.
+                        <a href={`mailto:${SUPPORT_EMAIL}`} className="aboutPremiumInlineLink">{SUPPORT_EMAIL}</a>.
                     </p>
                 </div>
 
@@ -413,7 +412,7 @@ export default function AboutPage() {
                         <button type="submit" className="aboutPremiumBtn aboutPremiumBtn--primary" disabled={sending}>
                             {sending ? "Sending..." : "Send message"}
                         </button>
-                        <a className="aboutPremiumBtn aboutPremiumBtn--secondary" href={`mailto:${HELP_EMAIL}`}>
+                        <a className="aboutPremiumBtn aboutPremiumBtn--secondary" href={`mailto:${SUPPORT_EMAIL}`}>
                             Email directly
                         </a>
                     </div>

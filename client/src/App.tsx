@@ -51,7 +51,7 @@ export default function App() {
                     observer.unobserve(entry.target);
                 }
             },
-            { threshold: 0.14, rootMargin: "0px 0px -10% 0px" }
+            { threshold: 0.03, rootMargin: "0px 0px 20% 0px" }
         );
 
         const registerTargets = () => {

@@ -1,45 +1,40 @@
 import { Router } from "express";
+import type { Response } from "express";
+import type { PoolClient } from "pg";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
+import { calcBookingUnits, type PriceUnit, toMoney } from "../lib/shared";
+import { countOverlappingBookings, isWindowSlot, normalizeExcludeDows } from "../lib/availability";
 
 const router = Router();
-
-type PriceUnit = "hour" | "day" | "week";
 type Mode = "free" | "rent" | "auction";
 
-// Availability json shapes
 type AvailabilityJson =
     | { type: "24_7"; date_from?: string; date_to?: string }
     | { type: "same_everyday"; start: string; end: string; date_from?: string; date_to?: string }
-    | { type: "custom_weekly"; rules: Array<{ dow: number; start: string; end: string }>; date_from?: string; date_to?: string };
+    | { type: "custom_weekly"; rules: Array<{ dow: number; start: string; end: string }>; date_from?: string; date_to?: string }
+    | {
+          type: "window_slots";
+          windows: Array<{
+              mode: "continuous" | "split";
+              date_from: string;
+              date_to: string;
+              start: string;
+              end: string;
+              exclude_dows?: number[];
+          }>;
+      };
 
-// Legacy support
 type LegacyAvailabilityType = "24_7" | "weekly";
 
 function isIsoDateString(s: unknown): s is string {
     return typeof s === "string" && !Number.isNaN(Date.parse(s));
 }
 
-function toMoney(x: any) {
-    const n = Number(x ?? 0);
-    return Number.isFinite(n) ? n : 0;
-}
-
-// Charge by 5-minute increments for hourly listings
-function calcUnits(start: Date, end: Date, unit: PriceUnit) {
-    const ms = end.getTime() - start.getTime();
-    const minutes = ms / (1000 * 60);
-
-    if (unit === "hour") {
-        const roundedMinutes = Math.max(5, Math.ceil(minutes / 5) * 5);
-        return roundedMinutes / 60;
-    }
-    if (unit === "day") return Math.max(1, Math.ceil(minutes / (60 * 24)));
-    return Math.max(1, Math.ceil(minutes / (60 * 24 * 7)));
-}
-
 function hhmmToMinutes(hhmm: string) {
-    const [h, m] = hhmm.split(":").map((x) => Number(x));
+    const [rawH, rawM] = hhmm.split(":");
+    const h = Number(rawH ?? 0);
+    const m = Number(rawM ?? 0);
     return h * 60 + m;
 }
 
@@ -60,12 +55,14 @@ function sameUtcDate(a: Date, b: Date) {
 function normalizeDbTimeToHHMM(x: any): string | null {
     if (!x) return null;
     const s = String(x);
-    // handles "HH:MM:SS" or "HH:MM"
     return s.length >= 5 ? s.slice(0, 5) : null;
 }
 
+function missingOwnerContactColumn(message: string) {
+    return message.includes("owner_contact_email") || message.includes("owner_contact_phone") || message.includes("owner_contact_info");
+}
+
 function validateWithinWindowUtc(start: Date, end: Date, windowStartHHMM: string, windowEndHHMM: string) {
-    // strict: booking must be within a single day for windowed availability
     if (!sameUtcDate(start, end)) {
         return { ok: false as const, error: "Booking must be within a single day for this availability type" };
     }
@@ -76,31 +73,28 @@ function validateWithinWindowUtc(start: Date, end: Date, windowStartHHMM: string
     const bMin = hhmmToMinutes(windowEndHHMM);
 
     if (sMin < aMin || eMin > bMin) {
-        return { ok: false as const, error: `Booking must be within ${windowStartHHMM}–${windowEndHHMM} (UTC)` };
+        return { ok: false as const, error: `Booking must be within ${windowStartHHMM}-${windowEndHHMM} (UTC)` };
     }
 
     return { ok: true as const };
 }
 
-/**
- * Availability check priority:
- * 1) availability_json (new)
- * 2) legacy weekly fields (availability_type + available_days + daily_start/end)
- */
+async function rollbackWithError(client: PoolClient, res: Response, status: number, error: string) {
+    await client.query("ROLLBACK");
+    return res.status(status).json({ ok: false, error });
+}
+
 function validateAvailability(spot: any, start: Date, end: Date): { ok: true } | { ok: false; error: string } {
     const av: AvailabilityJson | null = spot.availability_json ?? null;
-
-    // optional date window (YYYY-MM-DD)
-    if (av?.date_from || av?.date_to) {
-        const from = av.date_from ? new Date(`${av.date_from}T00:00:00Z`) : null;
-        const to = av.date_to ? new Date(`${av.date_to}T23:59:59Z`) : null;
+    const avAny = av as any;
+    if (avAny?.date_from || avAny?.date_to) {
+        const from = avAny.date_from ? new Date(`${avAny.date_from}T00:00:00Z`) : null;
+        const to = avAny.date_to ? new Date(`${avAny.date_to}T23:59:59Z`) : null;
         if (from && start < from) return { ok: false, error: "Booking is before the available date range" };
         if (from && end < from) return { ok: false, error: "Booking is before the available date range" };
         if (to && start > to) return { ok: false, error: "Booking is after the available date range" };
         if (to && end > to) return { ok: false, error: "Booking is after the available date range" };
     }
-
-    // ✅ New JSON availability
     if (av && typeof av === "object") {
         if (av.type === "24_7") return { ok: true };
 
@@ -114,18 +108,14 @@ function validateAvailability(spot: any, start: Date, end: Date): { ok: true } |
             if (!Array.isArray(av.rules) || av.rules.length === 0) {
                 return { ok: false, error: "Spot availability is misconfigured" };
             }
-
-            // must be same day for rule windows
             if (!sameUtcDate(start, end)) {
-                return { ok: false, error: "Booking must be within a single day for this spot’s availability rules" };
+                return { ok: false, error: "Booking must be within a single day for this spot's availability rules" };
             }
 
-            const dow = start.getUTCDay(); // 0..6
+            const dow = start.getUTCDay();
             const todaysRules = av.rules.filter((r) => r.dow === dow);
 
             if (todaysRules.length === 0) return { ok: false, error: "This spot is not available on that day" };
-
-            // booking is valid if it fits ANY rule for that day
             for (const rule of todaysRules) {
                 const r = validateWithinWindowUtc(start, end, rule.start, rule.end);
                 if (r.ok) return { ok: true };
@@ -134,10 +124,35 @@ function validateAvailability(spot: any, start: Date, end: Date): { ok: true } |
             return { ok: false, error: "Booking does not fit within the available time windows (UTC)" };
         }
 
+        if (av.type === "window_slots") {
+            if (!Array.isArray(av.windows) || av.windows.length === 0) {
+                return { ok: false, error: "Spot availability is misconfigured" };
+            }
+
+            for (const window of av.windows) {
+                if (!isWindowSlot(window)) continue;
+
+                const slotStart = new Date(`${window.date_from}T${window.start}:00Z`);
+                const slotEnd = new Date(`${window.date_to}T${window.end}:00Z`);
+                if (!(slotStart < slotEnd)) continue;
+                if (start < slotStart || end > slotEnd) continue;
+
+                if (window.mode === "continuous") {
+                    return { ok: true };
+                }
+
+                if (!sameUtcDate(start, end)) continue;
+                const blocked = new Set(normalizeExcludeDows(window.exclude_dows));
+                if (blocked.has(start.getUTCDay())) continue;
+                const r = validateWithinWindowUtc(start, end, window.start, window.end);
+                if (r.ok) return { ok: true };
+            }
+
+            return { ok: false, error: "Booking does not fit within the available slot windows" };
+        }
+
         return { ok: false, error: "Spot availability is misconfigured" };
     }
-
-    // ✅ Legacy availability fallback
     const legacyType = (spot.availability_type ?? "24_7") as LegacyAvailabilityType;
     if (legacyType === "24_7") return { ok: true };
 
@@ -163,16 +178,6 @@ function validateAvailability(spot: any, start: Date, end: Date): { ok: true } |
     return { ok: false, error: "Spot availability is invalid" };
 }
 
-/**
- * POST /bookings
- * Body:
- * {
- *   "parking_spot_id": "uuid",
- *   "start_time": "ISO",
- *   "end_time": "ISO",
- *   "pay_method": "money" | "points"
- * }
- */
 router.post("/", requireAuth, async (req: AuthRequest, res) => {
     const { parking_spot_id, start_time, end_time, pay_method, points_amount } = req.body ?? {};
 
@@ -184,10 +189,10 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         return res.status(400).json({ ok: false, error: "start_time and end_time must be ISO date strings" });
     }
 
-    const start = new Date(start_time);
-    const end = new Date(end_time);
+    const requestedStart = new Date(start_time);
+    const requestedEnd = new Date(end_time);
 
-    if (!(start < end)) {
+    if (!(requestedStart < requestedEnd)) {
         return res.status(400).json({ ok: false, error: "start_time must be before end_time" });
     }
 
@@ -196,8 +201,6 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
     const client = await pool.connect();
     try {
         await client.query("BEGIN");
-
-        // Load spot
         await client.query("SAVEPOINT spot_select");
 
         let spotR;
@@ -253,8 +256,7 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         await client.query("RELEASE SAVEPOINT spot_select");
 
         if (!spotR.rowCount) {
-            await client.query("ROLLBACK");
-            return res.status(404).json({ ok: false, error: "Parking spot not found" });
+            return rollbackWithError(client, res, 404, "Parking spot not found");
         }
 
         const spot = spotR.rows[0] as any;
@@ -262,56 +264,35 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         if (spot.capacity_total == null) spot.capacity_total = 1;
 
         if (!spot.is_active) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Parking spot is not active" });
+            return rollbackWithError(client, res, 400, "Parking spot is not active");
         }
 
         if (spot.owner_user_id === req.userId) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "You cannot book your own parking spot" });
+            return rollbackWithError(client, res, 400, "You cannot book your own parking spot");
         }
-
-        // Auction bookings are created by the owner-accept flow in /auctions/:spotId/accept.
         if ((spot.mode as Mode) === "auction") {
-            await client.query("ROLLBACK");
-            return res.status(400).json({
-                ok: false,
-                error: "Auction bookings are created when the owner accepts a bid.",
-            });
+            return rollbackWithError(client, res, 400, "Auction bookings are created when the owner accepts a bid.");
         }
 
-        // Availability validation
-        const avail = validateAvailability(spot, start, end);
-        if (!avail.ok) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: avail.error });
-        }
-
-        // Prevent overlaps for capacity (treat pending as reserved too).
-        const overlapR = await client.query(
-            `SELECT COUNT(*)::int AS count
-       FROM bookings
-       WHERE parking_spot_id = $1
-         AND status IN ('confirmed', 'pending')
-         AND NOT (end_time <= $2 OR start_time >= $3)`,
-            [parking_spot_id, start_time, end_time]
-        );
-
-        const overlapCount = Number(overlapR.rows[0]?.count ?? 0);
-        const capacity = Math.max(1, Number(spot.capacity_total ?? 1));
-        if (overlapCount >= capacity) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "No spaces available for that time slot" });
-        }
-
-        // Determine totals
         const unit: PriceUnit = (spot.price_unit ?? "hour") as PriceUnit;
         if (!["hour", "day", "week"].includes(unit)) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Spot price_unit is invalid" });
+            return rollbackWithError(client, res, 400, "Spot price_unit is invalid");
+        }
+        const start = requestedStart;
+        const end = requestedEnd;
+        const startIso = start.toISOString();
+        const endIso = end.toISOString();
+        const avail = validateAvailability(spot, start, end);
+        if (!avail.ok) {
+            return rollbackWithError(client, res, 400, "error" in avail ? avail.error : "Requested slot is unavailable");
+        }
+        const overlapCount = await countOverlappingBookings(client, parking_spot_id, startIso, endIso);
+        const capacity = Math.max(1, Number(spot.capacity_total ?? 1));
+        if (overlapCount >= capacity) {
+            return rollbackWithError(client, res, 400, "No spaces available for that time slot");
         }
 
-        const units = calcUnits(start, end, unit);
+        const units = calcBookingUnits(start, end, unit);
 
         let total_price_gbp = "0.00";
         let total_points = 0;
@@ -319,34 +300,30 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
 
         if (method === "points") {
             if (!spot.allow_points) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: "This spot cannot be booked with points" });
+                return rollbackWithError(client, res, 400, "This spot cannot be booked with points");
             }
 
             const perUnitPoints = Number(spot.points_cost ?? 0);
             if (!Number.isFinite(perUnitPoints) || perUnitPoints <= 0) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: "Invalid points cost for this spot" });
+                return rollbackWithError(client, res, 400, "Invalid points cost for this spot");
             }
 
             const minPoints = Math.ceil(perUnitPoints * units);
             const requested = Number(points_amount);
             if (!Number.isFinite(requested) || requested <= 0) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: `Points amount is required (min ${minPoints})` });
+                return rollbackWithError(client, res, 400, `Points amount is required (min ${minPoints})`);
             }
             if (requested < minPoints) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: `Points amount must be at least ${minPoints}` });
+                return rollbackWithError(client, res, 400, `Points amount must be at least ${minPoints}`);
             }
             total_points = Math.ceil(requested);
-            status = "confirmed"; // points booking confirms immediately (simple)
+            status = "confirmed";
         } else {
-            // money booking
             const perUnitPrice = toMoney(spot.price_gbp);
+            if ((spot.mode as Mode) === "rent" && perUnitPrice <= 0 && spot.allow_points) {
+                return rollbackWithError(client, res, 400, "This spot only accepts points bookings");
+            }
             const total = perUnitPrice * units;
-
-            // free listings can have total 0 and still be "confirmed" (no payment needed)
             if ((spot.mode as Mode) === "free" || total <= 0) {
                 total_price_gbp = "0.00";
                 status = "confirmed";
@@ -355,8 +332,6 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
                 status = "pending";
             }
         }
-
-        // If points booking: check user points and deduct
         if (method === "points") {
             const deductedR = await client.query(
                 `UPDATE users
@@ -370,19 +345,12 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
             if (!deductedR.rowCount) {
                 const balanceR = await client.query(`SELECT points_balance FROM users WHERE id = $1`, [req.userId]);
                 if (!balanceR.rowCount) {
-                    await client.query("ROLLBACK");
-                    return res.status(404).json({ ok: false, error: "User not found" });
+                    return rollbackWithError(client, res, 404, "User not found");
                 }
                 const balance = Number(balanceR.rows[0].points_balance ?? 0);
-                await client.query("ROLLBACK");
-                return res.status(400).json({
-                    ok: false,
-                    error: `Not enough points. Need ${total_points ?? 0}, you have ${balance}.`,
-                });
+                return rollbackWithError(client, res, 400, `Not enough points. Need ${total_points ?? 0}, you have ${balance}.`);
             }
         }
-
-        // Create booking
         const bookingR = await client.query(
             `INSERT INTO bookings (
                 parking_spot_id,
@@ -396,7 +364,7 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
             )
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
                  RETURNING *`,
-            [parking_spot_id, req.userId, start_time, end_time, status, method, total_price_gbp, total_points]
+            [parking_spot_id, req.userId, startIso, endIso, status, method, total_price_gbp, total_points]
         );
 
         const booking = bookingR.rows[0];
@@ -419,7 +387,6 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
                 [spot.owner_user_id, total_points, booking.id, parking_spot_id]
             );
         } else {
-            // only create payment row if there is something to pay
             if (Number(total_price_gbp) > 0) {
                 await client.query(
                     `INSERT INTO payments (booking_id, provider, status, amount_gbp)
@@ -439,11 +406,6 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
     }
 });
 
-/**
- * GET /bookings/spot/:id
- * Public: active bookings for a spot (times only).
- * Optional query params: start, end (ISO) to limit to a window.
- */
 router.get("/spot/:id", async (req, res) => {
     const spotId = req.params.id;
     const start = typeof req.query.start === "string" ? req.query.start : null;
@@ -477,98 +439,68 @@ router.get("/spot/:id", async (req, res) => {
     }
 });
 
-/**
- * GET /bookings/availability?ids=uuid,uuid&start=ISO&end=ISO
- * Public: returns active booking counts for each spot in a time window.
- */
-router.get("/availability", async (req, res) => {
-    const idsParam = typeof req.query.ids === "string" ? req.query.ids : "";
-    const ids = idsParam.split(",").map((x) => x.trim()).filter(Boolean);
-    if (!ids.length) return res.json({ ok: true, counts: {} });
-
-    const start = typeof req.query.start === "string" ? req.query.start : null;
-    const end = typeof req.query.end === "string" ? req.query.end : null;
-    const now = new Date().toISOString();
-    const s = start && isIsoDateString(start) ? start : now;
-    const e = end && isIsoDateString(end) ? end : now;
-
-    try {
-        const r = await pool.query(
-            `SELECT parking_spot_id, COUNT(*)::int AS count
-             FROM bookings
-             WHERE parking_spot_id = ANY($1)
-               AND status IN ('confirmed', 'pending')
-               AND NOT (end_time <= $2 OR start_time >= $3)
-             GROUP BY parking_spot_id`,
-            [ids, s, e]
-        );
-        const counts: Record<string, number> = {};
-        for (const row of r.rows) counts[row.parking_spot_id] = Number(row.count || 0);
-        return res.json({ ok: true, counts });
-    } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
-    }
-});
-
-/**
- * GET /bookings/window?ids=uuid,uuid&start=ISO&end=ISO
- * Public: active bookings within a window, grouped by spot_id.
- */
-router.get("/window", async (req, res) => {
-    const idsParam = typeof req.query.ids === "string" ? req.query.ids : "";
-    const ids = idsParam.split(",").map((x) => x.trim()).filter(Boolean);
-    if (!ids.length) return res.json({ ok: true, bookings: {} });
-
-    const start = typeof req.query.start === "string" ? req.query.start : null;
-    const end = typeof req.query.end === "string" ? req.query.end : null;
-    const now = new Date();
-    const s = start && isIsoDateString(start) ? start : now.toISOString();
-    const e =
-        end && isIsoDateString(end)
-            ? end
-            : new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString();
-
-    try {
-        const r = await pool.query(
-            `SELECT id, parking_spot_id, start_time, end_time, status
-             FROM bookings
-             WHERE parking_spot_id = ANY($1)
-               AND status IN ('confirmed', 'pending')
-               AND NOT (end_time <= $2 OR start_time >= $3)
-             ORDER BY start_time ASC`,
-            [ids, s, e]
-        );
-        const grouped: Record<string, any[]> = {};
-        for (const row of r.rows) {
-            if (!grouped[row.parking_spot_id]) grouped[row.parking_spot_id] = [];
-            grouped[row.parking_spot_id].push(row);
-        }
-        return res.json({ ok: true, bookings: grouped });
-    } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
-    }
-});
-
-/**
- * GET /bookings/me
- * Adds spot info (including owner_user_id for your dashboard UI)
- */
 router.get("/me", requireAuth, async (req: AuthRequest, res) => {
     try {
-        const r = await pool.query(
-            `SELECT
-                 b.*,
-                 ps.title AS spot_title,
-                 ps.address_text AS spot_address,
-                 ps.lat AS spot_lat,
-                 ps.lng AS spot_lng,
-                 ps.owner_user_id AS owner_user_id
-             FROM bookings b
-                      JOIN parking_spots ps ON ps.id = b.parking_spot_id
-             WHERE b.driver_user_id = $1
-             ORDER BY b.created_at DESC`,
-            [req.userId]
-        );
+        let r;
+        try {
+            r = await pool.query(
+                `SELECT
+                     b.*,
+                     ps.title AS spot_title,
+                     ps.address_text AS spot_address,
+                     ps.lat AS spot_lat,
+                     ps.lng AS spot_lng,
+                     ps.owner_user_id AS owner_user_id,
+                     CASE
+                         WHEN b.pay_method = 'money'
+                              AND b.total_price_gbp > 0
+                              AND COALESCE(pay.status, '') <> 'succeeded' THEN NULL
+                         ELSE ps.owner_contact_email
+                     END AS owner_contact_email,
+                     CASE
+                         WHEN b.pay_method = 'money'
+                              AND b.total_price_gbp > 0
+                              AND COALESCE(pay.status, '') <> 'succeeded' THEN NULL
+                         ELSE ps.owner_contact_phone
+                     END AS owner_contact_phone,
+                     CASE
+                         WHEN b.pay_method = 'money'
+                              AND b.total_price_gbp > 0
+                              AND COALESCE(pay.status, '') <> 'succeeded' THEN NULL
+                         ELSE ps.owner_contact_info
+                     END AS owner_contact_info,
+                     pay.status AS payment_status
+                 FROM bookings b
+                          JOIN parking_spots ps ON ps.id = b.parking_spot_id
+                          LEFT JOIN LATERAL (
+                              SELECT p.status
+                              FROM payments p
+                              WHERE p.booking_id = b.id
+                              ORDER BY p.created_at DESC, p.id DESC
+                              LIMIT 1
+                          ) pay ON TRUE
+                 WHERE b.driver_user_id = $1
+                 ORDER BY b.created_at DESC`,
+                [req.userId]
+            );
+        } catch (e: any) {
+            const message = String(e?.message || e);
+            if (!missingOwnerContactColumn(message)) throw e;
+            r = await pool.query(
+                `SELECT
+                     b.*,
+                     ps.title AS spot_title,
+                     ps.address_text AS spot_address,
+                     ps.lat AS spot_lat,
+                     ps.lng AS spot_lng,
+                     ps.owner_user_id AS owner_user_id
+                 FROM bookings b
+                          JOIN parking_spots ps ON ps.id = b.parking_spot_id
+                 WHERE b.driver_user_id = $1
+                 ORDER BY b.created_at DESC`,
+                [req.userId]
+            );
+        }
 
         return res.json({ ok: true, bookings: r.rows });
     } catch (e) {
@@ -576,10 +508,6 @@ router.get("/me", requireAuth, async (req: AuthRequest, res) => {
     }
 });
 
-/**
- * PATCH /bookings/:id/cancel
- * Driver cancels their own booking (pending only)
- */
 router.patch("/:id/cancel", requireAuth, async (req: AuthRequest, res) => {
     const bookingId = req.params.id;
 
@@ -604,21 +532,6 @@ router.patch("/:id/cancel", requireAuth, async (req: AuthRequest, res) => {
     }
 });
 
-/**
- * PATCH /bookings/:id/confirm
- * Deprecated: auction acceptance is handled by /auctions/:spotId/accept.
- */
-router.patch("/:id/confirm", requireAuth, async (req: AuthRequest, res) => {
-    return res.status(410).json({
-        ok: false,
-        error: "Deprecated endpoint. Use /auctions/:spotId/accept for auction confirmations.",
-    });
-});
-
-/**
- * GET /bookings/owner
- * Bookings for spots owned by the current user
- */
 router.get("/owner", requireAuth, async (req: AuthRequest, res) => {
     try {
         const r = await pool.query(
@@ -641,59 +554,98 @@ router.get("/owner", requireAuth, async (req: AuthRequest, res) => {
     }
 });
 
-/**
- * PATCH /bookings/:id/mark-paid
- * Deprecated: payment finalization is handled by Stripe verification routes/webhooks.
- */
-router.patch("/:id/mark-paid", requireAuth, async (req: AuthRequest, res) => {
-    return res.status(410).json({
-        ok: false,
-        error: "Deprecated endpoint. Payment completion is handled by Stripe-confirmed flow.",
-    });
-});
-
-/**
- * GET /bookings/:id
- * Driver-only booking detail (includes spot info)
- */
 router.get("/:id", requireAuth, async (req: AuthRequest, res) => {
-    const bookingId = req.params.id;
-    // guard against non-uuid paths
+    const bookingId = typeof req.params.id === "string" ? req.params.id : "";
     if (!/^[0-9a-fA-F-]{36}$/.test(bookingId)) {
         return res.status(404).json({ ok: false, error: "Booking not found" });
     }
     try {
-        const r = await pool.query(
-            `SELECT
-                 b.*,
-                 ps.title AS spot_title,
-                 ps.address_text AS spot_address,
-                 ps.lat AS spot_lat,
-                 ps.lng AS spot_lng,
-                 ps.image_url AS spot_image,
-                 ps.mode AS spot_mode,
-                 ps.price_gbp AS spot_price_gbp,
-                 ps.price_unit AS spot_price_unit,
-                 pay.id AS payment_id,
-                 pay.provider AS payment_provider,
-                 pay.provider_ref AS payment_provider_ref,
-                 pay.status AS payment_status
-             FROM bookings b
-             JOIN parking_spots ps ON ps.id = b.parking_spot_id
-             LEFT JOIN LATERAL (
-                 SELECT
-                     p.id,
-                     p.provider,
-                     p.provider_ref,
-                     p.status
-                 FROM payments p
-                 WHERE p.booking_id = b.id
-                 ORDER BY p.created_at DESC, p.id DESC
-                 LIMIT 1
-             ) pay ON TRUE
-             WHERE b.id = $1 AND b.driver_user_id = $2`,
-            [bookingId, req.userId]
-        );
+        let r;
+        try {
+            r = await pool.query(
+                `SELECT
+                     b.*,
+                     ps.title AS spot_title,
+                     ps.address_text AS spot_address,
+                     ps.lat AS spot_lat,
+                     ps.lng AS spot_lng,
+                     ps.image_url AS spot_image,
+                     ps.mode AS spot_mode,
+                     ps.price_gbp AS spot_price_gbp,
+                     ps.price_unit AS spot_price_unit,
+                     CASE
+                         WHEN b.pay_method = 'money'
+                              AND b.total_price_gbp > 0
+                              AND COALESCE(pay.status, '') <> 'succeeded' THEN NULL
+                         ELSE ps.owner_contact_email
+                     END AS owner_contact_email,
+                     CASE
+                         WHEN b.pay_method = 'money'
+                              AND b.total_price_gbp > 0
+                              AND COALESCE(pay.status, '') <> 'succeeded' THEN NULL
+                         ELSE ps.owner_contact_phone
+                     END AS owner_contact_phone,
+                     CASE
+                         WHEN b.pay_method = 'money'
+                              AND b.total_price_gbp > 0
+                              AND COALESCE(pay.status, '') <> 'succeeded' THEN NULL
+                         ELSE ps.owner_contact_info
+                     END AS owner_contact_info,
+                     pay.id AS payment_id,
+                     pay.provider AS payment_provider,
+                     pay.provider_ref AS payment_provider_ref,
+                     pay.status AS payment_status
+                 FROM bookings b
+                 JOIN parking_spots ps ON ps.id = b.parking_spot_id
+                 LEFT JOIN LATERAL (
+                     SELECT
+                         p.id,
+                         p.provider,
+                         p.provider_ref,
+                         p.status
+                     FROM payments p
+                     WHERE p.booking_id = b.id
+                     ORDER BY p.created_at DESC, p.id DESC
+                     LIMIT 1
+                 ) pay ON TRUE
+                 WHERE b.id = $1 AND b.driver_user_id = $2`,
+                [bookingId, req.userId]
+            );
+        } catch (e: any) {
+            const message = String(e?.message || e);
+            if (!missingOwnerContactColumn(message)) throw e;
+            r = await pool.query(
+                `SELECT
+                     b.*,
+                     ps.title AS spot_title,
+                     ps.address_text AS spot_address,
+                     ps.lat AS spot_lat,
+                     ps.lng AS spot_lng,
+                     ps.image_url AS spot_image,
+                     ps.mode AS spot_mode,
+                     ps.price_gbp AS spot_price_gbp,
+                     ps.price_unit AS spot_price_unit,
+                     pay.id AS payment_id,
+                     pay.provider AS payment_provider,
+                     pay.provider_ref AS payment_provider_ref,
+                     pay.status AS payment_status
+                 FROM bookings b
+                 JOIN parking_spots ps ON ps.id = b.parking_spot_id
+                 LEFT JOIN LATERAL (
+                     SELECT
+                         p.id,
+                         p.provider,
+                         p.provider_ref,
+                         p.status
+                     FROM payments p
+                     WHERE p.booking_id = b.id
+                     ORDER BY p.created_at DESC, p.id DESC
+                     LIMIT 1
+                 ) pay ON TRUE
+                 WHERE b.id = $1 AND b.driver_user_id = $2`,
+                [bookingId, req.userId]
+            );
+        }
 
         if (!r.rowCount) {
             return res.status(404).json({ ok: false, error: "Booking not found" });
@@ -706,3 +658,7 @@ router.get("/:id", requireAuth, async (req: AuthRequest, res) => {
 });
 
 export default router;
+
+
+
+

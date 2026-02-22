@@ -2,22 +2,16 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { pool } from "../db";
+import {
+    isValidEmail,
+    isValidName,
+    isValidPassword,
+    normalizeEmail,
+    normalizeName,
+} from "../lib/shared";
 
 const router = Router();
 const SIGNUP_REWARD_POINTS = 1;
-
-// simple validators (enough for PDD)
-function isValidEmail(email: string) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-// "advanced" requirement: min 8 chars, at least 1 letter and 1 number
-function isValidPassword(pw: string) {
-    if (pw.length < 8) return false;
-    const hasLetter = /[A-Za-z]/.test(pw);
-    const hasNumber = /[0-9]/.test(pw);
-    return hasLetter && hasNumber;
-}
 
 function issueToken(userId: string) {
     const secret = process.env.JWT_SECRET;
@@ -26,7 +20,6 @@ function issueToken(userId: string) {
     return jwt.sign({ userId }, secret, { expiresIn: "7d" });
 }
 
-// POST /auth/signup
 router.post("/signup", async (req, res) => {
     const { email, name, password } = req.body ?? {};
 
@@ -34,15 +27,15 @@ router.post("/signup", async (req, res) => {
         return res.status(400).json({ ok: false, error: "email, name, password are required" });
     }
 
-    const trimmedEmail = email.trim().toLowerCase();
-    const trimmedName = name.trim();
+    const trimmedEmail = normalizeEmail(email);
+    const trimmedName = normalizeName(name);
 
     if (!isValidEmail(trimmedEmail)) {
         return res.status(400).json({ ok: false, error: "Invalid email format" });
     }
 
-    if (trimmedName.length < 2 || trimmedName.length > 120) {
-        return res.status(400).json({ ok: false, error: "Name must be 2–120 characters" });
+    if (!isValidName(trimmedName)) {
+        return res.status(400).json({ ok: false, error: "Name must be 2-120 characters" });
     }
 
     if (!isValidPassword(password)) {
@@ -94,7 +87,6 @@ router.post("/signup", async (req, res) => {
     }
 });
 
-// POST /auth/login
 router.post("/login", async (req, res) => {
     const { email, password } = req.body ?? {};
 
@@ -102,7 +94,7 @@ router.post("/login", async (req, res) => {
         return res.status(400).json({ ok: false, error: "email and password are required" });
     }
 
-    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedEmail = normalizeEmail(email);
 
     try {
         const r = await pool.query(
@@ -125,7 +117,6 @@ router.post("/login", async (req, res) => {
 
         const token = issueToken(user.id);
 
-        // never send password_hash back
         const safeUser = {
             id: user.id,
             email: user.email,

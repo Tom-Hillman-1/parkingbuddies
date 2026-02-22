@@ -1,7 +1,7 @@
 ﻿import { useEffect, useRef } from "react";
 import type { Marker as LeafletMarker } from "leaflet";
 import L from "leaflet";
-import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
+import { MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { Link } from "react-router-dom";
 import type { ParkingSpot } from "../types";
 
@@ -51,6 +51,15 @@ function Recenter({ center }: { center: { lat: number; lng: number } }) {
     return null;
 }
 
+function MapPickerEvents({ onMapPick }: { onMapPick?: (lat: number, lng: number) => void }) {
+    useMapEvents({
+        click(event) {
+            onMapPick?.(event.latlng.lat, event.latlng.lng);
+        },
+    });
+    return null;
+}
+
 export default function SpotsMap({
     spots,
     center = { lat: 51.5074, lng: -0.1278 },
@@ -58,6 +67,8 @@ export default function SpotsMap({
     hoveredId,
     onSelect,
     onHover,
+    pickerPosition,
+    onMapPick,
 }: {
     spots: ParkingSpot[];
     center?: { lat: number; lng: number };
@@ -65,6 +76,8 @@ export default function SpotsMap({
     hoveredId?: string | null;
     onSelect?: (id: string) => void;
     onHover?: (id: string | null) => void;
+    pickerPosition?: { lat: number; lng: number } | null;
+    onMapPick?: (lat: number, lng: number) => void;
 }) {
     const markerRefs = useRef<Record<string, LeafletMarker | null>>({});
     const previousHoveredId = useRef<string | null>(null);
@@ -92,11 +105,19 @@ export default function SpotsMap({
         <div className="leafletShell">
             <MapContainer center={[center.lat, center.lng]} zoom={13} className="leafletMap" zoomControl={false}>
                 <Recenter center={center} />
+                <MapPickerEvents onMapPick={onMapPick} />
 
                 <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
                     url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                 />
+
+                {pickerPosition && (
+                    <Marker
+                        position={[pickerPosition.lat, pickerPosition.lng]}
+                        icon={pinIcon.selected}
+                    />
+                )}
 
                 {spots.map((spot) => {
                     const isSelected = selectedId === spot.id;
