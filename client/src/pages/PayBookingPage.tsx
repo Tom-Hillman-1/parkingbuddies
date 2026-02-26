@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
-import { apiGet, apiPost } from "../lib/api";
+import { apiGet, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ReceiptCard, ReceiptDivider, ReceiptRow } from "../components/ReceiptCard";
 import { formatDateRangeLocal, formatDateTimeLocal, toFiniteNumber } from "./pagesShared";
@@ -35,31 +36,26 @@ const POUND = String.fromCharCode(163);
 export default function PayBookingPage() {
     const { bookingId } = useParams();
     const { token } = useAuth();
-    const [booking, setBooking] = useState<Booking | null>(null);
-    const [receipt, setReceipt] = useState<StripeReceiptDetails | null>(null);
-    const [loading, setLoading] = useState(true);
+    const [searchParams] = useSearchParams();
     const [err, setErr] = useState<string | null>(null);
-    const [busy, setBusy] = useState(false);
 
     const id = bookingId ?? "";
-    const [searchParams] = useSearchParams();
     const successCheckout = searchParams.get("success") === "1";
     const sessionId = searchParams.get("session_id") ?? undefined;
     const receiptQueryString = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
 
-    const refreshReceipt = useCallback(async () => {
-        if (!token || !id) return;
-        try {
-            const receiptRes = await apiGet<{ receipt: StripeReceiptDetails }>(
-                `/payments/booking/${id}/receipt${receiptQueryString}`,
-                token
-            );
-            setReceipt(receiptRes.receipt ?? null);
-        } catch {
-            // waiting for Stripe to post the receipt
-        }
-    }, [id, token, receiptQueryString]);
+    // credit: server-state loading pattern adapted from TanStack Query docs
+    const bookingQuery = useQuery({
+        queryKey: ["booking-payment", id, token],
+        enabled: Boolean(token && id),
+        queryFn: async () => {
+            if (!token || !id) throw new Error("Missing booking details.");
+            const bookingRes = await apiGet<{ booking: Booking }>(`/bookings/${id}`, token);
+            return bookingRes.booking;
+        },
+    });
 
+    const booking = bookingQuery.data ?? null;
     const requiresPayment = useMemo(() => {
         if (!booking) return false;
         return (
@@ -69,80 +65,68 @@ export default function PayBookingPage() {
         );
     }, [booking]);
 
-    useEffect(() => {
-        if (!id) {
-            setErr("Missing booking ID.");
-            setLoading(false);
-            return;
-        }
-        if (!token) {
-            setErr("Please sign in to continue.");
-            setLoading(false);
-            return;
-        }
+    const shouldFetchReceipt = useMemo(() => {
+        if (!booking) return false;
+        const hasProviderRef =
+            typeof booking.payment_provider_ref === "string" &&
+            booking.payment_provider_ref.trim().length > 0;
+        return booking.pay_method === "money" && (hasProviderRef || !requiresPayment || successCheckout);
+    }, [booking, requiresPayment, successCheckout]);
 
-        (async () => {
-            setLoading(true);
-            setErr(null);
-            setReceipt(null);
-
-            try {
-                const bookingRes = await apiGet<{ booking: Booking }>(`/bookings/${id}`, token);
-                const currentBooking = bookingRes.booking;
-                setBooking(currentBooking);
-
-                const needsPayment =
-                    currentBooking.pay_method === "money" &&
-                    currentBooking.status === "pending" &&
-                    toFiniteNumber(currentBooking.total_price_gbp) > 0;
-                const hasProviderRef =
-                    typeof currentBooking.payment_provider_ref === "string" &&
-                    currentBooking.payment_provider_ref.trim().length > 0;
-                const shouldFetchReceipt =
-                    currentBooking.pay_method === "money" && (hasProviderRef || !needsPayment || successCheckout);
-
-                if (shouldFetchReceipt) {
-                    await refreshReceipt();
-                }
-            } catch (e: any) {
-                setErr(e?.message || "Could not load payment details.");
-            } finally {
-                setLoading(false);
-            }
-        })();
-    }, [id, token, successCheckout, refreshReceipt]);
+    const receiptQuery = useQuery({
+        queryKey: ["booking-receipt", id, token, receiptQueryString],
+        enabled: Boolean(token && id && shouldFetchReceipt),
+        retry: false,
+        queryFn: async () => {
+            if (!token || !id) throw new Error("Missing receipt details.");
+            const receiptRes = await apiGet<{ receipt: StripeReceiptDetails }>(
+                `/payments/booking/${id}/receipt${receiptQueryString}`,
+                token
+            );
+            return receiptRes.receipt ?? null;
+        },
+    });
+    const shouldPollReceipt = Boolean(
+        successCheckout &&
+        booking &&
+        booking.pay_method === "money" &&
+        !receiptQuery.data?.receipt_url
+    );
+    const refetchReceipt = receiptQuery.refetch;
 
     useEffect(() => {
-        if (!successCheckout || !booking || booking.pay_method !== "money" || receipt?.receipt_url) {
-            return;
-        }
+        if (!shouldPollReceipt) return;
         const timer = window.setInterval(() => {
-            refreshReceipt();
+            void refetchReceipt();
         }, 2500);
         return () => {
             window.clearInterval(timer);
         };
-    }, [successCheckout, booking?.pay_method, receipt?.receipt_url, refreshReceipt]);
+    }, [shouldPollReceipt, refetchReceipt]);
 
-    async function goToStripeCheckout() {
-        if (!token || !booking) return;
-        setBusy(true);
-        setErr(null);
-        try {
-            const res = await apiPost<{ url: string }>("/payments/checkout-session", { booking_id: booking.id }, token);
-            if (res?.url) {
-                window.location.href = res.url;
+    const checkoutMutation = useMutation({
+        // credit: Stripe Checkout redirect pattern aligned to Stripe docs
+        mutationFn: async () => {
+            if (!token || !booking) throw new Error("Missing booking context.");
+            return apiPost<{ url: string }>("/payments/checkout-session", { booking_id: booking.id }, token);
+        },
+        onSuccess: (response) => {
+            if (response?.url) {
+                window.location.href = response.url;
                 return;
             }
             setErr("Stripe checkout link was not available.");
-        } catch (e: any) {
-            setErr(e?.message || "Unable to start Stripe checkout.");
-        } finally {
-            setBusy(false);
-        }
-    }
+        },
+        onError: (error: unknown) => {
+            setErr(readErrorMessage(error, "Unable to start Stripe checkout."));
+        },
+    });
 
     if (!token) return <Navigate to="/login" replace />;
+
+    const loadErr = bookingQuery.error ? readErrorMessage(bookingQuery.error, "Could not load payment details.") : null;
+    const loading = bookingQuery.isLoading;
+    const receipt = receiptQuery.data ?? null;
 
     const hasStripeReceipt = Boolean(receipt?.receipt_url);
     const bookingTitle = booking?.spot_title ?? "Parking booking";
@@ -166,11 +150,11 @@ export default function PayBookingPage() {
 
     const stripeSummary = hasStripeReceipt
         ? [
-              { label: "Amount received", value: `${POUND}${amountReceived.toFixed(2)}` },
-              { label: "Payment intent", value: receipt?.payment_intent_id ?? "-" },
-              { label: "Charge ID", value: receipt?.charge_id ?? "-" },
-              { label: "Booked at", value: bookedAt },
-          ]
+            { label: "Amount received", value: `${POUND}${amountReceived.toFixed(2)}` },
+            { label: "Payment intent", value: receipt?.payment_intent_id ?? "-" },
+            { label: "Charge ID", value: receipt?.charge_id ?? "-" },
+            { label: "Booked at", value: bookedAt },
+        ]
         : [];
 
     return (
@@ -182,9 +166,9 @@ export default function PayBookingPage() {
             </div>
 
             {loading && <div className="card formSection">Loading checkout...</div>}
-            {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
+            {(err ?? loadErr) && <div className="card formSection" style={{ color: "crimson" }}>{err ?? loadErr}</div>}
 
-            {!loading && !err && booking && (
+            {!loading && !loadErr && booking && (
                 <>
                     {requiresPayment && !successCheckout && (
                         <div className="card formSection" style={{ marginBottom: 14 }}>
@@ -193,8 +177,8 @@ export default function PayBookingPage() {
                                 You will complete payment on Stripe and receive the official receipt there.
                             </div>
                             <div className="rowInline" style={{ marginTop: 12 }}>
-                                <button className="btn btn-primary" onClick={goToStripeCheckout} disabled={busy}>
-                                    {busy ? "Opening Stripe..." : "Continue to Stripe checkout"}
+                                <button className="btn btn-primary" onClick={() => checkoutMutation.mutate()} disabled={checkoutMutation.isPending}>
+                                    {checkoutMutation.isPending ? "Opening Stripe..." : "Continue to Stripe checkout"}
                                 </button>
                             </div>
                         </div>

@@ -8,6 +8,13 @@ type WindowSlot = {
     start: string;
     end: string;
 };
+type RawWindowSlot = {
+    mode?: unknown;
+    date_from?: unknown;
+    date_to?: unknown;
+    start?: unknown;
+    end?: unknown;
+};
 
 export type AvailabilityJson = {
     type: "24_7" | "same_everyday" | "custom_weekly" | "window_slots";
@@ -28,10 +35,6 @@ export type AvailabilityJson = {
 
 export type AvailabilitySpot = {
     availability_json?: AvailabilityJson | null;
-    availability_type?: "24_7" | "weekly";
-    available_days?: number[];
-    daily_start?: string | null;
-    daily_end?: string | null;
 };
 
 export type AuctionBidLike = {
@@ -241,24 +244,25 @@ function isTimeHHMM(value: string) {
     return /^\d{2}:\d{2}$/.test(value);
 }
 
-function toWindowSlot(raw: any): WindowSlot | null {
+function toWindowSlot(raw: unknown): WindowSlot | null {
     if (!raw || typeof raw !== "object") return null;
+    const source = raw as RawWindowSlot;
 
-    if (raw.mode && raw.mode !== "continuous" && raw.mode !== "split") return null;
-    if (typeof raw.date_from !== "string" || typeof raw.date_to !== "string") return null;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw.date_from) || !/^\d{4}-\d{2}-\d{2}$/.test(raw.date_to)) return null;
-    if (raw.date_from > raw.date_to) return null;
+    if (source.mode && source.mode !== "continuous" && source.mode !== "split") return null;
+    if (typeof source.date_from !== "string" || typeof source.date_to !== "string") return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(source.date_from) || !/^\d{4}-\d{2}-\d{2}$/.test(source.date_to)) return null;
+    if (source.date_from > source.date_to) return null;
 
-    if (typeof raw.start !== "string" || typeof raw.end !== "string") return null;
-    if (!isTimeHHMM(raw.start) || !isTimeHHMM(raw.end)) return null;
-    if (raw.date_from === raw.date_to && timeToMinutes(raw.start) >= timeToMinutes(raw.end)) return null;
+    if (typeof source.start !== "string" || typeof source.end !== "string") return null;
+    if (!isTimeHHMM(source.start) || !isTimeHHMM(source.end)) return null;
+    if (source.date_from === source.date_to && timeToMinutes(source.start) >= timeToMinutes(source.end)) return null;
 
     return {
-        mode: raw.mode === "split" ? "split" : "continuous",
-        date_from: raw.date_from,
-        date_to: raw.date_to,
-        start: raw.start,
-        end: raw.end,
+        mode: source.mode === "split" ? "split" : "continuous",
+        date_from: source.date_from,
+        date_to: source.date_to,
+        start: source.start,
+        end: source.end,
     };
 }
 
@@ -299,8 +303,7 @@ function isDaySelectable(spot: AvailabilitySpot, day: Date) {
     if (availability?.date_from && key < availability.date_from) return false;
     if (availability?.date_to && key > availability.date_to) return false;
 
-    const isTwentyFourSeven =
-        availability?.type === "24_7" || (!availability && (spot.availability_type ?? "24_7") === "24_7");
+    const isTwentyFourSeven = !availability || availability.type === "24_7";
     if (isTwentyFourSeven) return true;
 
     const rules = extractAvailabilityRules(spot);
@@ -329,8 +332,7 @@ export function getAutoStartForDate(spot: AvailabilitySpot | null, ymd: string) 
     }
 
     const availability = spot.availability_json;
-    const isTwentyFourSeven =
-        availability?.type === "24_7" || (!availability && (spot.availability_type ?? "24_7") === "24_7");
+    const isTwentyFourSeven = !availability || availability.type === "24_7";
 
     let start = new Date(base);
     if (!isTwentyFourSeven) {
@@ -376,6 +378,7 @@ function formatWindowLabelForDay(slot: WindowSlot, day: Date) {
 
 export function formatAvailability(spot: AvailabilitySpot) {
     const availability = spot.availability_json;
+    if (!availability) return "24/7";
 
     if (availability?.type === "24_7") return "24/7";
     if (availability?.type === "same_everyday" && availability.start && availability.end) {
@@ -393,14 +396,6 @@ export function formatAvailability(spot: AvailabilitySpot) {
 
     if (availability?.type === "custom_weekly" && Array.isArray(availability.rules)) {
         return availability.rules.map((rule) => `${dayShort(rule.dow)} ${rule.start}-${rule.end}`).join(", ");
-    }
-
-    if (spot.availability_type === "24_7") return "24/7";
-    if (spot.availability_type === "weekly" && Array.isArray(spot.available_days)) {
-        const days = spot.available_days.map(dayShort).join(", ");
-        const start = spot.daily_start?.slice(0, 5);
-        const end = spot.daily_end?.slice(0, 5);
-        return start && end ? `${days} ${start}-${end}` : `${days} (weekly)`;
     }
 
     return "Not specified";
@@ -424,8 +419,7 @@ export function isSlotAllowed(spot: AvailabilitySpot, start: Date, end: Date) {
     if (from && start < from) return false;
     if (to && end > to) return false;
 
-    const isTwentyFourSeven =
-        availability?.type === "24_7" || (!availability && (spot.availability_type ?? "24_7") === "24_7");
+    const isTwentyFourSeven = !availability || availability.type === "24_7";
     if (isTwentyFourSeven) return true;
 
     if (!isSameDay(start, end)) return false;
@@ -444,13 +438,18 @@ export function isSlotAllowed(spot: AvailabilitySpot, start: Date, end: Date) {
 
 function extractAvailabilityRules(spot: AvailabilitySpot): Array<{ dow: number; start: string; end: string }> {
     const availability = spot.availability_json;
+    if (!availability) {
+        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: "00:00", end: "23:59" }));
+    }
 
     if (availability?.type === "24_7") {
         return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: "00:00", end: "23:59" }));
     }
 
     if (availability?.type === "same_everyday" && availability.start && availability.end) {
-        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: availability.start!, end: availability.end! }));
+        const start = availability.start;
+        const end = availability.end;
+        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start, end }));
     }
 
     if (availability?.type === "custom_weekly" && Array.isArray(availability.rules)) {
@@ -458,16 +457,6 @@ function extractAvailabilityRules(spot: AvailabilitySpot): Array<{ dow: number; 
             (rule): rule is { dow: number; start: string; end: string } =>
                 typeof rule?.dow === "number" && typeof rule?.start === "string" && typeof rule?.end === "string"
         );
-    }
-
-    if (spot.availability_type === "24_7") {
-        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: "00:00", end: "23:59" }));
-    }
-
-    if (spot.availability_type === "weekly" && Array.isArray(spot.available_days)) {
-        const start = spot.daily_start?.slice(0, 5) ?? "00:00";
-        const end = spot.daily_end?.slice(0, 5) ?? "23:59";
-        return spot.available_days.map((dow) => ({ dow, start, end }));
     }
 
     return [];

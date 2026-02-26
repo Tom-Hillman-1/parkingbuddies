@@ -20,4 +20,10 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    files: ['src/lib/auth.tsx', 'src/pages/createListingSupport.tsx', 'src/pages/spotDetailsSupport.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 ])

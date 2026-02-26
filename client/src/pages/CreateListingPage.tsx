@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import Lottie from "lottie-react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import SpotsMap from "../components/SpotsMap";
-import { apiGet, apiPatch, apiPost } from "../lib/api";
+import { apiGet, apiPatch, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import successAnimation from "../assets/Success.json";
 import type { ParkingSpot } from "../types";
@@ -54,12 +55,6 @@ import type {
     WizardStep,
 } from "./createListingSupport";
 
-function readErrorMessage(error: unknown, fallback: string) {
-    return error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string"
-        ? (error as { message: string }).message
-        : fallback;
-}
-
 function PricingUnitOptionCard({
     id,
     label,
@@ -82,6 +77,91 @@ function PricingUnitOptionCard({
             <span className="wizardOptionTitle">{label}</span>
         </button>
     );
+}
+
+type RawAvailabilityForEdit = {
+    type?: unknown;
+    date_from?: unknown;
+    date_to?: unknown;
+    windows?: unknown[];
+};
+type OwnerContactForEdit = {
+    owner_contact_email?: string | null;
+    owner_contact_phone?: string | null;
+    owner_contact_info?: string | null;
+};
+
+type ListingSubmitPayload = {
+    title: string;
+    description: string;
+    mode: Mode;
+    price_gbp: number;
+    price_unit: PriceUnit;
+    allow_points: boolean;
+    points_cost: number;
+    address_text: string;
+    lat: number;
+    lng: number;
+    image_url: string | null;
+    owner_contact_email: string | null;
+    owner_contact_phone: string | null;
+    owner_contact_info: string | null;
+    availability: ReturnType<typeof toAvailabilityPayload>;
+    parking_type: "private";
+    capacity_total: number;
+    capacity_available: number;
+    auction_start_price_gbp?: number;
+};
+
+function buildEditSnapshot(listing: ParkingSpot, ownerContact: OwnerContactForEdit): DraftSnapshot {
+    const rawAvailability = listing.availability_json;
+    const av = rawAvailability && typeof rawAvailability === "object" ? (rawAvailability as RawAvailabilityForEdit) : null;
+    const todayYmd = toLocalDateInput(new Date());
+    const plus30 = new Date();
+    plus30.setDate(plus30.getDate() + 30);
+    const fallbackFrom = typeof av?.date_from === "string" ? av.date_from : todayYmd;
+    const fallbackTo = typeof av?.date_to === "string" ? av.date_to : toLocalDateInput(plus30);
+
+    let nextAvailabilityWindows: AvailabilityWindow[] = [];
+    if (av?.type === "window_slots" && Array.isArray(av?.windows)) {
+        nextAvailabilityWindows = av.windows
+            .map((window: unknown) => normalizeWindow(window))
+            .filter((window: AvailabilityWindow | null): window is AvailabilityWindow => Boolean(window));
+    }
+
+    if (!nextAvailabilityWindows.length) {
+        nextAvailabilityWindows = [
+            createAvailabilityWindow({
+                from: fallbackFrom,
+                to: fallbackTo,
+                start: DEFAULT_AVAILABILITY_START,
+                end: DEFAULT_AVAILABILITY_END,
+            }),
+        ];
+    }
+
+    return {
+        mode: normalizeMode(listing.mode),
+        title: asString(listing.title),
+        description: asString(listing.description),
+        ownerContactEmail: asString(ownerContact.owner_contact_email),
+        ownerContactPhone: asString(ownerContact.owner_contact_phone),
+        ownerContactInfo: asString(ownerContact.owner_contact_info),
+        capacityTotal: String(listing.capacity_total ?? 1),
+        priceUnit: normalizePriceUnit(listing.price_unit),
+        price: listing.mode === "rent" ? String(listing.price_gbp ?? "") : "",
+        auctionStartPrice:
+            listing.auction_start_price_gbp == null
+                ? DEFAULT_AUCTION_START_PRICE
+                : String(listing.auction_start_price_gbp),
+        allowPoints: Boolean(listing.allow_points),
+        pointsCost: String(listing.points_cost ?? DEFAULT_POINTS_COST),
+        availabilityWindows: nextAvailabilityWindows,
+        addressText: asString(listing.address_text),
+        lat: String(listing.lat ?? ""),
+        lng: String(listing.lng ?? ""),
+        imageUrl: asString(listing.image_url),
+    };
 }
 
 export default function CreateListingPage() {
@@ -131,7 +211,6 @@ export default function CreateListingPage() {
     const [pendingSpacesChoice, setPendingSpacesChoice] = useState<SpaceChoice>("1");
     const [pendingSpacesCustom, setPendingSpacesCustom] = useState("3");
 
-    const [loadingExisting, setLoadingExisting] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
     const [slotSheetError, setSlotSheetError] = useState("");
@@ -145,6 +224,32 @@ export default function CreateListingPage() {
 
     const parsedCoords = parseCoordinates(lat, lng);
     const mapCenter = parsedCoords ?? { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] };
+
+    // credit: server-state loading/caching pattern follows TanStack Query docs (https://tanstack.com/query)
+    const editSnapshotQuery = useQuery({
+        queryKey: ["listing-edit-snapshot", editId, token],
+        enabled: Boolean(isEdit && token && editId),
+        queryFn: async () => {
+            if (!editId || !token) return null;
+            const listingRes = await apiGet<{ parking_spot: ParkingSpot }>(`/parking-spots/${editId}`, token);
+            let ownerContact: OwnerContactForEdit = {};
+
+            try {
+                const contactRes = await apiGet<{ owner_contact: OwnerContactForEdit }>(
+                    `/parking-spots/${editId}/owner-contact`,
+                    token
+                );
+                ownerContact = contactRes.owner_contact ?? {};
+            } catch {
+                ownerContact = {};
+            }
+
+            return buildEditSnapshot(listingRes.parking_spot, ownerContact);
+        },
+        retry: false,
+        staleTime: Number.POSITIVE_INFINITY,
+        refetchOnWindowFocus: false,
+    });
 
     function applySnapshot(snapshot: DraftSnapshot) {
         setMode(snapshot.mode);
@@ -189,87 +294,19 @@ export default function CreateListingPage() {
     }, []);
 
     useEffect(() => {
-        if (!isEdit || !token || !editId) return;
-
-        let active = true;
-        setLoadingExisting(true);
+        if (!isEdit) return;
         setError("");
+    }, [isEdit]);
 
-        apiGet<{ parking_spot: ParkingSpot }>(`/parking-spots/${editId}`, token)
-            .then(async (res) => {
-                if (!active) return;
-                const listing = res.parking_spot;
-                let ownerContact: { owner_contact_email?: string | null; owner_contact_phone?: string | null; owner_contact_info?: string | null } = {};
-                try {
-                    const contactRes = await apiGet<{ owner_contact: { owner_contact_email?: string | null; owner_contact_phone?: string | null; owner_contact_info?: string | null } }>(
-                        `/parking-spots/${editId}/owner-contact`,
-                        token
-                    );
-                    ownerContact = contactRes.owner_contact ?? {};
-                } catch {
-                    ownerContact = {};
-                }
-                const av = (listing.availability_json ?? null) as any;
-                const todayYmd = toLocalDateInput(new Date());
-                const plus30 = new Date();
-                plus30.setDate(plus30.getDate() + 30);
-                const fallbackFrom = typeof av?.date_from === "string" ? av.date_from : todayYmd;
-                const fallbackTo = typeof av?.date_to === "string" ? av.date_to : toLocalDateInput(plus30);
-                let nextAvailabilityWindows: AvailabilityWindow[] = [];
+    useEffect(() => {
+        if (!editSnapshotQuery.data) return;
+        applySnapshot(editSnapshotQuery.data);
+    }, [editSnapshotQuery.data]);
 
-                if (av?.type === "window_slots" && Array.isArray(av?.windows)) {
-                    nextAvailabilityWindows = av.windows
-                        .map((window: unknown) => normalizeWindow(window))
-                        .filter((window: AvailabilityWindow | null): window is AvailabilityWindow => Boolean(window));
-                }
-                if (!nextAvailabilityWindows.length) {
-                    nextAvailabilityWindows = [
-                        createAvailabilityWindow({
-                            from: fallbackFrom,
-                            to: fallbackTo,
-                            start: DEFAULT_AVAILABILITY_START,
-                            end: DEFAULT_AVAILABILITY_END,
-                        }),
-                    ];
-                }
-
-                const nextSnapshot: DraftSnapshot = {
-                    mode: normalizeMode(listing.mode),
-                    title: asString(listing.title),
-                    description: asString(listing.description),
-                    ownerContactEmail: asString(ownerContact.owner_contact_email),
-                    ownerContactPhone: asString(ownerContact.owner_contact_phone),
-                    ownerContactInfo: asString(ownerContact.owner_contact_info),
-                    capacityTotal: String(listing.capacity_total ?? 1),
-                    priceUnit: normalizePriceUnit(listing.price_unit),
-                    price: listing.mode === "rent" ? String(listing.price_gbp ?? "") : "",
-                    auctionStartPrice:
-                        listing.auction_start_price_gbp == null
-                            ? DEFAULT_AUCTION_START_PRICE
-                            : String(listing.auction_start_price_gbp),
-                    allowPoints: Boolean(listing.allow_points),
-                    pointsCost: String(listing.points_cost ?? DEFAULT_POINTS_COST),
-                    availabilityWindows: nextAvailabilityWindows,
-                    addressText: asString(listing.address_text),
-                    lat: String(listing.lat ?? ""),
-                    lng: String(listing.lng ?? ""),
-                    imageUrl: asString(listing.image_url),
-                };
-
-                applySnapshot(nextSnapshot);
-            })
-            .catch((error: unknown) => {
-                if (!active) return;
-                setError(readErrorMessage(error, "Could not load listing for editing."));
-            })
-            .finally(() => {
-                if (active) setLoadingExisting(false);
-            });
-
-        return () => {
-            active = false;
-        };
-    }, [isEdit, editId, token]);
+    useEffect(() => {
+        if (!editSnapshotQuery.isError) return;
+        setError(readErrorMessage(editSnapshotQuery.error, "Could not load listing for editing."));
+    }, [editSnapshotQuery.isError, editSnapshotQuery.error]);
 
     useEffect(() => {
         if (mode === "free") {
@@ -529,7 +566,7 @@ export default function CreateListingPage() {
                                 ? "Points must be at least 1."
                                 : "";
 
-    const availabilityPayloadResult = useMemo<{ payload: Record<string, any> | null; issue: string }>(() => {
+    const availabilityPayloadResult = useMemo<{ payload: ReturnType<typeof toAvailabilityPayload> | null; issue: string }>(() => {
         const issue = validateAvailabilityWindows(availabilityWindows);
         if (issue) return { payload: null, issue };
         return { payload: toAvailabilityPayload(availabilityWindows), issue: "" };
@@ -561,7 +598,7 @@ export default function CreateListingPage() {
     };
     const publishReady = stepReady[6];
 
-    const submitPayload: Record<string, any> | null =
+    const submitPayload: ListingSubmitPayload | null =
         !submitIssue && parsedCoords && availabilityPayloadResult.payload
             ? {
                   title: normalizedTitle,
@@ -936,7 +973,7 @@ export default function CreateListingPage() {
 
     return (
         <div className="container createWizardPage">
-            {loadingExisting ? (
+            {editSnapshotQuery.isPending ? (
                 <div className="card formSection createFlowLocked">
                     <div className="h3">Loading listing details...</div>
                     <div className="muted">Pulling your saved information and availability settings.</div>

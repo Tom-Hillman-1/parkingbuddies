@@ -3,7 +3,19 @@ import type { Marker as LeafletMarker } from "leaflet";
 import L from "leaflet";
 import { MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { Link } from "react-router-dom";
-import type { ParkingSpot } from "../types";
+
+export type MapSpot = {
+    id: string;
+    title: string;
+    address_text: string;
+    lat: number;
+    lng: number;
+    image_url: string | null;
+    mode: "free" | "rent" | "auction";
+    price_gbp: number | string | null | undefined;
+    capacity_total?: number;
+    capacity_available?: number;
+};
 
 type PinState = "default" | "hovered" | "selected";
 
@@ -23,7 +35,7 @@ const pinIcon = {
     selected: makePin("selected"),
 };
 
-function moneyLabel(value: number | string | null | undefined, mode?: ParkingSpot["mode"]) {
+function moneyLabel(value: number | string | null | undefined, mode?: MapSpot["mode"]) {
     const amount = Number(value ?? 0);
 
     if (mode === "auction") {
@@ -35,7 +47,7 @@ function moneyLabel(value: number | string | null | undefined, mode?: ParkingSpo
     return `\u00A3${amount.toFixed(2)}`;
 }
 
-function modeLabel(mode?: ParkingSpot["mode"]) {
+function modeLabel(mode?: MapSpot["mode"]) {
     if (!mode) return "Unknown";
     return mode.charAt(0).toUpperCase() + mode.slice(1);
 }
@@ -70,7 +82,7 @@ export default function SpotsMap({
     pickerPosition,
     onMapPick,
 }: {
-    spots: ParkingSpot[];
+    spots: MapSpot[];
     center?: { lat: number; lng: number };
     selectedId?: string | null;
     hoveredId?: string | null;

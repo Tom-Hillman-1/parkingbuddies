@@ -6,8 +6,6 @@ export type ParkingSpot = {
 
     mode: "free" | "rent" | "auction";
     price_gbp: number;
-
-    // Phase 2 additions (safe)
     price_unit?: "hour" | "day" | "week";
     auction_end?: string | null;
     auction_start_price_gbp?: number | null;
@@ -28,19 +26,22 @@ export type ParkingSpot = {
     owner_contact_email?: string | null;
     owner_contact_phone?: string | null;
     owner_contact_info?: string | null;
-
-    // OLD fields (keep if your DB still has them)
-    availability_start: string | null;
-    availability_end: string | null;
-
-    // NEW unified availability (from your newer server logic)
     availability_json?: {
-        type: "24_7" | "same_everyday" | "custom_weekly";
+        type: "24_7" | "same_everyday" | "custom_weekly" | "window_slots";
         date_from?: string;
         date_to?: string;
-        start?: string; // "HH:MM"
-        end?: string; // "HH:MM"
-        rules?: Array<{ dow: number; start: string; end: string }>; // dow: 0-6
+        start?: string;
+        end?: string;
+        rules?: Array<{ dow: number; start: string; end: string }>;
+        windows?: Array<{
+            mode?: "continuous" | "split";
+            date_from: string;
+            date_to: string;
+            start: string;
+            end: string;
+            exclude_dows?: number[];
+        }>;
+        parking_kind?: string;
     } | null;
 
     is_active: boolean;

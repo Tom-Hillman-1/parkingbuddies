@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type Request, type Response } from "express";
 import cors from "cors";
 import * as dotenv from "dotenv";
 import { pool } from "./db";
@@ -26,10 +26,10 @@ app.use("/dashboard", dashboardRoutes);
 app.use("/payments", paymentsRoutes);
 app.use("/auctions", auctionsRoutes);
 
-app.get("/health", (_req, res) => {
+app.get("/health", (_req: Request, res: Response) => {
     res.json({ ok: true, message: "ParkingBuddies API is running" });
 });
-app.get("/db-health", async (_req, res) => {
+app.get("/db-health", async (_req: Request, res: Response) => {
     try {
         const r = await pool.query("SELECT 1 AS ok");
         res.json({ ok: r.rows[0].ok === 1 });

@@ -3,8 +3,9 @@ const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 type AvailabilityRule = { dow: number; start: string; end: string };
 type AvailabilityWindow = { start: Date; end: Date };
 type Queryable = {
-    query: (text: string, params?: any[]) => Promise<{ rows: Array<{ count?: number | string }> }>;
+    query: (text: string, params?: unknown[]) => Promise<{ rows: Array<{ count?: number | string }> }>;
 };
+const PENDING_BOOKING_HOLD_MINUTES = 30;
 
 function parseTimeToMinutes(hhmm: string) {
     const [rawH, rawM] = hhmm.split(":");
@@ -13,7 +14,7 @@ function parseTimeToMinutes(hhmm: string) {
     return h * 60 + m;
 }
 
-export function setTime(d: Date, hhmm: string) {
+function setTime(d: Date, hhmm: string) {
     const [rawH, rawM] = hhmm.split(":");
     const h = Number(rawH ?? 0);
     const m = Number(rawM ?? 0);
@@ -45,9 +46,12 @@ export function normalizeExcludeDows(raw: any): number[] {
     );
 }
 
-export function extractAvailabilityRules(spot: any): AvailabilityRule[] {
+function extractAvailabilityRules(spot: any): AvailabilityRule[] {
     const rules: AvailabilityRule[] = [];
     const a = spot?.availability_json;
+    if (!a) {
+        return ALL_DAYS.map((dow) => ({ dow, start: "00:00", end: "23:59" }));
+    }
 
     if (a?.type === "24_7") {
         return ALL_DAYS.map((dow) => ({ dow, start: "00:00", end: "23:59" }));
@@ -68,19 +72,10 @@ export function extractAvailabilityRules(spot: any): AvailabilityRule[] {
         }
         if (rules.length) return rules;
     }
-
-    if (spot?.availability_type === "24_7") {
-        return ALL_DAYS.map((dow) => ({ dow, start: "00:00", end: "23:59" }));
-    }
-    if (spot?.availability_type === "weekly" && Array.isArray(spot?.available_days)) {
-        const ds = spot?.daily_start?.slice(0, 5) ?? "00:00";
-        const de = spot?.daily_end?.slice(0, 5) ?? "23:59";
-        return spot.available_days.map((dow: number) => ({ dow, start: ds, end: de }));
-    }
     return rules;
 }
 
-export function buildAvailabilityWindows(spot: any, maxDaysForward = 30): AvailabilityWindow[] {
+function buildAvailabilityWindows(spot: any, maxDaysForward = 30): AvailabilityWindow[] {
     const a: any = spot?.availability_json;
     const now = new Date();
     const maxEnd = new Date(now.getTime() + maxDaysForward * 24 * 60 * 60 * 1000);
@@ -148,7 +143,7 @@ export function buildAvailabilityWindows(spot: any, maxDaysForward = 30): Availa
     return windows;
 }
 
-export function subtractBookings(
+function subtractBookings(
     window: AvailabilityWindow,
     bookings: AvailabilityWindow[],
     capacity = 1
@@ -258,7 +253,7 @@ export function isSlotAllowed(spot: any, start: Date, end: Date) {
     const rules = extractAvailabilityRules(spot);
     if (!rules.length) return false;
 
-    const isTwentyFourSeven = a?.type === "24_7" || (!a && (spot?.availability_type ?? "24_7") === "24_7");
+    const isTwentyFourSeven = a?.type === "24_7";
     const dateFrom = a?.date_from ? new Date(`${a.date_from}T00:00:00`) : null;
     const dateTo = a?.date_to ? new Date(`${a.date_to}T23:59:59`) : null;
     if (dateFrom && start < dateFrom) return false;
@@ -306,19 +301,22 @@ export function availabilityDateRange(availability: any) {
 
 export async function countOverlappingBookings(
     db: Queryable,
-    parkingSpotId: string | string[] | undefined,
+    parkingSpotId: unknown,
     startIso: string,
     endIso: string
 ) {
     const spotId = Array.isArray(parkingSpotId) ? parkingSpotId[0] : parkingSpotId;
-    if (!spotId) return 0;
+    if (typeof spotId !== "string" || !spotId.trim()) return 0;
     const overlapR = await db.query(
         `SELECT COUNT(*)::int AS count
          FROM bookings
          WHERE parking_spot_id = $1
-           AND status IN ('confirmed', 'pending')
+           AND (
+               status = 'confirmed'
+               OR (status = 'pending' AND created_at >= now() - ($4 * interval '1 minute'))
+           )
            AND NOT (end_time <= $2 OR start_time >= $3)`,
-        [spotId, startIso, endIso]
+        [spotId, startIso, endIso, PENDING_BOOKING_HOLD_MINUTES]
     );
     return Number(overlapR.rows[0]?.count ?? 0);
 }

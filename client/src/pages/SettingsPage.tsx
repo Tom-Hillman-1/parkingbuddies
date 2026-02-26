@@ -1,36 +1,60 @@
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
 import { Link, Navigate, useNavigate } from "react-router-dom";
-import { apiGet, apiPatch } from "../lib/api";
+import { apiGet, apiPatch, readErrorMessage } from "../lib/api";
 import { useAuth, useStripeConnect } from "../lib/auth";
 import type { User } from "../types";
 
-type SettingsPayload = {
-    name?: string;
-    email?: string;
-    home_address?: string;
-};
+const profileSchema = z.object({
+    name: z.string().trim(),
+    email: z.string().trim(),
+    homeAddress: z.string().trim(),
+}).superRefine((value, ctx) => {
+    if (value.email && !z.string().email().safeParse(value.email).success) {
+        ctx.addIssue({ code: "custom", path: ["email"], message: "Enter a valid email." });
+    }
+});
 
-function isStrongPassword(password: string) {
-    if (password.length < 8) return false;
-    const hasLetter = /[A-Za-z]/.test(password);
-    const hasNumber = /[0-9]/.test(password);
-    return hasLetter && hasNumber;
-}
+const passwordSchema = z.object({
+    currentPassword: z.string().trim().min(1, "Enter your current password."),
+    newPassword: z.string().trim().min(8, "New password must be at least 8 characters."),
+    confirmPassword: z.string().trim().min(1, "Confirm your new password."),
+}).superRefine((value, ctx) => {
+    if (!/[A-Za-z]/.test(value.newPassword) || !/[0-9]/.test(value.newPassword)) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["newPassword"],
+            message: "New password must include at least one letter and one number.",
+        });
+    }
+    if (value.newPassword === value.currentPassword) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["newPassword"],
+            message: "New password must be different from your current password.",
+        });
+    }
+    if (value.newPassword !== value.confirmPassword) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["confirmPassword"],
+            message: "New password and confirmation do not match.",
+        });
+    }
+});
+
+type ProfileFormValues = z.infer<typeof profileSchema>;
+type PasswordFormValues = z.infer<typeof passwordSchema>;
+type SettingsResponse = { name: string; email: string; home_address: string | null };
+type SettingsQueryData = { name: string; email: string; homeAddress: string };
 
 export default function SettingsPage() {
     const { token, logout } = useAuth();
     const navigate = useNavigate();
 
-    const [name, setName] = useState("");
-    const [email, setEmail] = useState("");
-    const [homeAddress, setHomeAddress] = useState("");
-    const [currentPassword, setCurrentPassword] = useState("");
-    const [newPassword, setNewPassword] = useState("");
-    const [confirmPassword, setConfirmPassword] = useState("");
-
-    const [loading, setLoading] = useState(true);
-    const [savingProfile, setSavingProfile] = useState(false);
-    const [savingPassword, setSavingPassword] = useState(false);
     const [msg, setMsg] = useState<string | null>(null);
     const [err, setErr] = useState<string | null>(null);
     const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
@@ -43,43 +67,58 @@ export default function SettingsPage() {
         openConnectDashboard,
     } = useStripeConnect(token);
 
-    useEffect(() => {
-        if (!token) return;
+    // credit: form validation setup pattern adapted from react-hook-form + zod docs
+    const profileForm = useForm<ProfileFormValues>({
+        resolver: zodResolver(profileSchema),
+        defaultValues: { name: "", email: "", homeAddress: "" },
+    });
+    const passwordForm = useForm<PasswordFormValues>({
+        resolver: zodResolver(passwordSchema),
+        defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
+    });
 
-        (async () => {
-            setLoading(true);
-            setErr(null);
-            setMsg(null);
+    // credit: query loading pattern adapted from TanStack Query docs
+    const settingsQuery = useQuery<SettingsQueryData>({
+        queryKey: ["settings-page", token],
+        enabled: Boolean(token),
+        queryFn: async () => {
+            if (!token) throw new Error("Missing auth token");
+            const meRes = await apiGet<{ user: User }>("/me", token);
+
+            let settings: SettingsResponse = {
+                name: meRes.user.name ?? "",
+                email: meRes.user.email ?? "",
+                home_address: null,
+            };
 
             try {
-                // 1) Load base user info
-                const r1 = await apiGet<{ user: User }>("/me", token);
-
-                // 2) Load settings (if your backend returns extra fields like home_address)
-                // If your backend doesn't have GET /settings, comment this out and just use /me.
-                try {
-                    const r2 = await apiGet<{ settings: { name: string; email: string; home_address: string | null } }>(
-                        "/settings",
-                        token
-                    );
-                    setName(r2.settings.name ?? r1.user.name ?? "");
-                    setEmail(r2.settings.email ?? r1.user.email ?? "");
-                    setHomeAddress(r2.settings.home_address ?? "");
-                } catch {
-                    // fallback if GET /settings isn't implemented
-                    setName(r1.user.name ?? "");
-                    setEmail(r1.user.email ?? "");
-                    setHomeAddress("");
-                }
-
-                await refreshConnectStatus(true);
-            } catch (e: any) {
-                setErr(e.message || "Failed to load settings");
-            } finally {
-                setLoading(false);
+                const settingsRes = await apiGet<{ settings: SettingsResponse }>("/settings", token);
+                settings = settingsRes.settings;
+            } catch {
+                settings = {
+                    name: meRes.user.name ?? "",
+                    email: meRes.user.email ?? "",
+                    home_address: null,
+                };
             }
-        })();
-    }, [token, refreshConnectStatus]);
+
+            await refreshConnectStatus(true);
+            return {
+                name: settings.name ?? "",
+                email: settings.email ?? "",
+                homeAddress: settings.home_address ?? "",
+            };
+        },
+    });
+
+    useEffect(() => {
+        if (!settingsQuery.data) return;
+        profileForm.reset({
+            name: settingsQuery.data.name,
+            email: settingsQuery.data.email,
+            homeAddress: settingsQuery.data.homeAddress,
+        });
+    }, [settingsQuery.data, profileForm]);
 
     if (!token) {
         return <Navigate to="/" replace />;
@@ -99,6 +138,9 @@ export default function SettingsPage() {
             : connect.onboarding_complete
                 ? "badge badge--green"
                 : "badge badge--warm";
+    const loadErr = settingsQuery.error
+        ? readErrorMessage(settingsQuery.error, "Failed to load settings")
+        : null;
 
     async function handleBeginConnectOnboarding(mode: "stripe" | "demo" = "stripe") {
         setErr(null);
@@ -121,81 +163,59 @@ export default function SettingsPage() {
         }
     }
 
-    async function save() {
-        setSavingProfile(true);
+    const saveProfile = profileForm.handleSubmit(async (values) => {
         setErr(null);
         setMsg(null);
 
         try {
-            const body: SettingsPayload = {
-                name: name.trim() || undefined,
-                email: email.trim() || undefined,
-                home_address: homeAddress.trim() || undefined,
-            };
-
-            await apiPatch<{ user: any }>("/settings/profile", body, token ?? undefined);
-
+            await apiPatch<{ user: User }>(
+                "/settings/profile",
+                {
+                    name: values.name.trim() || undefined,
+                    email: values.email.trim() || undefined,
+                    home_address: values.homeAddress.trim() || undefined,
+                },
+                token
+            );
             setMsg("Saved");
-        } catch (e: any) {
-            setErr(e.message || "Save failed");
-        } finally {
-            setSavingProfile(false);
+        } catch (error: unknown) {
+            setErr(readErrorMessage(error, "Save failed"));
         }
-    }
+    });
 
-    async function updatePassword() {
-        const current = currentPassword;
-        const next = newPassword;
-        const confirm = confirmPassword;
-
+    const updatePassword = passwordForm.handleSubmit(async (values) => {
         setPasswordErr(null);
         setPasswordMsg(null);
 
-        if (!current.trim()) {
-            setPasswordErr("Enter your current password.");
-            return;
-        }
-        if (!next.trim()) {
-            setPasswordErr("Enter a new password.");
-            return;
-        }
-        if (!isStrongPassword(next)) {
-            setPasswordErr("New password must be at least 8 characters and include at least one letter and one number.");
-            return;
-        }
-        if (next !== confirm) {
-            setPasswordErr("New password and confirmation do not match.");
-            return;
-        }
-        if (current === next) {
-            setPasswordErr("New password must be different from your current password.");
-            return;
-        }
-
-        setSavingPassword(true);
         try {
-            await apiPatch("/settings/password", { currentPassword: current, newPassword: next }, token ?? undefined);
+            await apiPatch(
+                "/settings/password",
+                { currentPassword: values.currentPassword, newPassword: values.newPassword },
+                token
+            );
             setPasswordMsg("Password changed successfully.");
-            setCurrentPassword("");
-            setNewPassword("");
-            setConfirmPassword("");
-        } catch (e: any) {
-            const raw = String(e?.message || "Password update failed");
+            passwordForm.reset({ currentPassword: "", newPassword: "", confirmPassword: "" });
+        } catch (error: unknown) {
+            const raw = readErrorMessage(error, "Password update failed");
             if (/current password is incorrect/i.test(raw)) {
                 setPasswordErr("Current password is incorrect.");
-            } else if (/must be at least 8 characters/i.test(raw)) {
-                setPasswordErr("New password must be at least 8 characters and include at least one letter and one number.");
-            } else if (/different from/i.test(raw)) {
-                setPasswordErr("New password must be different from your current password.");
-            } else if (/required/i.test(raw)) {
-                setPasswordErr("Current password and new password are required.");
-            } else {
-                setPasswordErr(raw);
+                return;
             }
-        } finally {
-            setSavingPassword(false);
+            if (/must be at least 8 characters/i.test(raw)) {
+                setPasswordErr("New password must be at least 8 characters and include at least one letter and one number.");
+                return;
+            }
+            if (/different from/i.test(raw)) {
+                setPasswordErr("New password must be different from your current password.");
+                return;
+            }
+            if (/required/i.test(raw)) {
+                setPasswordErr("Current password and new password are required.");
+                return;
+            }
+            setPasswordErr(raw);
         }
-    }
+    });
 
     return (
         <div className="container settingsPage">
@@ -205,10 +225,10 @@ export default function SettingsPage() {
                 <div className="heroSub muted">Update your profile and preferences.</div>
             </div>
 
-            {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
+            {(err ?? loadErr) && <div className="card formSection" style={{ color: "crimson" }}>{err ?? loadErr}</div>}
             {msg && <div className="card formSection settingsSavedNotice">{msg}</div>}
 
-            {!loading && (
+            {!settingsQuery.isLoading && (
                 <div className="settingsGrid">
                     <div className="settingsStack">
                         <div className="card formSection settingsPanel settingsPanel--profile">
@@ -222,37 +242,29 @@ export default function SettingsPage() {
 
                             <label>
                                 <span>Name</span>
-                                <input
-                                    className="input"
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                    placeholder="Your name"
-                                />
+                                <input className="input" placeholder="Your name" {...profileForm.register("name")} />
                             </label>
 
                             <label>
                                 <span>Email</span>
-                                <input
-                                    className="input"
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    placeholder="you@example.com"
-                                />
+                                <input className="input" placeholder="you@example.com" {...profileForm.register("email")} />
                             </label>
+                            {profileForm.formState.errors.email && (
+                                <div className="spotAlert">{profileForm.formState.errors.email.message}</div>
+                            )}
 
                             <label>
                                 <span>Home base (optional)</span>
                                 <input
                                     className="input"
-                                    value={homeAddress}
-                                    onChange={(e) => setHomeAddress(e.target.value)}
                                     placeholder="e.g. 12 Example Road, London"
+                                    {...profileForm.register("homeAddress")}
                                 />
                             </label>
 
                             <div className="rowInline">
-                                <button onClick={save} disabled={savingProfile} className="btn btn-primary">
-                                    {savingProfile ? "Saving..." : "Save changes"}
+                                <button onClick={saveProfile} disabled={profileForm.formState.isSubmitting} className="btn btn-primary">
+                                    {profileForm.formState.isSubmitting ? "Saving..." : "Save changes"}
                                 </button>
                                 <Link to="/dashboard" className="btn">Back to dashboard</Link>
                             </div>
@@ -272,50 +284,59 @@ export default function SettingsPage() {
                                     className="input"
                                     type="password"
                                     placeholder="Enter current password"
-                                    value={currentPassword}
-                                    onChange={(e) => {
-                                        setCurrentPassword(e.target.value);
-                                        setPasswordErr(null);
-                                        setPasswordMsg(null);
-                                    }}
+                                    {...passwordForm.register("currentPassword", {
+                                        onChange: () => {
+                                            setPasswordErr(null);
+                                            setPasswordMsg(null);
+                                        },
+                                    })}
                                 />
                             </label>
+                            {passwordForm.formState.errors.currentPassword && (
+                                <div className="spotAlert">{passwordForm.formState.errors.currentPassword.message}</div>
+                            )}
                             <label>
                                 <span>New password</span>
                                 <input
                                     className="input"
                                     type="password"
                                     placeholder="Create a new password"
-                                    value={newPassword}
-                                    onChange={(e) => {
-                                        setNewPassword(e.target.value);
-                                        setPasswordErr(null);
-                                        setPasswordMsg(null);
-                                    }}
+                                    {...passwordForm.register("newPassword", {
+                                        onChange: () => {
+                                            setPasswordErr(null);
+                                            setPasswordMsg(null);
+                                        },
+                                    })}
                                 />
                             </label>
                             <div className="tiny muted">
                                 Minimum 8 characters with at least one letter and one number.
                             </div>
+                            {passwordForm.formState.errors.newPassword && (
+                                <div className="spotAlert">{passwordForm.formState.errors.newPassword.message}</div>
+                            )}
                             <label>
                                 <span>Confirm new password</span>
                                 <input
                                     className="input"
                                     type="password"
                                     placeholder="Repeat new password"
-                                    value={confirmPassword}
-                                    onChange={(e) => {
-                                        setConfirmPassword(e.target.value);
-                                        setPasswordErr(null);
-                                        setPasswordMsg(null);
-                                    }}
+                                    {...passwordForm.register("confirmPassword", {
+                                        onChange: () => {
+                                            setPasswordErr(null);
+                                            setPasswordMsg(null);
+                                        },
+                                    })}
                                 />
                             </label>
+                            {passwordForm.formState.errors.confirmPassword && (
+                                <div className="spotAlert">{passwordForm.formState.errors.confirmPassword.message}</div>
+                            )}
                             {passwordErr && <div className="spotAlert">{passwordErr}</div>}
                             {passwordMsg && <div className="badge badge--green">{passwordMsg}</div>}
                             <div className="rowInline">
-                                <button onClick={updatePassword} className="btn btn-primary" disabled={savingPassword}>
-                                    {savingPassword ? "Updating..." : "Update password"}
+                                <button onClick={updatePassword} className="btn btn-primary" disabled={passwordForm.formState.isSubmitting}>
+                                    {passwordForm.formState.isSubmitting ? "Updating..." : "Update password"}
                                 </button>
                                 <button
                                     onClick={() => {
@@ -331,7 +352,6 @@ export default function SettingsPage() {
                     </div>
 
                     <div className="settingsStack">
-
                         <div className="card formSection settingsPanel settingsPanel--payouts">
                             <div className="sectionHeader sectionHeader--payments">
                                 <div className="sectionHeaderTitle">
@@ -379,11 +399,11 @@ export default function SettingsPage() {
                                         ? "Opening..."
                                         : connect?.demo_bypass
                                             ? "Connect Stripe instead"
-                                        : !connect?.account_id
-                                            ? "Connect Stripe"
-                                            : connect.onboarding_complete
-                                                ? "Update Stripe details"
-                                                : "Continue onboarding"}
+                                            : !connect?.account_id
+                                                ? "Connect Stripe"
+                                                : connect.onboarding_complete
+                                                    ? "Update Stripe details"
+                                                    : "Continue onboarding"}
                                 </button>
                                 {connect?.demo_available && !connect?.demo_bypass && !connect?.account_id && (
                                     <button
@@ -401,10 +421,8 @@ export default function SettingsPage() {
                                 >
                                     Open Stripe dashboard
                                 </button>
-
                             </div>
                         </div>
-
                     </div>
                 </div>
             )}

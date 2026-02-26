@@ -19,6 +19,14 @@ export type AvailabilityWindow = {
     end: string;
 };
 type AvailabilityWindowInput = Pick<AvailabilityWindow, "from" | "to" | "start" | "end">;
+type RawAvailabilityWindow = {
+    from?: unknown;
+    to?: unknown;
+    date_from?: unknown;
+    date_to?: unknown;
+    start?: unknown;
+    end?: unknown;
+};
 export type DraftSnapshot = {
     mode: Mode;
     title: string;
@@ -212,11 +220,13 @@ export function normalizePriceUnit(value: unknown): PriceUnit {
     return value === "day" || value === "week" ? value : "hour";
 }
 
-export function normalizeWindow(raw: any): AvailabilityWindow | null {
-    const from = typeof raw?.from === "string" ? raw.from : typeof raw?.date_from === "string" ? raw.date_from : "";
-    const to = typeof raw?.to === "string" ? raw.to : typeof raw?.date_to === "string" ? raw.date_to : "";
-    const start = typeof raw?.start === "string" ? raw.start : "";
-    const end = typeof raw?.end === "string" ? raw.end : "";
+export function normalizeWindow(raw: unknown): AvailabilityWindow | null {
+    if (!raw || typeof raw !== "object") return null;
+    const source = raw as RawAvailabilityWindow;
+    const from = typeof source.from === "string" ? source.from : typeof source.date_from === "string" ? source.date_from : "";
+    const to = typeof source.to === "string" ? source.to : typeof source.date_to === "string" ? source.date_to : "";
+    const start = typeof source.start === "string" ? source.start : "";
+    const end = typeof source.end === "string" ? source.end : "";
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return null;
     if (from > to) return null;

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import SpotsMap from "../components/SpotsMap";
-import { apiGet, apiPost } from "../lib/api";
+import { apiGet, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { Booking as SharedBooking, ParkingSpot as SharedParkingSpot } from "../types";
 import {
@@ -37,10 +38,6 @@ type PayMethod = "money" | "points";
 type ParkingSpot = Omit<SharedParkingSpot, "price_gbp" | "availability_json"> & {
     price_gbp: number | string;
     availability_json?: AvailabilityJson | null;
-    availability_type?: "24_7" | "weekly";
-    available_days?: number[];
-    daily_start?: string | null;
-    daily_end?: string | null;
 };
 
 type SpotBooking = Pick<SharedBooking, "id" | "start_time" | "end_time" | "status" | "pay_method" | "total_price_gbp">;
@@ -96,12 +93,30 @@ export default function SpotDetailsPage() {
     const navigate = useNavigate();
     const { token, user } = useAuth();
 
-    const [spot, setSpot] = useState<ParkingSpot | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    // credit: server-state loading/caching pattern follows TanStack Query docs (https://tanstack.com/query)
+    const spotQuery = useQuery({
+        queryKey: ["spot", id],
+        enabled: !!id,
+        queryFn: async () => {
+            const response = await apiGet<{ parking_spot: ParkingSpot }>(`/parking-spots/${id}`);
+            return response.parking_spot ?? null;
+        },
+        refetchOnWindowFocus: false,
+    });
 
-    const [bookings, setBookings] = useState<SpotBooking[]>([]);
-    const [auctionInfo, setAuctionInfo] = useState<AuctionInfo | null>(null);
+    const bookingsQuery = useQuery({
+        queryKey: ["spot-bookings", id],
+        enabled: !!id,
+        queryFn: async () => {
+            try {
+                const response = await apiGet<{ bookings: SpotBooking[] }>(`/bookings/spot/${id}`);
+                return response.bookings ?? [];
+            } catch {
+                return [] as SpotBooking[];
+            }
+        },
+        refetchOnWindowFocus: false,
+    });
 
     const [selectedDate, setSelectedDate] = useState(toLocalDateInput(new Date()));
     const [selectedStartTime, setSelectedStartTime] = useState(() => toTimeInput(nextWholeQuarterHour()));
@@ -126,66 +141,25 @@ export default function SpotDetailsPage() {
     const [busy, setBusy] = useState(false);
     const [bidBusy, setBidBusy] = useState(false);
 
-    const refreshBookings = useCallback(async (spotId: string) => {
-        try {
-            const r = await apiGet<{ bookings: SpotBooking[] }>(`/bookings/spot/${spotId}`);
-            setBookings(r.bookings ?? []);
-        } catch {
-            setBookings([]);
-        }
-    }, []);
-
-    const refreshAuction = useCallback(async () => {
-        if (!spot || spot.mode !== "auction") {
-            setAuctionInfo(null);
-            return;
-        }
-
-        try {
-            const summary = token
-                ? await apiGet<{ auction: AuctionInfo }>(`/auctions/${spot.id}`, token)
-                : await apiGet<{ auction: AuctionInfo }>(`/auctions/${spot.id}`);
-            setAuctionInfo(summary.auction ?? null);
-        } catch {
-            setAuctionInfo(null);
-        }
-    }, [spot, token]);
-
-    useEffect(() => {
-        if (!id) return;
-
-        let active = true;
-        setLoading(true);
-        setError(null);
-
-        apiGet<{ parking_spot: ParkingSpot }>(`/parking-spots/${id}`)
-            .then((r) => {
-                if (!active) return;
-                setSpot(r.parking_spot ?? null);
-            })
-            .catch((e: any) => {
-                if (!active) return;
-                setError(e?.message || "Failed to load listing.");
-            })
-            .finally(() => {
-                if (active) setLoading(false);
-            });
-
-        void refreshBookings(id);
-
-        return () => {
-            active = false;
-        };
-    }, [id, refreshBookings]);
-
-    useEffect(() => {
-        if (!spot || spot.mode !== "auction") return;
-        void refreshAuction();
-        const timer = window.setInterval(() => {
-            void refreshAuction();
-        }, 10000);
-        return () => window.clearInterval(timer);
-    }, [spot, refreshAuction]);
+    const spot = spotQuery.data ?? null;
+    const bookings = useMemo(() => bookingsQuery.data ?? [], [bookingsQuery.data]);
+    const auctionQuery = useQuery({
+        queryKey: ["spot-auction", spot?.id, token ? "auth" : "anon"],
+        enabled: !!spot && spot.mode === "auction",
+        queryFn: async () => {
+            try {
+                const summary = token
+                    ? await apiGet<{ auction: AuctionInfo }>(`/auctions/${spot?.id}`, token)
+                    : await apiGet<{ auction: AuctionInfo }>(`/auctions/${spot?.id}`);
+                return summary.auction ?? null;
+            } catch {
+                return null as AuctionInfo | null;
+            }
+        },
+        refetchInterval: 10000,
+        refetchOnWindowFocus: false,
+    });
+    const auctionInfo = auctionQuery.data ?? null;
 
     useEffect(() => {
         const date = searchParams.get("date");
@@ -359,7 +333,7 @@ export default function SpotDetailsPage() {
 
             const r = await apiPost<{ booking: SpotBooking }>("/bookings", body, token);
             const booking = r.booking;
-            await refreshBookings(spot.id);
+            await bookingsQuery.refetch();
 
             const needsPayment =
                 booking?.pay_method === "money" &&
@@ -369,8 +343,8 @@ export default function SpotDetailsPage() {
 
             if (needsPayment) return navigate(`/pay/${booking.id}`);
             navigate("/dashboard?tab=myBookings");
-        } catch (e: any) {
-            setActionMsg(e?.message || "Booking failed.");
+        } catch (error: unknown) {
+            setActionMsg(readErrorMessage(error, "Booking failed."));
         } finally {
             setBusy(false);
         }
@@ -398,8 +372,8 @@ export default function SpotDetailsPage() {
             start: startAt.toISOString(),
             end: endAt.toISOString(),
             pay: bidPayMethod,
-            perHour: bidPayMethod === "money" ? bidMoneyPerHour : "",
-            pointsPerHour: bidPayMethod === "points" ? bidPointsPerHour : "",
+            moneyPerUnit: bidPayMethod === "money" ? bidMoneyPerHour : "",
+            pointsPerUnit: bidPayMethod === "points" ? bidPointsPerHour : "",
         });
 
         navigate(`/bids/confirm?${params.toString()}`);
@@ -410,18 +384,17 @@ export default function SpotDetailsPage() {
         setBidBusy(true);
         try {
             await apiPost(`/auctions/${spot.id}/accept`, { bid_id: bidId }, token);
-            await refreshAuction();
-            await refreshBookings(spot.id);
+            await Promise.all([auctionQuery.refetch(), bookingsQuery.refetch()]);
             setBidMsg("Bid accepted.");
-        } catch (e: any) {
-            setBidMsg(e?.message || "Failed to accept bid.");
+        } catch (error: unknown) {
+            setBidMsg(readErrorMessage(error, "Failed to accept bid."));
         } finally {
             setBidBusy(false);
         }
     }
 
-    if (loading) return <div style={{ padding: 24 }}>Loading listing...</div>;
-    if (error) return <div style={{ padding: 24, color: "crimson" }}>{error}</div>;
+    if (spotQuery.isPending) return <div style={{ padding: 24 }}>Loading listing...</div>;
+    if (spotQuery.isError) return <div style={{ padding: 24, color: "crimson" }}>{readErrorMessage(spotQuery.error, "Failed to load listing.")}</div>;
     if (!spot) return <div style={{ padding: 24 }}>Listing not found.</div>;
 
     const modeLabel = capitalizeLabel(spot.mode);
@@ -441,7 +414,7 @@ export default function SpotDetailsPage() {
                     <div className="card spotSimpleMedia">
                         <div className="h3">Map</div>
                         <div className="spotMapWrap" style={{ marginTop: 10 }}>
-                            <SpotsMap spots={[spot as any]} center={{ lat: spot.lat, lng: spot.lng }} selectedId={spot.id} />
+                            <SpotsMap spots={[spot]} center={{ lat: spot.lat, lng: spot.lng }} selectedId={spot.id} />
                         </div>
                     </div>
 
@@ -641,7 +614,10 @@ export default function SpotDetailsPage() {
                             <div className="h3">Incoming bids</div>
                             <div className="spotSimpleBidList">
                                 {pendingBids.map((bid) => (
-                                    <div key={bid.id} className="spotSimpleBid">
+                                    <div
+                                        key={bid.id}
+                                        className={`spotSimpleBid${["pending", "accepted", "rejected", "declined", "won"].includes(bid.status) ? ` ${bid.status}` : ""}`}
+                                    >
                                         <div className="rowInline" style={{ justifyContent: "space-between", gap: 10 }}>
                                             <strong>{formatBidAmount(bid)}</strong>
                                             <button className="btn btn-primary" onClick={() => acceptBid(bid.id)} disabled={bidBusy}>

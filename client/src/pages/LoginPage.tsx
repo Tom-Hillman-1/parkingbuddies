@@ -1,43 +1,59 @@
 import { useMemo, useState } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { SUPPORT_EMAIL } from "./pagesShared";
 
 const remembered = localStorage.getItem("pb_remember") === "true";
 
+const loginSchema = z.object({
+    email: z.string().trim().email("Enter a valid email."),
+    password: z.string().min(1, "Password is required."),
+    remember: z.boolean(),
+});
+
+type LoginFormValues = z.infer<typeof loginSchema>;
+
 export default function LoginPage() {
     const { login } = useAuth();
     const nav = useNavigate();
     const [searchParams] = useSearchParams();
-
-    const [email, setEmail] = useState(() => (remembered ? localStorage.getItem("pb_email") ?? "" : ""));
-    const [password, setPassword] = useState(() => (remembered ? localStorage.getItem("pb_password") ?? "" : ""));
     const [msg, setMsg] = useState<string | null>(null);
     const [showPass, setShowPass] = useState(false);
-    const [remember, setRemember] = useState(remembered);
+
+    // credit: react-hook-form + zod form setup pattern adapted from official docs
+    const form = useForm<LoginFormValues>({
+        resolver: zodResolver(loginSchema),
+        defaultValues: {
+            email: remembered ? localStorage.getItem("pb_email") ?? "" : "",
+            password: remembered ? localStorage.getItem("pb_password") ?? "" : "",
+            remember: remembered,
+        },
+    });
+
     const next = searchParams.get("next");
     const redirectTarget = next && next.startsWith("/") ? next : "/";
 
-    async function onSubmit(e: React.FormEvent) {
-        e.preventDefault();
+    const onSubmit = form.handleSubmit(async (values) => {
         setMsg(null);
-
         try {
-            await login(email, password);
-            if (remember) {
+            await login(values.email, values.password);
+            if (values.remember) {
                 localStorage.setItem("pb_remember", "true");
-                localStorage.setItem("pb_email", email);
-                localStorage.setItem("pb_password", password);
+                localStorage.setItem("pb_email", values.email);
+                localStorage.setItem("pb_password", values.password);
             } else {
                 localStorage.removeItem("pb_remember");
                 localStorage.removeItem("pb_email");
                 localStorage.removeItem("pb_password");
             }
             nav(redirectTarget);
-        } catch (err) {
-            setMsg(err instanceof Error ? err.message : "Login failed");
+        } catch (error: unknown) {
+            setMsg(error instanceof Error ? error.message : "Login failed");
         }
-    }
+    });
 
     const statusTone = useMemo(() => (msg ? (msg.toLowerCase().includes("fail") ? "crimson" : "inherit") : "inherit"), [msg]);
 
@@ -63,47 +79,45 @@ export default function LoginPage() {
                             <span>Email</span>
                             <input
                                 className="input"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
                                 type="email"
                                 autoComplete="username"
                                 placeholder="you@example.com"
-                                required
+                                {...form.register("email")}
                             />
                         </label>
+                        {form.formState.errors.email && (
+                            <div className="spotAlert">{form.formState.errors.email.message}</div>
+                        )}
 
                         <label>
                             <span>Password</span>
                             <div className="authInputRow">
                                 <input
                                     className="input"
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
                                     type={showPass ? "text" : "password"}
                                     autoComplete="current-password"
                                     placeholder="Enter your password"
-                                    required
+                                    {...form.register("password")}
                                 />
-                                <button type="button" className="btn" onClick={() => setShowPass((v) => !v)}>
+                                <button type="button" className="btn" onClick={() => setShowPass((value) => !value)}>
                                     {showPass ? "Hide" : "Show"}
                                 </button>
                             </div>
                         </label>
+                        {form.formState.errors.password && (
+                            <div className="spotAlert">{form.formState.errors.password.message}</div>
+                        )}
 
                         <div className="rowInline" style={{ justifyContent: "space-between" }}>
                             <label className="chip">
-                                <input
-                                    type="checkbox"
-                                    checked={remember}
-                                    onChange={(e) => setRemember(e.target.checked)}
-                                />
+                                <input type="checkbox" {...form.register("remember")} />
                                 Keep me signed in
                             </label>
                             <span className="tiny muted">Forgot password? Ask support.</span>
                         </div>
 
-                        <button type="submit" className="btn btn-primary">
-                            Log in
+                        <button type="submit" className="btn btn-primary" disabled={form.formState.isSubmitting}>
+                            {form.formState.isSubmitting ? "Logging in..." : "Log in"}
                         </button>
                     </form>
 

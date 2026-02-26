@@ -6,6 +6,8 @@ import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import { stripe } from "../stripe";
 import { moneyBookingRewardPoints, toMoney } from "../lib/shared";
+import { z } from "zod";
+import { parseWithSchema } from "../lib/validation";
 
 const router = Router();
 
@@ -14,6 +16,28 @@ const DEMO_PAYOUTS_ENABLED = ["1", "true", "yes", "on"].includes(
     String(process.env.DEMO_BYPASS_CONNECT ?? "").toLowerCase()
 );
 const DEMO_CONNECT_ACCOUNT_PREFIX = "acct_demo_";
+
+// credit: request schema validation pattern adapted from Zod docs (https://zod.dev)
+const connectOnboardBodySchema = z.object({
+    mode: z.enum(["stripe", "demo"]).optional(),
+});
+
+const checkoutSessionBodySchema = z.object({
+    booking_id: z.string().trim().min(1),
+});
+
+const auctionIntentBodySchema = z.object({
+    spot_id: z.string().trim().min(1),
+    amount_gbp: z.coerce.number(),
+});
+
+const bookingReceiptParamsSchema = z.object({
+    bookingId: z.string().trim().min(1),
+});
+
+const bookingReceiptQuerySchema = z.object({
+    session_id: z.string().trim().min(1).optional(),
+});
 
 type UserConnectRow = {
     id: string;
@@ -37,6 +61,7 @@ type ConnectStatus = {
 
 type StripeReceiptDetails = {
     payment_intent_id: string;
+    payment_intent_status: Stripe.PaymentIntent.Status;
     charge_id: string | null;
     receipt_url: string | null;
     receipt_email: string | null;
@@ -88,6 +113,10 @@ function requireUserId(req: AuthRequest, res: Response) {
     return req.userId;
 }
 
+function asNonEmptyString(value: unknown): string | null {
+    return typeof value === "string" && value.trim() ? value : null;
+}
+
 async function getStripeReceiptDetails(paymentIntentId: string): Promise<StripeReceiptDetails> {
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
         expand: ["latest_charge"],
@@ -102,6 +131,7 @@ async function getStripeReceiptDetails(paymentIntentId: string): Promise<StripeR
 
     return {
         payment_intent_id: paymentIntent.id,
+        payment_intent_status: paymentIntent.status,
         charge_id: charge?.id ?? (typeof paymentIntent.latest_charge === "string" ? paymentIntent.latest_charge : null),
         receipt_url: charge?.receipt_url ?? null,
         receipt_email: charge?.receipt_email ?? paymentIntent.receipt_email ?? null,
@@ -310,16 +340,76 @@ async function markPaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
     }
 }
 
+function normalizeStripePaymentStatus(
+    status: Stripe.PaymentIntent.Status
+): "pending" | "succeeded" | "failed" {
+    if (status === "succeeded") return "succeeded";
+    if (status === "canceled" || status === "requires_payment_method") return "failed";
+    return "pending";
+}
+
+async function syncBookingPaymentFromReceipt(
+    bookingId: string,
+    paymentIntentId: string,
+    amountGbp: number,
+    status: "pending" | "succeeded" | "failed"
+) {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        const bookingR = await client.query(
+            `SELECT id, driver_user_id, parking_spot_id, pay_method, status, total_price_gbp
+             FROM bookings
+             WHERE id = $1
+             FOR UPDATE`,
+            [bookingId]
+        );
+        if (!bookingR.rowCount) {
+            await client.query("COMMIT");
+            return;
+        }
+
+        const booking = bookingR.rows[0];
+        if (booking.pay_method !== "money") {
+            await client.query("COMMIT");
+            return;
+        }
+
+        await upsertLatestPaymentRow(client, bookingId, paymentIntentId, amountGbp, status);
+
+        if (status === "succeeded") {
+            if (booking.status !== "confirmed") {
+                await client.query(
+                    `UPDATE bookings
+                     SET status = 'confirmed', updated_at = now()
+                     WHERE id = $1`,
+                    [bookingId]
+                );
+            }
+            await awardMoneyBookingRewardIfNeeded(client, booking);
+        }
+
+        await client.query("COMMIT");
+    } catch (e) {
+        await client.query("ROLLBACK");
+        throw e;
+    } finally {
+        client.release();
+    }
+}
+
 router.post("/connect/onboard", requireAuth, async (req: AuthRequest, res) => {
     const userId = requireUserId(req, res);
     if (!userId) return;
+    const parsedBody = parseWithSchema(connectOnboardBodySchema, req.body ?? {}, res, "connect_onboard");
+    if (!parsedBody.ok) return;
 
     const client = await pool.connect();
     try {
         const row = await getUserConnectRow(client, userId);
         if (!row) return res.status(404).json({ ok: false, error: "User not found" });
 
-        const requestedMode = req.body?.mode === "demo" ? "demo" : "stripe";
+        const requestedMode = parsedBody.data.mode === "demo" ? "demo" : "stripe";
         if (requestedMode === "demo") {
             if (!DEMO_PAYOUTS_ENABLED) {
                 return res.status(400).json({
@@ -459,11 +549,9 @@ router.post("/connect/dashboard-link", requireAuth, async (req: AuthRequest, res
 });
 
 router.post("/checkout-session", requireAuth, async (req: AuthRequest, res) => {
-    const { booking_id } = req.body ?? {};
-
-    if (typeof booking_id !== "string") {
-        return res.status(400).json({ ok: false, error: "booking_id is required" });
-    }
+    const parsedBody = parseWithSchema(checkoutSessionBodySchema, req.body ?? {}, res, "checkout_session");
+    if (!parsedBody.ok) return;
+    const { booking_id } = parsedBody.data;
 
     try {
         const bookingR = await pool.query(
@@ -528,6 +616,7 @@ router.post("/checkout-session", requireAuth, async (req: AuthRequest, res) => {
             paymentIntentData.on_behalf_of = ownerAccountUsable;
         }
 
+        // credit: Stripe Checkout session flow follows official Stripe docs/samples
         const session = await stripe.checkout.sessions.create({
             mode: "payment",
             payment_method_types: ["card"],
@@ -565,19 +654,13 @@ router.post("/checkout-session", requireAuth, async (req: AuthRequest, res) => {
             } finally {
                 client.release();
             }
-            try {
-                await pool.query(
-                    `UPDATE bookings
-                     SET payment_provider_ref = $1,
-                         updated_at = now()
-                     WHERE id = $2`,
-                    [paymentIntentId, booking_id]
-                );
-            } catch (e: any) {
-                if (!String(e.message).includes("payment_provider_ref")) {
-                    throw e;
-                }
-            }
+            await pool.query(
+                `UPDATE bookings
+                 SET payment_provider_ref = $1,
+                     updated_at = now()
+                 WHERE id = $2`,
+                [paymentIntentId, booking_id]
+            );
         }
 
         return res.json({ ok: true, url: session.url });
@@ -587,10 +670,9 @@ router.post("/checkout-session", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.post("/auction-intent", requireAuth, async (req: AuthRequest, res) => {
-    const { spot_id, amount_gbp } = req.body ?? {};
-    if (typeof spot_id !== "string") {
-        return res.status(400).json({ ok: false, error: "spot_id is required" });
-    }
+    const parsedBody = parseWithSchema(auctionIntentBodySchema, req.body ?? {}, res, "auction_intent");
+    if (!parsedBody.ok) return;
+    const { spot_id, amount_gbp } = parsedBody.data;
 
     const amount = toMoney(amount_gbp);
     if (amount <= 0) {
@@ -656,14 +738,12 @@ router.post("/auction-intent", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.get("/booking/:bookingId/receipt", requireAuth, async (req: AuthRequest, res) => {
-    const bookingId = req.params.bookingId;
-    if (!bookingId) {
-        return res.status(400).json({ ok: false, error: "bookingId is required" });
-    }
-    const sessionId =
-        typeof req.query?.session_id === "string" && req.query.session_id
-            ? req.query.session_id
-            : null;
+    const parsedParams = parseWithSchema(bookingReceiptParamsSchema, req.params ?? {}, res, "booking_receipt");
+    if (!parsedParams.ok) return;
+    const parsedQuery = parseWithSchema(bookingReceiptQuerySchema, req.query ?? {}, res, "booking_receipt");
+    if (!parsedQuery.ok) return;
+    const bookingId = parsedParams.data.bookingId;
+    const sessionId = parsedQuery.data.session_id ?? null;
 
     try {
         const bookingR = await pool.query(
@@ -688,13 +768,11 @@ router.get("/booking/:bookingId/receipt", requireAuth, async (req: AuthRequest, 
         );
 
         let providerRef: string | null = null;
-        let paymentStatus: string | null = null;
         if (paymentR.rowCount) {
-            providerRef = paymentR.rows[0].provider_ref ?? null;
-            paymentStatus = paymentR.rows[0].status ?? null;
+            providerRef = asNonEmptyString(paymentR.rows[0].provider_ref);
         }
         if (!providerRef) {
-            providerRef = bookingR.rows[0].payment_provider_ref ?? null;
+            providerRef = asNonEmptyString(bookingR.rows[0].payment_provider_ref);
         }
 
         if (!providerRef && sessionId) {
@@ -703,43 +781,14 @@ router.get("/booking/:bookingId/receipt", requireAuth, async (req: AuthRequest, 
             });
             const intent = session.payment_intent;
             const paymentIntentId =
-                typeof intent === "string"
-                    ? intent
-                    : intent && typeof intent === "object"
-                        ? intent.id
-                        : null;
+                asNonEmptyString(typeof intent === "string" ? intent : intent && typeof intent === "object" ? intent.id : null);
             if (paymentIntentId) {
                 providerRef = paymentIntentId;
                 const normalizedStatus =
                     session.payment_status === "paid"
                         ? "succeeded"
-                        : session.payment_status === "unpaid"
-                            ? "created"
-                            : "pending";
-                paymentStatus = normalizedStatus;
-
-                if (paymentR.rowCount) {
-                    await pool.query(
-                        `UPDATE payments
-                         SET provider_ref = $1,
-                             status = $2,
-                             updated_at = now()
-                         WHERE id = (
-                             SELECT id
-                             FROM payments
-                             WHERE booking_id = $3
-                             ORDER BY updated_at DESC NULLS LAST, created_at DESC, id DESC
-                             LIMIT 1
-                         )`,
-                        [providerRef, normalizedStatus, bookingId]
-                    );
-                } else {
-                    await pool.query(
-                        `INSERT INTO payments (booking_id, provider, provider_ref, status, amount_gbp, created_at, updated_at)
-                         VALUES ($1, 'stripe', $2, $3, 0, now(), now())`,
-                        [bookingId, providerRef, normalizedStatus]
-                    );
-                }
+                        : "pending";
+                await syncBookingPaymentFromReceipt(bookingId, providerRef, 0, normalizedStatus);
 
                 await pool.query(
                     `UPDATE bookings
@@ -756,7 +805,23 @@ router.get("/booking/:bookingId/receipt", requireAuth, async (req: AuthRequest, 
         }
 
         const receipt = await getStripeReceiptDetails(providerRef);
-        return res.json({ ok: true, receipt, payment_status: paymentStatus ?? "pending" });
+        const normalizedPaymentStatus = normalizeStripePaymentStatus(receipt.payment_intent_status);
+        await syncBookingPaymentFromReceipt(
+            bookingId,
+            receipt.payment_intent_id,
+            receipt.amount_received_gbp,
+            normalizedPaymentStatus
+        );
+
+        await pool.query(
+            `UPDATE bookings
+             SET payment_provider_ref = $1,
+                 updated_at = now()
+             WHERE id = $2`,
+            [receipt.payment_intent_id, bookingId]
+        );
+
+        return res.json({ ok: true, receipt, payment_status: normalizedPaymentStatus });
     } catch (e) {
         return res.status(500).json({ ok: false, error: String(e) });
     }

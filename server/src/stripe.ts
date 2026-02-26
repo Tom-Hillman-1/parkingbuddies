@@ -6,5 +6,5 @@ if (!key) {
 }
 
 export const stripe = new Stripe(key, {
-    apiVersion: "2024-04-10",
+    apiVersion: "2026-01-28.clover",
 });

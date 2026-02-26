@@ -1,5 +1,6 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
+import { z } from "zod";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import {
@@ -9,14 +10,27 @@ import {
     normalizeEmail,
     normalizeName,
 } from "../lib/shared";
+import { parseWithSchema } from "../lib/validation";
 
 const router = Router();
+// credit: request schema validation pattern adapted from Zod docs (https://zod.dev)
+const profileBodySchema = z.object({
+    name: z.string().optional(),
+    email: z.string().optional(),
+});
+
+const passwordBodySchema = z.object({
+    currentPassword: z.string(),
+    newPassword: z.string(),
+});
 
 router.patch("/profile", requireAuth, async (req: AuthRequest, res) => {
-    const { name, email } = req.body ?? {};
+    const parsedBody = parseWithSchema(profileBodySchema, req.body ?? {}, res, "settings_profile");
+    if (!parsedBody.ok) return;
+    const { name, email } = parsedBody.data;
 
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let i = 1;
 
     if (name !== undefined) {
@@ -69,11 +83,10 @@ router.patch("/profile", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.patch("/password", requireAuth, async (req: AuthRequest, res) => {
-    const { currentPassword, newPassword } = req.body ?? {};
+    const parsedBody = parseWithSchema(passwordBodySchema, req.body ?? {}, res, "settings_password");
+    if (!parsedBody.ok) return;
+    const { currentPassword, newPassword } = parsedBody.data;
 
-    if (typeof currentPassword !== "string" || typeof newPassword !== "string") {
-        return res.status(400).json({ ok: false, error: "currentPassword and newPassword are required" });
-    }
     if (!currentPassword.trim() || !newPassword.trim()) {
         return res.status(400).json({ ok: false, error: "currentPassword and newPassword are required" });
     }

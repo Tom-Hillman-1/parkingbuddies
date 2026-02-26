@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { apiGet, apiPost } from "./api";
+import { apiGet, apiPost, readErrorMessage } from "./api";
 import type { User } from "../types";
 
 type AuthContextValue = {
@@ -30,10 +30,6 @@ type ConnectActionResult =
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const TOKEN_KEY = "pb_token";
-const readErrorMessage = (error: unknown, fallback: string) =>
-    error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string"
-        ? (error as { message: string }).message
-        : fallback;
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));

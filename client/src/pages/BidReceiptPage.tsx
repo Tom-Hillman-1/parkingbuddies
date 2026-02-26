@@ -3,17 +3,18 @@ import { Link, useParams } from "react-router-dom";
 import { apiGet } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ReceiptCard, ReceiptRow } from "../components/ReceiptCard";
-import { calcUnitsForMinutes, formatDateTimeCompact } from "./pagesShared";
+import { calcUnitsForMinutes, formatDateTimeCompact, type PriceUnit } from "./pagesShared";
 
 type BidReceipt = {
     id: string;
     parking_spot_id: string;
     booking_id?: string | null;
-    amount_gbp: any;
+    amount_gbp: number | string | null;
     amount_points?: number | null;
     pay_method?: "money" | "points";
     status: string;
     payment_status?: string | null;
+    price_unit?: PriceUnit;
     created_at: string;
     start_time?: string;
     end_time?: string;
@@ -84,9 +85,9 @@ export default function BidReceiptPage() {
         const end = new Date(bid.end_time);
         if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
         const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
-        const units = calcUnitsForMinutes(minutes, "hour");
+        const units = calcUnitsForMinutes(minutes, bid.price_unit ?? "hour");
         return Math.ceil(Number(bid.amount_points ?? 0) * units);
-    }, [bid?.start_time, bid?.end_time, bid?.amount_points]);
+    }, [bid?.start_time, bid?.end_time, bid?.amount_points, bid?.price_unit]);
 
     const windowText =
         bid?.start_time && bid?.end_time
@@ -119,7 +120,7 @@ export default function BidReceiptPage() {
                         <ReceiptRow label="When" value={windowText} />
                         {bid.pay_method === "points" ? (
                             <>
-                                <ReceiptRow label="Bid rate" value={`${Number(bid.amount_points ?? 0)} pts / hour`} />
+                                <ReceiptRow label="Bid rate" value={`${Number(bid.amount_points ?? 0)} pts / ${bid.price_unit ?? "hour"}`} />
                                 <ReceiptRow label="Total (estimated)" value={`${totalPoints} pts`} />
                             </>
                         ) : (

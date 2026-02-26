@@ -1,0 +1,889 @@
+.dashboardPage.dashboardModern {
+    background: #f5f5f7;
+    border-radius: 24px;
+    padding: 1rem 1rem 1.3rem;
+}
+
+.dashboardModern .dashboardHeroSplit {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 0.95rem;
+    align-items: stretch;
+    margin-bottom: 0.8rem;
+}
+
+.dashboardModern .dashboardHeroCard {
+    position: relative;
+    overflow: hidden;
+    border-radius: 16px;
+    border: 1px solid #d9e4f3;
+    background: #eef5ff;
+    box-shadow: 0 8px 20px rgba(16, 24, 40, 0.08);
+}
+
+.dashboardModern .dashboardHeroCopy {
+    position: relative;
+    z-index: 2;
+}
+
+.dashboardModern .dashboardHeroActions {
+    margin-top: 0.5rem;
+}
+
+.dashboardModern .dashboardHeroBubble {
+    position: absolute;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.38);
+}
+
+.dashboardModern .dashboardHeroBubble:nth-child(1) {
+    width: 180px;
+    height: 180px;
+    right: -48px;
+    top: -70px;
+}
+
+.dashboardModern .dashboardHeroBubble--small {
+    width: 96px;
+    height: 96px;
+    left: 40px;
+    bottom: -40px;
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.dashboardModern .dashboardHeroBubble--low {
+    width: 120px;
+    height: 120px;
+    right: 160px;
+    bottom: -56px;
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.dashboardModern .dashboardHeroReceiptWindow {
+    border-radius: 16px;
+    border: 1px solid #dfe6f1;
+    background: #fff;
+    box-shadow: 0 10px 22px rgba(16, 24, 40, 0.09);
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: 32% 1fr;
+    min-height: 270px;
+}
+
+.dashboardModern .dashboardHeroReceiptTop {
+    position: relative;
+    overflow: hidden;
+    padding: 0.8rem 0.9rem;
+}
+
+.dashboardModern .dashboardHeroReceiptTop--blue {
+    background: linear-gradient(165deg, #7ea7ea 0%, #6594df 100%);
+}
+
+.dashboardModern .dashboardHeroReceiptTop--blue .dashboardHeroBubble {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.dashboardModern .dashboardHeroReceiptHead {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.dashboardModern .dashboardHeroReceiptTitle {
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.dashboardModern .dashboardHeroReceiptDate {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.68rem;
+    font-weight: 600;
+}
+
+.dashboardModern .dashboardHeroReceiptBody {
+    background: #fff;
+    padding: 0.45rem 0.92rem 0.7rem;
+    display: grid;
+    gap: 0;
+}
+
+.dashboardModern .dashboardHeroReceiptRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.7rem;
+    padding: 0.44rem 0;
+    border-bottom: 1px solid #edf1f6;
+}
+
+.dashboardModern .dashboardHeroReceiptRow:last-child {
+    border-bottom: 0;
+}
+
+.dashboardModern .dashboardHeroReceiptLabel {
+    color: #5f6979;
+    font-size: 0.74rem;
+}
+
+.dashboardModern .dashboardHeroReceiptValue {
+    color: #162031;
+    font-size: 0.84rem;
+    font-weight: 800;
+}
+
+.dashboardModern .dashboardHeroReceiptValue--points {
+    color: #2f6ee8;
+}
+
+.dashboardModern .dashboardRail--inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+    background: #fff;
+    border-radius: 999px;
+    padding: 0.3rem;
+    box-shadow: 0 8px 20px rgba(16, 24, 40, 0.08);
+    margin-bottom: 0.8rem;
+}
+
+.dashboardModern .dashboardNavBtn {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    min-height: 36px;
+    border-radius: 999px;
+    padding: 0.34rem 0.84rem;
+    color: #212733;
+}
+
+.dashboardModern .dashboardNavBtn:hover {
+    background: transparent;
+    box-shadow: none;
+    transform: none;
+    color: #0f141b;
+}
+
+.dashboardModern .dashboardNavBtn.is-active {
+    background: #111418;
+    color: #fff;
+    box-shadow: none;
+}
+
+.dashboardModern .dashboardNavTitle {
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.dashboardModern .dashboardAccordionCard {
+    border-radius: 16px;
+    border: 1px solid #e5e9ef;
+    box-shadow: 0 5px 14px rgba(16, 24, 40, 0.06);
+    background: #fff;
+    padding: 0;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.dashboardModern .dashboardAccordionItem {
+    border-bottom: 1px solid #f0f0f0;
+    min-width: 0;
+}
+
+.dashboardModern .dashboardAccordionItem.is-last {
+    border-bottom: 0;
+}
+
+.dashboardModern .dashboardAccordionHeader {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    text-align: left;
+    padding: 0.72rem 0.86rem;
+    cursor: pointer;
+}
+
+.dashboardModern .dashboardAccordionLeft {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+.dashboardModern .dashboardAccordionDot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    flex-shrink: 0;
+}
+
+.dashboardModern .dashboardAccordionDot--driver {
+    background: #4d82ec;
+}
+
+.dashboardModern .dashboardAccordionDot--owner {
+    background: #7ea559;
+}
+
+.dashboardModern .dashboardAccordionDot--rewards {
+    background: #8a6ad8;
+}
+
+.dashboardModern .dashboardAccordionDot--payments {
+    background: #e3a33f;
+}
+
+.dashboardModern .dashboardAccordionTitle {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #161d27;
+}
+
+.dashboardModern .dashboardAccordionRight {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+.dashboardModern .dashboardAccordionChevron {
+    display: inline-block;
+    color: #8b95a5;
+    font-size: 0.95rem;
+    font-weight: 700;
+    transition: transform 180ms ease;
+    transform: rotate(0deg);
+}
+
+.dashboardModern .dashboardAccordionChevron.is-open {
+    transform: rotate(90deg);
+}
+
+.dashboardModern .dashboardAccordionBody {
+    padding: 0 0.86rem 0.86rem;
+    min-width: 0;
+}
+
+.dashboardModern .dashboardScrollRow,
+.dashboardModern .dashboardChipRow,
+.dashboardModern .dashboardRailRow {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-y: hidden;
+    gap: 12px;
+    scroll-snap-type: x mandatory;
+    touch-action: pan-x;
+    padding: 0.1rem 0.12rem 0.5rem;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    cursor: auto;
+}
+
+.dashboardModern .dashboardScrollRow > *,
+.dashboardModern .dashboardChipRow > *,
+.dashboardModern .dashboardRailRow > * {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+}
+
+.dashboardModern .dashboardChip {
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 12px;
+    padding: 10px 14px;
+    flex-shrink: 0;
+}
+
+.dashboardModern .dashboardListingMiniCard,
+.dashboardModern .dashboardTxReceiptCard {
+    flex-shrink: 0;
+    background: #fff;
+    border: 1px solid #eee;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.07);
+    overflow: hidden;
+}
+
+.dashboardModern .dashboardChipLeft {
+    min-width: 0;
+}
+
+.dashboardModern .dashboardChipTitle {
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.dashboardModern .dashboardChipMeta {
+    font-size: 11px;
+}
+
+.dashboardModern .dashboardChipTitle,
+.dashboardModern .dashboardChipMeta,
+.dashboardModern .dashboardStripTitle,
+.dashboardModern .dashboardStripMeta,
+.dashboardModern .dashboardListingMiniTitle,
+.dashboardModern .dashboardListingMiniAddress,
+.dashboardModern .dashboardTxSpot,
+.dashboardModern .dashboardSlotAddress,
+.dashboardModern .dashboardContactText--single {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dashboardModern .dashboardChipAmount {
+    font-weight: 700;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.dashboardModern .dashboardChipAmount--in {
+    color: #15803d;
+}
+
+.dashboardModern .dashboardChipAmount--out {
+    color: #b91c1c;
+}
+
+.dashboardModern .dashboardRewardPill {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-radius: 40px;
+    padding: 8px 14px 8px 8px;
+}
+
+.dashboardModern .dashboardRewardAvatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.dashboardModern .dashboardRewardAvatar.is-earn {
+    background: #dce8ff;
+    color: #3f63b6;
+}
+
+.dashboardModern .dashboardRewardAvatar.is-spend {
+    background: #f8dde2;
+    color: #a34f60;
+}
+
+.dashboardModern .dashboardPillDivider {
+    width: 1px;
+    height: 22px;
+    background: #e7e7e7;
+    flex-shrink: 0;
+}
+
+.dashboardModern .dashboardChip--strip {
+    width: 220px;
+    padding: 0;
+    display: flex;
+    align-items: stretch;
+    overflow: hidden;
+}
+
+.dashboardModern .dashboardStripAccent {
+    width: 6px;
+    flex-shrink: 0;
+    background: #9aa3b2;
+}
+
+.dashboardModern .dashboardStrip--incoming .dashboardStripAccent {
+    background: #22966d;
+}
+
+.dashboardModern .dashboardStripBody {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 9px 11px;
+}
+
+.dashboardModern .dashboardStripTop {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.dashboardModern .dashboardStripTitle {
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.dashboardModern .dashboardStripAmount {
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.dashboardModern .dashboardStripMeta {
+    font-size: 10px;
+    line-height: 1.2;
+}
+
+.dashboardModern .dashboardStripBottom {
+    margin-top: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.dashboardModern .dashboardTextAction,
+.dashboardModern .dashboardTxLink {
+    border: 0;
+    background: none;
+    padding: 0;
+    font-family: inherit;
+    font-weight: 600;
+    color: #4f6ef7;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.dashboardModern .dashboardTextAction {
+    font-size: 11px;
+}
+
+.dashboardModern .dashboardTxLink {
+    font-size: 10px;
+}
+
+.dashboardModern .dashboardTextAction:hover,
+.dashboardModern .dashboardTxLink:hover {
+    text-decoration: underline;
+}
+
+.dashboardModern .dashboardListingMiniCard {
+    width: 210px;
+    border-radius: 16px;
+}
+
+.dashboardModern .dashboardListingMiniHeader {
+    height: 70px;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 8px 10px 9px;
+}
+
+.dashboardModern .dashboardListingMiniHeader--auction {
+    background: #e8edff;
+    color: #4f6ef7;
+}
+
+.dashboardModern .dashboardListingMiniHeader--rent {
+    background: #dcfce7;
+    color: #16a34a;
+}
+
+.dashboardModern .dashboardListingMiniHeader--free {
+    background: #f5f5f7;
+    color: #888;
+}
+
+.dashboardModern .dashboardListingMiniBubble {
+    position: absolute;
+    right: -16px;
+    top: -20px;
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.8);
+    opacity: 0.2;
+}
+
+.dashboardModern .dashboardListingMiniMode,
+.dashboardModern .dashboardListingMiniPrice {
+    position: relative;
+    z-index: 1;
+}
+
+.dashboardModern .dashboardListingMiniMode {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.dashboardModern .dashboardListingMiniPrice {
+    font-size: 18px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.dashboardModern .dashboardListingMiniBody {
+    padding: 10px 14px;
+    display: grid;
+    gap: 6px;
+}
+
+.dashboardModern .dashboardListingMiniTitle {
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.dashboardModern .dashboardListingMiniAddress {
+    font-size: 11px;
+}
+
+.dashboardModern .dashboardMiniBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 5px 10px;
+    border-radius: 8px;
+    text-decoration: none;
+    border: 1px solid #d5dce7;
+    color: #1f2937;
+    background: #fff;
+}
+
+.dashboardModern .dashboardMiniBtn.is-dark {
+    background: #111;
+    color: #fff;
+    border-color: #111;
+}
+
+.dashboardModern .dashboardTxReceiptCard {
+    width: 190px;
+    border-radius: 14px;
+}
+
+.dashboardModern .dashboardTxReceiptTop {
+    padding: 12px 14px 10px;
+    display: grid;
+    gap: 3px;
+}
+
+.dashboardModern .dashboardTxReceiptTop.is-incoming {
+    background: #f0fdf4;
+}
+
+.dashboardModern .dashboardTxReceiptTop.is-outgoing {
+    background: #fff1f2;
+}
+
+.dashboardModern .dashboardTxAmount {
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.dashboardModern .dashboardTxAmount.is-incoming {
+    color: #16a34a;
+}
+
+.dashboardModern .dashboardTxAmount.is-outgoing {
+    color: #e11d48;
+}
+
+.dashboardModern .dashboardTxSpot {
+    font-size: 11px;
+    font-weight: 600;
+    color: #333b46;
+}
+
+.dashboardModern .dashboardTxDivider {
+    border-top: 1px dashed #e5e5e5;
+}
+
+.dashboardModern .dashboardTxReceiptBottom {
+    padding: 8px 14px;
+    display: grid;
+    gap: 5px;
+}
+
+.dashboardModern .dashboardTxMetaRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.dashboardModern .dashboardTxMetaLabel {
+    font-size: 10px;
+    color: #8a93a0;
+}
+
+.dashboardModern .dashboardTxMetaValue {
+    font-size: 10px;
+    font-weight: 700;
+    color: #555;
+}
+
+.dashboardModern .dashboardTxLinks {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    margin-top: 2px;
+}
+
+.dashboardModern .dashboardTextAction:disabled,
+.dashboardModern .dashboardTxLink:disabled {
+    color: #94a2d5;
+    cursor: default;
+}
+
+.dashboardModern .dashboardTextAction:disabled:hover,
+.dashboardModern .dashboardTxLink:disabled:hover {
+    text-decoration: none;
+}
+
+.dashboardModern .dashboardSlotCard {
+    width: 240px;
+    height: 390px;
+    flex-shrink: 0;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid #e4e9f0;
+    background: #fff;
+    box-shadow: 0 5px 15px rgba(16, 24, 40, 0.08);
+    display: flex;
+    flex-direction: column;
+}
+
+.dashboardModern .dashboardSlotTop {
+    position: relative;
+    height: 92px;
+    padding: 10px 12px;
+    overflow: hidden;
+}
+
+.dashboardModern .dashboardSlotTop--blue {
+    background: #7ea4d9;
+}
+
+.dashboardModern .dashboardSlotTop--green {
+    background: #7cb28a;
+}
+
+.dashboardModern .dashboardSlotTop--rose {
+    background: #c79090;
+}
+
+.dashboardModern .dashboardSlotTop--sage {
+    background: #9fb58e;
+}
+
+.dashboardModern .dashboardSlotBubble {
+    position: absolute;
+    width: 82px;
+    height: 82px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.2);
+    right: -18px;
+    top: -20px;
+}
+
+.dashboardModern .dashboardSlotBubble--small {
+    width: 48px;
+    height: 48px;
+    left: 10px;
+    bottom: -18px;
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.dashboardModern .dashboardSlotAvatar {
+    position: relative;
+    z-index: 2;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    background: rgba(255, 255, 255, 0.36);
+    color: rgba(17, 21, 28, 0.7);
+    font-weight: 800;
+}
+
+.dashboardModern .dashboardSlotAvatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.dashboardModern .dashboardSlotAmount {
+    position: absolute;
+    z-index: 2;
+    left: 12px;
+    bottom: 10px;
+    color: #fff;
+    font-size: 1.22rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.dashboardModern .dashboardSlotBody {
+    padding: 11px 12px 12px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.dashboardModern .dashboardSlotTitle {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #141820;
+    line-height: 1.2;
+}
+
+.dashboardModern .dashboardSlotMain {
+    display: grid;
+    gap: 7px;
+    min-height: 0;
+}
+
+.dashboardModern .dashboardSlotBadges {
+    margin-top: 1px;
+    gap: 6px;
+}
+
+.dashboardModern .dashboardSlotMetaBlock {
+    display: grid;
+    gap: 2px;
+}
+
+.dashboardModern .dashboardSlotMetaLabel {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #7a8595;
+}
+
+.dashboardModern .dashboardSlotMetaValue {
+    font-size: 11px;
+    font-weight: 600;
+    color: #4e5969;
+    line-height: 1.25;
+}
+
+.dashboardModern .dashboardSlotDetails {
+    min-height: 0;
+    max-height: 110px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: block;
+    padding-right: 2px;
+    margin-bottom: 8px;
+}
+
+.dashboardModern .dashboardContactBlock {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+.dashboardModern .dashboardContactLine {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    font-size: 11px;
+    line-height: 1.18;
+    color: #5c6878;
+    margin: 0;
+    padding: 0;
+}
+
+.dashboardModern .dashboardContactKey {
+    flex: 0 0 auto;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    line-height: 1.08;
+    color: #7b8796;
+}
+
+.dashboardModern .dashboardContactText {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    line-height: 1.08;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.dashboardModern .dashboardContactText--single {
+    overflow-wrap: normal;
+}
+
+.dashboardModern .dashboardSlotActions {
+    margin-top: auto;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+}
+
+.dashboardModern .dashboardSlotActions .btn {
+    font-size: 12px;
+    line-height: 1.1;
+    min-height: 36px;
+    padding: 0 10px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.dashboardModern .dashboardSlotActions .dashboardSlotActionBtn {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.dashboardModern .dashboardSlotActions .dashboardSlotActionBtn:disabled {
+    opacity: 0.7;
+    cursor: default;
+}
+
+@media (max-width: 980px) {
+    .dashboardPage.dashboardModern {
+        padding: 0.7rem 0.7rem 1rem;
+    }
+
+    .dashboardModern .dashboardHeroSplit {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .dashboardModern .dashboardHeroReceiptWindow {
+        max-width: 320px;
+    }
+
+}

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { z } from "zod";
 import { pool } from "../db";
 import {
     isValidEmail,
@@ -9,9 +10,21 @@ import {
     normalizeEmail,
     normalizeName,
 } from "../lib/shared";
+import { parseWithSchema } from "../lib/validation";
 
 const router = Router();
 const SIGNUP_REWARD_POINTS = 1;
+// credit: request schema validation pattern adapted from Zod docs (https://zod.dev)
+const signupBodySchema = z.object({
+    email: z.string(),
+    name: z.string(),
+    password: z.string(),
+});
+
+const loginBodySchema = z.object({
+    email: z.string(),
+    password: z.string(),
+});
 
 function issueToken(userId: string) {
     const secret = process.env.JWT_SECRET;
@@ -21,11 +34,9 @@ function issueToken(userId: string) {
 }
 
 router.post("/signup", async (req, res) => {
-    const { email, name, password } = req.body ?? {};
-
-    if (typeof email !== "string" || typeof name !== "string" || typeof password !== "string") {
-        return res.status(400).json({ ok: false, error: "email, name, password are required" });
-    }
+    const parsedBody = parseWithSchema(signupBodySchema, req.body ?? {}, res, "signup");
+    if (!parsedBody.ok) return;
+    const { email, name, password } = parsedBody.data;
 
     const trimmedEmail = normalizeEmail(email);
     const trimmedName = normalizeName(name);
@@ -88,11 +99,9 @@ router.post("/signup", async (req, res) => {
 });
 
 router.post("/login", async (req, res) => {
-    const { email, password } = req.body ?? {};
-
-    if (typeof email !== "string" || typeof password !== "string") {
-        return res.status(400).json({ ok: false, error: "email and password are required" });
-    }
+    const parsedBody = parseWithSchema(loginBodySchema, req.body ?? {}, res, "login");
+    if (!parsedBody.ok) return;
+    const { email, password } = parsedBody.data;
 
     const trimmedEmail = normalizeEmail(email);
 

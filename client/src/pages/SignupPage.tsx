@@ -1,51 +1,50 @@
 import { useMemo, useState } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm, useWatch } from "react-hook-form";
+import { z } from "zod";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { SUPPORT_EMAIL } from "./pagesShared";
 
+const signupSchema = z.object({
+    name: z.string().trim().min(3, "Name must be at least 3 characters.").refine((value) => /[A-Za-z]/.test(value), {
+        message: "Name must include letters.",
+    }),
+    email: z.string().trim().email("Enter a valid email."),
+    password: z.string().min(8, "Password must be at least 8 characters."),
+    confirmPassword: z.string().min(1, "Confirm your password."),
+    agree: z.boolean().refine((value) => value, { message: "Please accept the terms to continue." }),
+}).superRefine((value, ctx) => {
+    if (value.password !== value.confirmPassword) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["confirmPassword"],
+            message: "Passwords do not match.",
+        });
+    }
+});
+
+type SignupFormValues = z.infer<typeof signupSchema>;
+
 export default function SignupPage() {
     const { signup } = useAuth();
     const nav = useNavigate();
-
-    const [email, setEmail] = useState("");
-    const [name, setName] = useState("");
-    const [password, setPassword] = useState("");
-    const [confirm, setConfirm] = useState("");
     const [showPass, setShowPass] = useState(false);
-    const [agree, setAgree] = useState(false);
     const [msg, setMsg] = useState<string | null>(null);
 
-    async function onSubmit(e: React.FormEvent) {
-        e.preventDefault();
-        setMsg(null);
+    // credit: react-hook-form + zod form setup pattern adapted from official docs
+    const form = useForm<SignupFormValues>({
+        resolver: zodResolver(signupSchema),
+        defaultValues: {
+            name: "",
+            email: "",
+            password: "",
+            confirmPassword: "",
+            agree: false,
+        },
+    });
 
-        const trimmedName = name.trim();
-        if (trimmedName.length < 3 || !/[A-Za-z]/.test(trimmedName)) {
-            setMsg("Name must be at least 3 characters and include letters.");
-            return;
-        }
-
-        if (password.length < 8) {
-            setMsg("Password must be at least 8 characters.");
-            return;
-        }
-        if (password !== confirm) {
-            setMsg("Passwords do not match.");
-            return;
-        }
-        if (!agree) {
-            setMsg("Please accept the terms to continue.");
-            return;
-        }
-
-        try {
-            await signup(email, name, password);
-            nav("/");
-        } catch (err) {
-            setMsg(err instanceof Error ? err.message : "Signup failed");
-        }
-    }
-
+    const password = useWatch({ control: form.control, name: "password", defaultValue: "" });
     const strength = useMemo(() => {
         let score = 0;
         if (password.length >= 8) score += 1;
@@ -59,6 +58,16 @@ export default function SignupPage() {
     const strengthWidth = `${Math.min(100, (strength / 4) * 100)}%`;
     const strengthColor =
         strength <= 1 ? "rgba(243,107,127,0.9)" : strength === 2 ? "rgba(255,200,87,0.9)" : "rgba(59,186,156,0.9)";
+
+    const onSubmit = form.handleSubmit(async (values) => {
+        setMsg(null);
+        try {
+            await signup(values.email, values.name, values.password);
+            nav("/");
+        } catch (error: unknown) {
+            setMsg(error instanceof Error ? error.message : "Signup failed");
+        }
+    });
 
     return (
         <div className="container authPage">
@@ -82,40 +91,36 @@ export default function SignupPage() {
                             <span>Name</span>
                             <input
                                 className="input"
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
                                 autoComplete="name"
                                 placeholder="Jamie Parker"
-                                required
+                                {...form.register("name")}
                             />
                         </label>
+                        {form.formState.errors.name && <div className="spotAlert">{form.formState.errors.name.message}</div>}
 
                         <label>
                             <span>Email</span>
                             <input
                                 className="input"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
                                 type="email"
                                 autoComplete="email"
                                 placeholder="you@example.com"
-                                required
+                                {...form.register("email")}
                             />
                         </label>
+                        {form.formState.errors.email && <div className="spotAlert">{form.formState.errors.email.message}</div>}
 
                         <label>
                             <span>Password</span>
                             <div className="authInputRow">
                                 <input
                                     className="input"
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
                                     type={showPass ? "text" : "password"}
                                     autoComplete="new-password"
                                     placeholder="Create a password"
-                                    required
+                                    {...form.register("password")}
                                 />
-                                <button type="button" className="btn" onClick={() => setShowPass((v) => !v)}>
+                                <button type="button" className="btn" onClick={() => setShowPass((value) => !value)}>
                                     {showPass ? "Hide" : "Show"}
                                 </button>
                             </div>
@@ -125,27 +130,32 @@ export default function SignupPage() {
                             </div>
                             <div className="tiny muted">Strength: {strengthLabel}</div>
                         </label>
+                        {form.formState.errors.password && (
+                            <div className="spotAlert">{form.formState.errors.password.message}</div>
+                        )}
 
                         <label>
                             <span>Confirm password</span>
                             <input
                                 className="input"
-                                value={confirm}
-                                onChange={(e) => setConfirm(e.target.value)}
                                 type={showPass ? "text" : "password"}
                                 autoComplete="new-password"
                                 placeholder="Repeat password"
-                                required
+                                {...form.register("confirmPassword")}
                             />
                         </label>
+                        {form.formState.errors.confirmPassword && (
+                            <div className="spotAlert">{form.formState.errors.confirmPassword.message}</div>
+                        )}
 
                         <label className="chip">
-                            <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+                            <input type="checkbox" {...form.register("agree")} />
                             I agree to the ParkingBuddies terms
                         </label>
+                        {form.formState.errors.agree && <div className="spotAlert">{form.formState.errors.agree.message}</div>}
 
-                        <button type="submit" className="btn btn-primary">
-                            Create account
+                        <button type="submit" className="btn btn-primary" disabled={form.formState.isSubmitting}>
+                            {form.formState.isSubmitting ? "Creating account..." : "Create account"}
                         </button>
                     </form>
 

@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useElements, useStripe } from "@stripe/react-stripe-js";
-import { apiGet, apiPost } from "../lib/api";
+import { apiGet, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ReceiptCard, ReceiptRow } from "../components/ReceiptCard";
 import { calcUnitsForMinutes, formatDateTimeCompact, type PriceUnit } from "./pagesShared";
 
+// credit: Stripe Elements bootstrap pattern aligned to Stripe docs
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string);
 const POUND = String.fromCharCode(163);
+type SpotSummary = { id: string; title: string; address_text: string; price_unit?: PriceUnit };
 
 function useQueryValue(key: string, fallback = "") {
     const [search] = useSearchParams();
@@ -38,6 +41,10 @@ function BidCardForm({
 
     async function confirm() {
         if (!stripe || !elements) return;
+        if (!Number.isFinite(amountGbp) || amountGbp <= 0) {
+            onError("Enter a valid money amount before authorizing.");
+            return;
+        }
         setBusy(true);
         try {
             const intent = await apiPost<{ client_secret: string; payment_intent_id: string }>(
@@ -51,6 +58,7 @@ function BidCardForm({
                 setBusy(false);
                 return;
             }
+            // credit: manual-capture card confirmation flow follows Stripe's documented PaymentIntent pattern
             const result = await stripe.confirmCardPayment(intent.client_secret, {
                 payment_method: { card },
             });
@@ -73,8 +81,8 @@ function BidCardForm({
             );
 
             onDone();
-        } catch (e: any) {
-            onError(e?.message || "Authorization failed");
+        } catch (error: unknown) {
+            onError(readErrorMessage(error, "Authorization failed"));
         } finally {
             setBusy(false);
         }
@@ -109,12 +117,24 @@ export default function BidConfirmPage() {
     const start = useQueryValue("start");
     const end = useQueryValue("end");
     const pay = useQueryValue("pay", "money") as "money" | "points";
-    const perHour = useQueryValue("perHour");
-    const pointsPerHour = useQueryValue("pointsPerHour");
+    const moneyPerUnitPrimary = useQueryValue("moneyPerUnit");
+    const moneyPerUnitLegacy = useQueryValue("perHour");
+    const pointsPerUnitPrimary = useQueryValue("pointsPerUnit");
+    const pointsPerUnitLegacy = useQueryValue("pointsPerHour");
+    const moneyPerUnit = moneyPerUnitPrimary || moneyPerUnitLegacy;
+    const pointsPerUnit = pointsPerUnitPrimary || pointsPerUnitLegacy;
 
-    const [spot, setSpot] = useState<any | null>(null);
     const [err, setErr] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const spotQuery = useQuery({
+        queryKey: ["bid-confirm-spot", spotId],
+        enabled: Boolean(spotId),
+        queryFn: async () => {
+            const response = await apiGet<{ parking_spot: SpotSummary }>(`/parking-spots/${spotId}`);
+            return response.parking_spot ?? null;
+        },
+    });
+    const spot = spotQuery.data ?? null;
     const unit = (spot?.price_unit ?? "hour") as PriceUnit;
 
     const minutes = useMemo(() => {
@@ -126,24 +146,17 @@ export default function BidConfirmPage() {
     const units = useMemo(() => calcUnitsForMinutes(minutes, unit), [minutes, unit]);
 
     const totalMoney = useMemo(() => {
-        const n = Number(perHour);
+        const n = Number(moneyPerUnit);
         if (!Number.isFinite(n) || n <= 0) return 0;
         if (!Number.isFinite(units) || units <= 0) return 0;
         return Math.round(n * units * 100) / 100;
-    }, [perHour, units]);
+    }, [moneyPerUnit, units]);
     const totalPoints = useMemo(() => {
-        const n = Number(pointsPerHour);
+        const n = Number(pointsPerUnit);
         if (!Number.isFinite(n) || n <= 0) return 0;
         if (!Number.isFinite(units) || units <= 0) return 0;
         return Math.ceil(n * units);
-    }, [pointsPerHour, units]);
-
-    useEffect(() => {
-        if (!spotId) return;
-        apiGet<{ parking_spot: any }>(`/parking-spots/${spotId}`)
-            .then((r) => setSpot(r.parking_spot ?? null))
-            .catch(() => setSpot(null));
-    }, [spotId]);
+    }, [pointsPerUnit, units]);
 
     if (!token) return <Navigate to="/login" replace />;
     if (!spotId || !start || !end) {
@@ -152,7 +165,7 @@ export default function BidConfirmPage() {
 
     async function confirmPoints() {
         if (!token || !spotId) return;
-        const pts = Number(pointsPerHour);
+        const pts = Number(pointsPerUnit);
         if (!Number.isFinite(pts) || pts <= 0) {
             setErr(`Enter a valid points amount per ${unit}.`);
             return;
@@ -171,8 +184,8 @@ export default function BidConfirmPage() {
                 token
             );
             navigate("/dashboard?tab=myAuctionBids");
-        } catch (e: any) {
-            setErr(e?.message || "Bid failed");
+        } catch (error: unknown) {
+            setErr(readErrorMessage(error, "Bid failed"));
         } finally {
             setBusy(false);
         }
@@ -180,7 +193,7 @@ export default function BidConfirmPage() {
 
     const totalLabel = pay === "points" ? `${totalPoints} pts` : `${POUND}${totalMoney.toFixed(2)}`;
     const perUnitLabel =
-        pay === "points" ? `${Number(pointsPerHour || 0)} pts` : `${POUND}${Number(perHour || 0).toFixed(2)}`;
+        pay === "points" ? `${Number(pointsPerUnit || 0)} pts` : `${POUND}${Number(moneyPerUnit || 0).toFixed(2)}`;
 
     return (
         <div className="container">

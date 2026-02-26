@@ -1,7 +1,9 @@
 import { Router } from "express";
+import { z } from "zod";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import { availabilityDateRange, isWindowSlot, normalizeExcludeDows, remainingMinutes } from "../lib/availability";
+import { parseWithSchema } from "../lib/validation";
 
 const router = Router();
 
@@ -17,16 +19,21 @@ const NOMINATIM_HEADERS = {
     "Accept-Language": "en-GB,en;q=0.9",
     "User-Agent": "ParkingBuddies/1.0",
 };
-const LEGACY_SPOT_COLUMN_MARKERS = [
-    "parking_type",
-    "capacity_total",
-    "capacity_available",
-    "auction_end",
-    "auction_start_price_gbp",
-    "owner_contact_email",
-    "owner_contact_phone",
-    "owner_contact_info",
-];
+// credit: request schema validation pattern adapted from Zod docs (https://zod.dev)
+const listingBodySchema = z.record(z.string(), z.unknown());
+const spotIdParamsSchema = z.object({
+    id: z.string().uuid("id must be a valid listing ID"),
+});
+const geocodeSearchQuerySchema = z.object({
+    q: z.string().trim().min(3, "q must be at least 3 characters"),
+    limit: z.coerce.number().int().min(1).max(12).optional(),
+    countrycodes: z.string().trim().optional(),
+    viewbox: z.string().trim().optional(),
+});
+const geocodeReverseQuerySchema = z.object({
+    lat: z.coerce.number().min(-90).max(90),
+    lng: z.coerce.number().min(-180).max(180),
+});
 
 type PriceUnit = "hour" | "day" | "week";
 type Mode = "free" | "rent" | "auction";
@@ -65,7 +72,6 @@ type AvailabilityJson =
           parking_kind?: ParkingKind;
       };
 
-type LegacyAvailabilityType = "24_7" | "weekly";
 type NormalizedListingInput = {
     title: string;
     description: string;
@@ -172,10 +178,6 @@ function isDemoConnectAccountId(accountId: string | null | undefined) {
     return typeof accountId === "string" && accountId.startsWith(DEMO_CONNECT_ACCOUNT_PREFIX);
 }
 
-function isLegacySpotColumnError(message: string) {
-    return LEGACY_SPOT_COLUMN_MARKERS.some((marker) => message.includes(marker));
-}
-
 function auctionEndFromAvailability(availability: AvailabilityJson) {
     if (availability.type === "window_slots") {
         if (!Array.isArray(availability.windows) || availability.windows.length === 0) return null;
@@ -191,32 +193,6 @@ function auctionEndFromAvailability(availability: AvailabilityJson) {
     const dateTo = availability.date_to;
     if (!isDateYYYYMMDD(dateTo)) return null;
     return new Date(`${dateTo}T23:59:59.999Z`).toISOString();
-}
-
-let auctionSchemaReady = false;
-async function ensureAuctionBidSchema() {
-    if (auctionSchemaReady) return;
-    try {
-        await pool.query(
-            `ALTER TABLE auction_bids
-             ADD COLUMN IF NOT EXISTS start_time timestamptz,
-             ADD COLUMN IF NOT EXISTS end_time timestamptz`
-        );
-        auctionSchemaReady = true;
-    } catch {
-    }
-}
-
-let ownerContactSchemaReady = false;
-async function ensureOwnerContactSchema() {
-    if (ownerContactSchemaReady) return;
-    await pool.query(
-        `ALTER TABLE parking_spots
-         ADD COLUMN IF NOT EXISTS owner_contact_email text,
-         ADD COLUMN IF NOT EXISTS owner_contact_phone text,
-         ADD COLUMN IF NOT EXISTS owner_contact_info text`
-    );
-    ownerContactSchemaReady = true;
 }
 
 function buildAvailabilityJson(body: any): { ok: true; availability: AvailabilityJson } | { ok: false; error: string } {
@@ -294,41 +270,7 @@ function buildAvailabilityJson(body: any): { ok: true; availability: Availabilit
 
         return { ok: false, error: "Invalid availability.type" };
     }
-    const legacyType = (body?.availability_type ?? "24_7") as LegacyAvailabilityType;
-    if (legacyType === "24_7") {
-        return { ok: true, availability: { type: "24_7", ...kindField } };
-    }
-
-    if (legacyType === "weekly") {
-        const daysRaw = body?.available_days;
-        const ds = body?.daily_start;
-        const de = body?.daily_end;
-
-        if (!Array.isArray(daysRaw) || daysRaw.length === 0) {
-            return { ok: false, error: "available_days is required for weekly availability" };
-        }
-        if (!isTimeHHMM(ds) || !isTimeHHMM(de)) {
-            return { ok: false, error: "daily_start and daily_end must be HH:MM" };
-        }
-        if (minutes(ds) >= minutes(de)) {
-            return { ok: false, error: "daily_start must be before daily_end" };
-        }
-
-        const parsedDays = daysRaw.map((d: any) => Number(d)).filter((n: number) => Number.isInteger(n));
-        if (parsedDays.length !== daysRaw.length || !parsedDays.every((n: number) => n >= 0 && n <= 6)) {
-            return { ok: false, error: "available_days must be integers 0..6" };
-        }
-        return {
-            ok: true,
-            availability: {
-                type: "custom_weekly",
-                rules: parsedDays.map((dow: number) => ({ dow, start: ds, end: de })),
-                ...kindField,
-            },
-        };
-    }
-
-    return { ok: false, error: "Invalid availability_type" };
+    return { ok: false, error: "availability is required" };
 }
 
 function normalizeListingInput(
@@ -437,8 +379,9 @@ function resolveListingPricing(
 }
 
 router.post("/", requireAuth, async (req: AuthRequest, res) => {
-    await ensureOwnerContactSchema();
-    const body = req.body ?? {};
+    const parsedBody = parseWithSchema(listingBodySchema, req.body ?? {}, res, "listing_create");
+    if (!parsedBody.ok) return;
+    const body = parsedBody.data;
     const parsedInput = normalizeListingInput(body);
     if (!parsedInput.ok) return res.status(400).json({ ok: false, error: parsedInput.error });
     const {
@@ -516,17 +459,12 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         owner_contact_phone,
         owner_contact_info,
     ];
-    const legacyInsertValues = insertValues.slice(0, 13);
 
     const client = await pool.connect();
     try {
         await client.query("BEGIN");
-        await client.query("SAVEPOINT insert_spot");
-
-        let spot: any;
-        try {
-            const r = await client.query(
-                `INSERT INTO parking_spots (
+        const r = await client.query(
+            `INSERT INTO parking_spots (
         owner_user_id,
         title,
         description,
@@ -553,41 +491,9 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
       )
       RETURNING *`,
-                insertValues
-            );
-            spot = r.rows[0];
-        } catch (e: any) {
-            const msg = String(e?.message || e);
-            if (isLegacySpotColumnError(msg)) {
-                await client.query("ROLLBACK TO SAVEPOINT insert_spot");
-                const r = await client.query(
-                    `INSERT INTO parking_spots (
-          owner_user_id,
-          title,
-          description,
-          mode,
-          price_gbp,
-          price_unit,
-          allow_points,
-          points_cost,
-          address_text,
-          lat,
-          lng,
-          image_url,
-          availability_json
-        )
-        VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
-        )
-        RETURNING *`,
-                    legacyInsertValues
-                );
-                spot = r.rows[0];
-            } else {
-                throw e;
-            }
-        }
-        await client.query("RELEASE SAVEPOINT insert_spot");
+            insertValues
+        );
+        const spot = r.rows[0];
         await client.query(
             `UPDATE users
        SET points_balance = points_balance + $1, updated_at = now()
@@ -612,9 +518,12 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
-    await ensureOwnerContactSchema();
-    const body = req.body ?? {};
-    const spotId = req.params.id;
+    const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "listing_update");
+    if (!parsedParams.ok) return;
+    const parsedBody = parseWithSchema(listingBodySchema, req.body ?? {}, res, "listing_update");
+    if (!parsedBody.ok) return;
+    const body = parsedBody.data;
+    const spotId = parsedParams.data.id;
     const parsedInput = normalizeListingInput(body, { enforceCapacityAvailableLimit: true });
     if (!parsedInput.ok) return res.status(400).json({ ok: false, error: parsedInput.error });
     const {
@@ -670,13 +579,10 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
         spotId,
         req.userId,
     ];
-    const legacyUpdateValues = [...updateBaseValues.slice(0, 12), spotId, req.userId];
 
     try {
-        let r;
-        try {
-            r = await pool.query(
-                `UPDATE parking_spots
+        const r = await pool.query(
+            `UPDATE parking_spots
        SET title=$1,
            description=$2,
            mode=$3,
@@ -700,34 +606,8 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
            updated_at=now()
        WHERE id=$21 AND owner_user_id=$22
        RETURNING *`,
-                updateValues
-            );
-        } catch (e: any) {
-            const msg = String(e?.message || e);
-            if (isLegacySpotColumnError(msg)) {
-                r = await pool.query(
-                    `UPDATE parking_spots
-           SET title=$1,
-               description=$2,
-               mode=$3,
-               price_gbp=$4,
-               price_unit=$5,
-               allow_points=$6,
-               points_cost=$7,
-               address_text=$8,
-               lat=$9,
-               lng=$10,
-               image_url=$11,
-               availability_json=$12,
-               updated_at=now()
-            WHERE id=$13 AND owner_user_id=$14
-            RETURNING *`,
-                    legacyUpdateValues
-                );
-            } else {
-                throw e;
-            }
-        }
+            updateValues
+        );
 
         if (!r.rowCount) {
             return res.status(404).json({ ok: false, error: "Parking spot not found or not owned by user" });
@@ -740,7 +620,9 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.delete("/:id", requireAuth, async (req: AuthRequest, res) => {
-    const spotId = req.params.id;
+    const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "listing_delete");
+    if (!parsedParams.ok) return;
+    const spotId = parsedParams.data.id;
     const userId = req.userId;
 
     const client = await pool.connect();
@@ -809,7 +691,6 @@ router.delete("/:id", requireAuth, async (req: AuthRequest, res) => {
 
 router.get("/", async (_req, res) => {
     try {
-        await ensureAuctionBidSchema();
         const r = await pool.query(
             `SELECT *
        FROM parking_spots
@@ -861,29 +742,21 @@ router.get("/", async (_req, res) => {
 });
 
 router.get("/geocode/search", async (req, res) => {
-    const rawQuery = typeof req.query.q === "string" ? req.query.q.trim() : "";
-    if (rawQuery.length < 3) {
-        return res.status(400).json({ ok: false, error: "q must be at least 3 characters" });
-    }
-
-    const limitRaw = Number(req.query.limit ?? 12);
-    const limit = Number.isFinite(limitRaw) ? Math.min(12, Math.max(1, Math.floor(limitRaw))) : 12;
-    const countrycodes =
-        typeof req.query.countrycodes === "string" && req.query.countrycodes.trim()
-            ? req.query.countrycodes.trim()
-            : "gb";
-    const viewbox =
-        typeof req.query.viewbox === "string" && req.query.viewbox.trim()
-            ? req.query.viewbox.trim()
-            : "-0.5103,51.6919,0.3340,51.2868";
+    const parsedQuery = parseWithSchema(geocodeSearchQuerySchema, req.query ?? {}, res, "geocode_search");
+    if (!parsedQuery.ok) return;
+    const { q, limit, countrycodes, viewbox } = parsedQuery.data;
+    const rawQuery = q;
+    const maxResults = limit ?? 12;
+    const regionCodes = countrycodes || "gb";
+    const searchViewbox = viewbox || "-0.5103,51.6919,0.3340,51.2868";
 
     try {
         const params = new URLSearchParams({
             format: "jsonv2",
-            limit: String(limit),
+            limit: String(maxResults),
             addressdetails: "1",
-            countrycodes,
-            viewbox,
+            countrycodes: regionCodes,
+            viewbox: searchViewbox,
             q: rawQuery,
         });
 
@@ -919,15 +792,9 @@ router.get("/geocode/search", async (req, res) => {
 });
 
 router.get("/geocode/reverse", async (req, res) => {
-    const latRaw = typeof req.query.lat === "string" ? Number(req.query.lat) : Number.NaN;
-    const lngRaw = typeof req.query.lng === "string" ? Number(req.query.lng) : Number.NaN;
-
-    if (!Number.isFinite(latRaw) || !Number.isFinite(lngRaw)) {
-        return res.status(400).json({ ok: false, error: "lat and lng query params are required" });
-    }
-    if (latRaw < -90 || latRaw > 90 || lngRaw < -180 || lngRaw > 180) {
-        return res.status(400).json({ ok: false, error: "lat/lng out of range" });
-    }
+    const parsedQuery = parseWithSchema(geocodeReverseQuerySchema, req.query ?? {}, res, "geocode_reverse");
+    if (!parsedQuery.ok) return;
+    const { lat: latRaw, lng: lngRaw } = parsedQuery.data;
 
     try {
         const params = new URLSearchParams({
@@ -968,13 +835,14 @@ router.get("/geocode/reverse", async (req, res) => {
 });
 
 router.get("/:id/owner-contact", requireAuth, async (req: AuthRequest, res) => {
+    const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "listing_owner_contact");
+    if (!parsedParams.ok) return;
     try {
-        await ensureOwnerContactSchema();
         const r = await pool.query(
             `SELECT owner_contact_email, owner_contact_phone, owner_contact_info
              FROM parking_spots
              WHERE id = $1 AND owner_user_id = $2`,
-            [req.params.id, req.userId]
+            [parsedParams.data.id, req.userId]
         );
         if (!r.rowCount) {
             return res.status(404).json({ ok: false, error: "Parking spot not found or not owned by user" });
@@ -986,12 +854,14 @@ router.get("/:id/owner-contact", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.get("/:id", async (req, res) => {
+    const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "listing_get");
+    if (!parsedParams.ok) return;
     try {
         const r = await pool.query(
             `SELECT *
        FROM parking_spots
        WHERE id = $1`,
-            [req.params.id]
+            [parsedParams.data.id]
         );
 
         if (!r.rowCount) {

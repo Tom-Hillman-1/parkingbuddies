@@ -5,32 +5,29 @@ import jwt from "jsonwebtoken";
 import { stripe } from "../stripe";
 import { countOverlappingBookings, isSlotAllowed, remainingMinutes } from "../lib/availability";
 import { calcAuctionUnits, type PriceUnit, toMoney } from "../lib/shared";
+import { z } from "zod";
+import { parseWithSchema } from "../lib/validation";
 
 const router = Router();
+const PENDING_BOOKING_HOLD_MINUTES = 30;
 
-let auctionSchemaReady = false;
-async function ensureAuctionBidSchema() {
-    if (auctionSchemaReady) return;
-    try {
-        await pool.query(
-            `ALTER TABLE auction_bids
-             ADD COLUMN IF NOT EXISTS start_time timestamptz,
-             ADD COLUMN IF NOT EXISTS end_time timestamptz,
-             ADD COLUMN IF NOT EXISTS pay_method text,
-             ADD COLUMN IF NOT EXISTS amount_points integer`
-        );
-        await pool.query(
-            `ALTER TABLE auction_bids
-             ALTER COLUMN status SET DEFAULT 'pending'`
-        );
-        await pool.query(
-            `UPDATE auction_bids SET pay_method = 'money' WHERE pay_method IS NULL`
-        );
-        await pool.query(`UPDATE auction_bids SET status = 'pending' WHERE status IS NULL`);
-        auctionSchemaReady = true;
-    } catch {
-    }
-}
+// credit: request schema validation pattern adapted from Zod docs (https://zod.dev)
+const spotIdParamsSchema = z.object({
+    spotId: z.string().trim().min(1),
+});
+
+const createBidBodySchema = z.object({
+    pay_method: z.enum(["money", "points"]).optional(),
+    amount_gbp: z.coerce.number().optional(),
+    amount_points: z.coerce.number().optional(),
+    payment_intent_id: z.string().trim().min(1).optional(),
+    start_time: z.string().trim().min(1),
+    end_time: z.string().trim().min(1),
+});
+
+const bidActionBodySchema = z.object({
+    bid_id: z.string().trim().min(1),
+});
 
 function isValidDurationMinutes(minutes: number) {
     if (!Number.isFinite(minutes) || minutes <= 0) return false;
@@ -41,7 +38,7 @@ function isValidDurationMinutes(minutes: number) {
 }
 
 const AUCTION_SPOT_MUTATION_SELECT =
-    `SELECT id, owner_user_id, mode, price_unit, auction_start_price_gbp, allow_points, points_cost, availability_json, availability_type, available_days, daily_start, daily_end, capacity_total ` +
+    `SELECT id, owner_user_id, mode, price_unit, auction_start_price_gbp, allow_points, points_cost, availability_json, capacity_total ` +
     `FROM parking_spots WHERE id = $1`;
 
 function normalizeAuctionUnit(rawUnit: unknown): PriceUnit {
@@ -58,10 +55,8 @@ router.get("/:spotId", async (req, res) => {
     const spotId = req.params.spotId;
 
     try {
-        await ensureAuctionBidSchema();
-
         const spotR = await pool.query(
-            `SELECT id, owner_user_id, mode, auction_end, auction_start_price_gbp, availability_json, availability_type, available_days, daily_start, daily_end, capacity_total
+            `SELECT id, owner_user_id, mode, auction_end, auction_start_price_gbp, availability_json, capacity_total
              FROM parking_spots
              WHERE id = $1`,
             [spotId]
@@ -97,10 +92,13 @@ router.get("/:spotId", async (req, res) => {
             `SELECT start_time, end_time
              FROM bookings
              WHERE parking_spot_id = $1
-               AND status IN ('confirmed', 'pending')
+               AND (
+                   status = 'confirmed'
+                   OR (status = 'pending' AND created_at >= now() - ($2 * interval '1 minute'))
+               )
                AND start_time IS NOT NULL
                AND end_time IS NOT NULL`,
-            [spotId]
+            [spotId, PENDING_BOOKING_HOLD_MINUTES]
         );
         const occupied = bookingWindowsR.rows.map((b: any) => ({ start: new Date(b.start_time), end: new Date(b.end_time) }));
         const remaining = remainingMinutes(spot, occupied);
@@ -144,7 +142,6 @@ router.get("/:spotId", async (req, res) => {
 
 router.get("/owner/bids", requireAuth, async (req: AuthRequest, res) => {
     try {
-        await ensureAuctionBidSchema();
         const r = await pool.query(
             `SELECT
                  b.id,
@@ -176,7 +173,6 @@ router.get("/owner/bids", requireAuth, async (req: AuthRequest, res) => {
 
 router.get("/me/pending", requireAuth, async (req: AuthRequest, res) => {
     try {
-        await ensureAuctionBidSchema();
         const r = await pool.query(
             `SELECT b.id, b.parking_spot_id, b.amount_gbp, b.amount_points, b.pay_method, b.status, b.created_at, b.start_time, b.end_time, ps.title AS spot_title
              FROM auction_bids b
@@ -195,7 +191,6 @@ router.get("/me/pending", requireAuth, async (req: AuthRequest, res) => {
 router.get("/bids/:bidId", requireAuth, async (req: AuthRequest, res) => {
     const bidId = req.params.bidId;
     try {
-        await ensureAuctionBidSchema();
         const r = await pool.query(
             `SELECT b.id,
                     b.parking_spot_id,
@@ -209,6 +204,7 @@ router.get("/bids/:bidId", requireAuth, async (req: AuthRequest, res) => {
                     b.end_time,
                     ps.title AS spot_title,
                     ps.address_text AS spot_address,
+                    ps.price_unit AS price_unit,
                     ps.owner_user_id
              FROM auction_bids b
                       JOIN parking_spots ps ON ps.id = b.parking_spot_id
@@ -268,6 +264,7 @@ router.get("/bids/:bidId", requireAuth, async (req: AuthRequest, res) => {
                 end_time: row.end_time,
                 spot_title: row.spot_title,
                 spot_address: row.spot_address,
+                price_unit: row.price_unit ?? "hour",
                 booking_id: bookingId,
                 payment_status: paymentStatus,
             },
@@ -278,19 +275,25 @@ router.get("/bids/:bidId", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
-    const spotId = req.params.spotId;
-    const payMethod = req.body?.pay_method === "points" ? "points" : "money";
-    const amount = toMoney(req.body?.amount_gbp);
-    const amountPoints = Number(req.body?.amount_points);
-    const paymentIntentId = req.body?.payment_intent_id;
-    const startRaw = req.body?.start_time;
-    const endRaw = req.body?.end_time;
+    const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "auction_bid");
+    if (!parsedParams.ok) return;
+    const parsedBody = parseWithSchema(createBidBodySchema, req.body ?? {}, res, "auction_bid");
+    if (!parsedBody.ok) return;
+
+    const spotId = parsedParams.data.spotId;
+    const payMethod = parsedBody.data.pay_method === "points" ? "points" : "money";
+    const amount = toMoney(parsedBody.data.amount_gbp);
+    const amountPoints = Number(parsedBody.data.amount_points);
+    const paymentIntentId = parsedBody.data.payment_intent_id;
+    const startRaw = parsedBody.data.start_time;
+    const endRaw = parsedBody.data.end_time;
 
     if (payMethod === "money") {
+        const paymentIntentIdValue = typeof paymentIntentId === "string" ? paymentIntentId : "";
         if (!amount || amount <= 0) {
             return res.status(400).json({ ok: false, error: "Invalid bid amount" });
         }
-        if (typeof paymentIntentId !== "string" || !paymentIntentId.trim()) {
+        if (!paymentIntentIdValue.trim()) {
             return res.status(400).json({ ok: false, error: "payment_intent_id is required" });
         }
     } else {
@@ -311,7 +314,6 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
     let bidId: string | null = null;
     try {
         await client.query("BEGIN");
-        await ensureAuctionBidSchema();
         await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [spotId]);
 
         const spot = await loadAuctionSpot(client, spotId);
@@ -362,7 +364,8 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
                 await client.query("ROLLBACK");
                 return res.status(400).json({ ok: false, error: `Bid must be at least GBP ${minTotal.toFixed(2)} for this ${unit} slot` });
             }
-            const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+            const paymentIntentIdValue = typeof paymentIntentId === "string" ? paymentIntentId : "";
+            const intent = await stripe.paymentIntents.retrieve(paymentIntentIdValue);
             if (
                 intent.metadata?.user_id !== req.userId ||
                 intent.metadata?.spot_id !== spotId ||
@@ -389,7 +392,7 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
                 `INSERT INTO auction_bids (parking_spot_id, bidder_user_id, amount_gbp, payment_intent_id, start_time, end_time, status, pay_method)
                  VALUES ($1,$2,$3,$4,$5,$6,'pending','money')
                  RETURNING id`,
-                [spotId, req.userId, amount.toFixed(2), paymentIntentId, start.toISOString(), end.toISOString()]
+                [spotId, req.userId, amount.toFixed(2), paymentIntentIdValue, start.toISOString(), end.toISOString()]
             );
             bidId = insertR.rows[0]?.id ?? null;
         } else {
@@ -444,17 +447,16 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
-    const spotId = req.params.spotId;
-    const bidId = req.body?.bid_id;
-
-    if (typeof bidId !== "string") {
-        return res.status(400).json({ ok: false, error: "bid_id is required" });
-    }
+    const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "auction_accept");
+    if (!parsedParams.ok) return;
+    const parsedBody = parseWithSchema(bidActionBodySchema, req.body ?? {}, res, "auction_accept");
+    if (!parsedBody.ok) return;
+    const spotId = parsedParams.data.spotId;
+    const bidId = parsedBody.data.bid_id;
 
     const client = await pool.connect();
     try {
         await client.query("BEGIN");
-        await ensureAuctionBidSchema();
         await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [spotId]);
 
         const spot = await loadAuctionSpot(client, spotId);
@@ -641,12 +643,12 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.post("/:spotId/reject", requireAuth, async (req: AuthRequest, res) => {
-    const spotId = req.params.spotId;
-    const bidId = req.body?.bid_id;
-
-    if (typeof bidId !== "string") {
-        return res.status(400).json({ ok: false, error: "bid_id is required" });
-    }
+    const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "auction_reject");
+    if (!parsedParams.ok) return;
+    const parsedBody = parseWithSchema(bidActionBodySchema, req.body ?? {}, res, "auction_reject");
+    if (!parsedBody.ok) return;
+    const spotId = parsedParams.data.spotId;
+    const bidId = parsedBody.data.bid_id;
 
     const client = await pool.connect();
     try {

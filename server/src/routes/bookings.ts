@@ -5,9 +5,27 @@ import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import { calcBookingUnits, type PriceUnit, toMoney } from "../lib/shared";
 import { countOverlappingBookings, isWindowSlot, normalizeExcludeDows } from "../lib/availability";
+import { z } from "zod";
+import { parseWithSchema } from "../lib/validation";
 
 const router = Router();
 type Mode = "free" | "rent" | "auction";
+const PENDING_BOOKING_HOLD_MINUTES = 30;
+
+// credit: request schema validation pattern adapted from Zod docs (https://zod.dev)
+const bookingCreateBodySchema = z.object({
+    parking_spot_id: z.string().trim().min(1),
+    start_time: z.string().trim().min(1),
+    end_time: z.string().trim().min(1),
+    pay_method: z.enum(["money", "points"]).optional(),
+    points_amount: z.coerce.number().optional(),
+});
+const bookingIdParamsSchema = z.object({
+    id: z.string().uuid("id must be a valid booking ID"),
+});
+const spotIdParamsSchema = z.object({
+    id: z.string().uuid("id must be a valid listing ID"),
+});
 
 type AvailabilityJson =
     | { type: "24_7"; date_from?: string; date_to?: string }
@@ -15,6 +33,8 @@ type AvailabilityJson =
     | { type: "custom_weekly"; rules: Array<{ dow: number; start: string; end: string }>; date_from?: string; date_to?: string }
     | {
           type: "window_slots";
+          date_from?: string;
+          date_to?: string;
           windows: Array<{
               mode: "continuous" | "split";
               date_from: string;
@@ -22,10 +42,8 @@ type AvailabilityJson =
               start: string;
               end: string;
               exclude_dows?: number[];
-          }>;
+          }>; 
       };
-
-type LegacyAvailabilityType = "24_7" | "weekly";
 
 function isIsoDateString(s: unknown): s is string {
     return typeof s === "string" && !Number.isNaN(Date.parse(s));
@@ -52,16 +70,6 @@ function sameUtcDate(a: Date, b: Date) {
     );
 }
 
-function normalizeDbTimeToHHMM(x: any): string | null {
-    if (!x) return null;
-    const s = String(x);
-    return s.length >= 5 ? s.slice(0, 5) : null;
-}
-
-function missingOwnerContactColumn(message: string) {
-    return message.includes("owner_contact_email") || message.includes("owner_contact_phone") || message.includes("owner_contact_info");
-}
-
 function validateWithinWindowUtc(start: Date, end: Date, windowStartHHMM: string, windowEndHHMM: string) {
     if (!sameUtcDate(start, end)) {
         return { ok: false as const, error: "Booking must be within a single day for this availability type" };
@@ -86,10 +94,10 @@ async function rollbackWithError(client: PoolClient, res: Response, status: numb
 
 function validateAvailability(spot: any, start: Date, end: Date): { ok: true } | { ok: false; error: string } {
     const av: AvailabilityJson | null = spot.availability_json ?? null;
-    const avAny = av as any;
-    if (avAny?.date_from || avAny?.date_to) {
-        const from = avAny.date_from ? new Date(`${avAny.date_from}T00:00:00Z`) : null;
-        const to = avAny.date_to ? new Date(`${avAny.date_to}T23:59:59Z`) : null;
+    if (!av) return { ok: true };
+    if (av?.date_from || av?.date_to) {
+        const from = av.date_from ? new Date(`${av.date_from}T00:00:00Z`) : null;
+        const to = av.date_to ? new Date(`${av.date_to}T23:59:59Z`) : null;
         if (from && start < from) return { ok: false, error: "Booking is before the available date range" };
         if (from && end < from) return { ok: false, error: "Booking is before the available date range" };
         if (to && start > to) return { ok: false, error: "Booking is after the available date range" };
@@ -153,37 +161,13 @@ function validateAvailability(spot: any, start: Date, end: Date): { ok: true } |
 
         return { ok: false, error: "Spot availability is misconfigured" };
     }
-    const legacyType = (spot.availability_type ?? "24_7") as LegacyAvailabilityType;
-    if (legacyType === "24_7") return { ok: true };
-
-    if (legacyType === "weekly") {
-        if (!sameUtcDate(start, end)) {
-            return { ok: false, error: "Booking must be within a single day for weekly availability" };
-        }
-
-        const days: number[] = Array.isArray(spot.available_days) ? spot.available_days : [];
-        const dow = start.getUTCDay();
-
-        if (!days.includes(dow)) return { ok: false, error: "This spot is not available on that day" };
-
-        const ds = normalizeDbTimeToHHMM(spot.daily_start);
-        const de = normalizeDbTimeToHHMM(spot.daily_end);
-
-        if (!ds || !de) return { ok: false, error: "Spot weekly availability is misconfigured" };
-
-        const r = validateWithinWindowUtc(start, end, ds, de);
-        return r.ok ? { ok: true } : r;
-    }
-
-    return { ok: false, error: "Spot availability is invalid" };
+    return { ok: false, error: "Spot availability is missing or invalid" };
 }
 
 router.post("/", requireAuth, async (req: AuthRequest, res) => {
-    const { parking_spot_id, start_time, end_time, pay_method, points_amount } = req.body ?? {};
-
-    if (typeof parking_spot_id !== "string") {
-        return res.status(400).json({ ok: false, error: "parking_spot_id is required" });
-    }
+    const parsedBody = parseWithSchema(bookingCreateBodySchema, req.body ?? {}, res, "booking");
+    if (!parsedBody.ok) return;
+    const { parking_spot_id, start_time, end_time, pay_method, points_amount } = parsedBody.data;
 
     if (!isIsoDateString(start_time) || !isIsoDateString(end_time)) {
         return res.status(400).json({ ok: false, error: "start_time and end_time must be ISO date strings" });
@@ -201,12 +185,8 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
     const client = await pool.connect();
     try {
         await client.query("BEGIN");
-        await client.query("SAVEPOINT spot_select");
-
-        let spotR;
-        try {
-            spotR = await client.query(
-                `SELECT
+        const spotR = await client.query(
+            `SELECT
                  id,
                  owner_user_id,
                  mode,
@@ -216,44 +196,12 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
                  points_cost,
                  is_active,
                  availability_json,
-                 availability_type,
-                 available_days,
-                 daily_start,
-                 daily_end,
                  parking_type,
                  capacity_total
              FROM parking_spots
              WHERE id = $1`,
-                [parking_spot_id]
-            );
-        } catch (e: any) {
-            const msg = String(e?.message || e);
-            if (msg.includes("parking_type") || msg.includes("capacity_total")) {
-                await client.query("ROLLBACK TO SAVEPOINT spot_select");
-                spotR = await client.query(
-                    `SELECT
-                 id,
-                 owner_user_id,
-                 mode,
-                 price_gbp,
-                 price_unit,
-                 allow_points,
-                 points_cost,
-                 is_active,
-                 availability_json,
-                 availability_type,
-                 available_days,
-                 daily_start,
-                 daily_end
-             FROM parking_spots
-             WHERE id = $1`,
-                    [parking_spot_id]
-                );
-            } else {
-                throw e;
-            }
-        }
-        await client.query("RELEASE SAVEPOINT spot_select");
+            [parking_spot_id]
+        );
 
         if (!spotR.rowCount) {
             return rollbackWithError(client, res, 404, "Parking spot not found");
@@ -407,7 +355,9 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.get("/spot/:id", async (req, res) => {
-    const spotId = req.params.id;
+    const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "spot_bookings");
+    if (!parsedParams.ok) return;
+    const spotId = parsedParams.data.id;
     const start = typeof req.query.start === "string" ? req.query.start : null;
     const end = typeof req.query.end === "string" ? req.query.end : null;
 
@@ -418,19 +368,25 @@ router.get("/spot/:id", async (req, res) => {
                 `SELECT id, parking_spot_id, start_time, end_time, status
                  FROM bookings
                  WHERE parking_spot_id = $1
-                   AND status IN ('confirmed', 'pending')
+                   AND (
+                       status = 'confirmed'
+                       OR (status = 'pending' AND created_at >= now() - ($4 * interval '1 minute'))
+                   )
                    AND NOT (end_time <= $2 OR start_time >= $3)
                  ORDER BY start_time ASC`,
-                [spotId, start, end]
+                [spotId, start, end, PENDING_BOOKING_HOLD_MINUTES]
             );
         } else {
             r = await pool.query(
                 `SELECT id, parking_spot_id, start_time, end_time, status
                  FROM bookings
                  WHERE parking_spot_id = $1
-                   AND status IN ('confirmed', 'pending')
+                   AND (
+                       status = 'confirmed'
+                       OR (status = 'pending' AND created_at >= now() - ($2 * interval '1 minute'))
+                   )
                  ORDER BY start_time ASC`,
-                [spotId]
+                [spotId, PENDING_BOOKING_HOLD_MINUTES]
             );
         }
         return res.json({ ok: true, bookings: r.rows });
@@ -441,10 +397,8 @@ router.get("/spot/:id", async (req, res) => {
 
 router.get("/me", requireAuth, async (req: AuthRequest, res) => {
     try {
-        let r;
-        try {
-            r = await pool.query(
-                `SELECT
+        const r = await pool.query(
+            `SELECT
                      b.*,
                      ps.title AS spot_title,
                      ps.address_text AS spot_address,
@@ -481,26 +435,8 @@ router.get("/me", requireAuth, async (req: AuthRequest, res) => {
                           ) pay ON TRUE
                  WHERE b.driver_user_id = $1
                  ORDER BY b.created_at DESC`,
-                [req.userId]
-            );
-        } catch (e: any) {
-            const message = String(e?.message || e);
-            if (!missingOwnerContactColumn(message)) throw e;
-            r = await pool.query(
-                `SELECT
-                     b.*,
-                     ps.title AS spot_title,
-                     ps.address_text AS spot_address,
-                     ps.lat AS spot_lat,
-                     ps.lng AS spot_lng,
-                     ps.owner_user_id AS owner_user_id
-                 FROM bookings b
-                          JOIN parking_spots ps ON ps.id = b.parking_spot_id
-                 WHERE b.driver_user_id = $1
-                 ORDER BY b.created_at DESC`,
-                [req.userId]
-            );
-        }
+            [req.userId]
+        );
 
         return res.json({ ok: true, bookings: r.rows });
     } catch (e) {
@@ -509,7 +445,9 @@ router.get("/me", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.patch("/:id/cancel", requireAuth, async (req: AuthRequest, res) => {
-    const bookingId = req.params.id;
+    const parsedParams = parseWithSchema(bookingIdParamsSchema, req.params ?? {}, res, "booking_cancel");
+    if (!parsedParams.ok) return;
+    const bookingId = parsedParams.data.id;
 
     try {
         const r = await pool.query(
@@ -560,10 +498,8 @@ router.get("/:id", requireAuth, async (req: AuthRequest, res) => {
         return res.status(404).json({ ok: false, error: "Booking not found" });
     }
     try {
-        let r;
-        try {
-            r = await pool.query(
-                `SELECT
+        const r = await pool.query(
+            `SELECT
                      b.*,
                      ps.title AS spot_title,
                      ps.address_text AS spot_address,
@@ -609,43 +545,8 @@ router.get("/:id", requireAuth, async (req: AuthRequest, res) => {
                      LIMIT 1
                  ) pay ON TRUE
                  WHERE b.id = $1 AND b.driver_user_id = $2`,
-                [bookingId, req.userId]
-            );
-        } catch (e: any) {
-            const message = String(e?.message || e);
-            if (!missingOwnerContactColumn(message)) throw e;
-            r = await pool.query(
-                `SELECT
-                     b.*,
-                     ps.title AS spot_title,
-                     ps.address_text AS spot_address,
-                     ps.lat AS spot_lat,
-                     ps.lng AS spot_lng,
-                     ps.image_url AS spot_image,
-                     ps.mode AS spot_mode,
-                     ps.price_gbp AS spot_price_gbp,
-                     ps.price_unit AS spot_price_unit,
-                     pay.id AS payment_id,
-                     pay.provider AS payment_provider,
-                     pay.provider_ref AS payment_provider_ref,
-                     pay.status AS payment_status
-                 FROM bookings b
-                 JOIN parking_spots ps ON ps.id = b.parking_spot_id
-                 LEFT JOIN LATERAL (
-                     SELECT
-                         p.id,
-                         p.provider,
-                         p.provider_ref,
-                         p.status
-                     FROM payments p
-                     WHERE p.booking_id = b.id
-                     ORDER BY p.created_at DESC, p.id DESC
-                     LIMIT 1
-                 ) pay ON TRUE
-                 WHERE b.id = $1 AND b.driver_user_id = $2`,
-                [bookingId, req.userId]
-            );
-        }
+            [bookingId, req.userId]
+        );
 
         if (!r.rowCount) {
             return res.status(404).json({ ok: false, error: "Booking not found" });

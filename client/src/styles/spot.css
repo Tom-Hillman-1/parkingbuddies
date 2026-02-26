@@ -1,0 +1,351 @@
+.spotSimple {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    align-items: start;
+    gap: 1rem;
+}
+
+.spotSimpleSide,
+.spotSimpleMain,
+.spotSimpleMedia,
+.spotSimpleAction,
+.spotSimpleBidList {
+    display: grid;
+    gap: 0.72rem;
+}
+
+.spotSimpleHeader {
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    border-radius: 24px;
+    background: linear-gradient(135deg, #ffffff 0%, #edf6ff 100%);
+}
+
+.spotSimpleHeader--closed {
+    border-color: #f0c8c8;
+    background: linear-gradient(135deg, #ffffff 0%, #fff2f2 100%);
+}
+
+.spotSimpleBadges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.6rem;
+}
+
+.spotOwnerTools {
+    margin-top: 0.52rem;
+    display: grid;
+    gap: 0.5rem;
+}
+
+.spotOwnerFlag {
+    border: 1px solid #efc6c6;
+    border-radius: 10px;
+    background: #fff2f2;
+    color: #a23636;
+    font-size: 0.82rem;
+    font-weight: 800;
+    padding: 0.54rem 0.68rem;
+}
+
+.spotOwnerActions {
+    gap: 0.54rem;
+}
+
+.spotSimpleAction {
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    border-radius: 24px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(242, 248, 255, 0.92) 100%);
+    box-shadow: var(--shadow-xs);
+}
+
+.spotSimpleInlineMeta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.65rem;
+}
+
+.spotSimpleBid {
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    border-radius: 14px;
+    background: linear-gradient(135deg, #fbfdff 0%, #f0f6ff 100%);
+    padding: 0.58rem 0.66rem;
+    display: grid;
+    gap: 0.35rem;
+}
+
+.spotSimpleBid.pending {
+    border-color: #f2ddbc;
+    background: #fff9ee;
+}
+
+.spotSimpleBid.accepted,
+.spotSimpleBid.won {
+    border-color: #b8e6ca;
+    background: #f1fbf5;
+}
+
+.spotSimpleBid.rejected,
+.spotSimpleBid.declined {
+    border-color: #f0cbcb;
+    background: #fff2f2;
+}
+
+.slotCal {
+    display: grid;
+    gap: 0.45rem;
+}
+
+.slotCalHead {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 0.35rem;
+    color: #617088;
+    font-size: 0.76rem;
+    font-weight: 700;
+    text-align: center;
+}
+
+.slotCalGrid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 0.38rem;
+}
+
+.slotCalBlank {
+    min-height: 64px;
+}
+
+.slotCalDay {
+    min-height: 64px;
+    border: 1px solid rgba(255, 255, 255, 0.74);
+    border-radius: 14px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(241, 247, 255, 0.9) 100%);
+    position: relative;
+    overflow: hidden;
+    display: grid;
+    align-content: space-between;
+    justify-items: center;
+    gap: 0.18rem;
+    padding: 0.38rem 0.3rem;
+    transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.slotCalDay:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.slotCalDay--available {
+    border-color: #8fcdad;
+    background: linear-gradient(180deg, #e5f8ee 0%, #c9ebd9 100%);
+}
+
+.slotCalDay--available .slotCalNum {
+    color: #0f5f45;
+}
+
+.slotCalDay--available .slotCalMonth {
+    color: #2f775f;
+}
+
+.slotCalDay--off {
+    border-color: #d7dee8;
+    background: linear-gradient(180deg, #f0f3f7 0%, #e8edf3 100%);
+}
+
+.slotCalDay--off .slotCalNum,
+.slotCalDay--off .slotCalMonth {
+    color: #76869c;
+}
+
+.slotCalDay--selected {
+    border-color: #7ca9eb;
+    background: linear-gradient(180deg, #d9e9ff 0%, #c4ddff 100%);
+    box-shadow: 0 0 0 2px rgba(80, 143, 232, 0.22);
+}
+
+.slotCalDay--range {
+    border-color: #7ca9eb;
+    background: linear-gradient(180deg, #d9e9ff 0%, #c4ddff 100%);
+}
+
+.slotCalDay--selected .slotCalNum,
+.slotCalDay--selected .slotCalMonth,
+.slotCalDay--range .slotCalNum,
+.slotCalDay--range .slotCalMonth {
+    color: #144785;
+}
+
+.slotCalNum {
+    position: relative;
+    z-index: 2;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.slotCalHint {
+    position: relative;
+    z-index: 2;
+    max-width: 100%;
+    font-size: 0.55rem;
+    font-weight: 700;
+    line-height: 1.15;
+    color: #2c755e;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.slotCalDay--off .slotCalHint {
+    color: #8b98ab;
+}
+
+.slotCalDay--selected .slotCalHint,
+.slotCalDay--range .slotCalHint {
+    color: #225a97;
+}
+
+.slotCalMonth {
+    position: relative;
+    z-index: 2;
+    font-size: 0.68rem;
+    color: #6a7a91;
+}
+
+.slotRangeSummary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.slotRangeSummary .badge {
+    white-space: nowrap;
+}
+
+.slotDialogBackdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgba(11, 22, 42, 0.34);
+    backdrop-filter: blur(4px);
+}
+
+.slotDialog {
+    width: min(460px, 100%);
+    display: grid;
+    gap: 0.68rem;
+    border-radius: 22px;
+    background: var(--surface-grad);
+}
+
+.slotDialogPreview {
+    border-radius: 14px;
+    border: 1px solid #d6e2f4;
+    background: linear-gradient(135deg, #f9fbff 0%, #edf5ff 100%);
+    color: #284872;
+    font-size: 0.84rem;
+    font-weight: 700;
+    padding: 0.56rem 0.68rem;
+}
+
+.spotInfoValue {
+    color: #111827;
+    font-weight: 700;
+    margin-top: 0.22rem;
+}
+
+.spotAlert {
+    border: 1px solid #cbdcf4;
+    border-radius: 10px;
+    background: #f2f7ff;
+    color: #2f4b72;
+    font-size: 0.85rem;
+    padding: 0.62rem 0.72rem;
+}
+
+.payToggle {
+    display: inline-flex;
+    gap: 0.42rem;
+}
+
+.payToggleBtn {
+    min-height: 38px;
+    border: 1px solid #c9d8f0;
+    border-radius: 999px;
+    background: #fff;
+    color: #486285;
+    font-weight: 700;
+    padding: 0.34rem 0.82rem;
+}
+
+.payToggleBtn.active {
+    border-color: #9ec2f9;
+    background: #eaf2ff;
+    color: #1159c5;
+}
+
+.slotStatus {
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: #f9fbff;
+    padding: 0.58rem 0.72rem;
+}
+
+.slotStatus--ok {
+    border-color: #bde8d0;
+    background: #effbf4;
+    color: #146a44;
+}
+
+.slotStatus--bad {
+    border-color: #f1c7c7;
+    background: #fff1f1;
+    color: #a23636;
+}
+
+.spotMapWrap {
+    border-radius: 18px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+}
+
+.spotMapWrap .leafletShell,
+.spotMapWrap .leafletMap {
+    min-height: 260px;
+    height: 320px;
+}
+
+.spotHeroImg,
+.spotHeroFallback {
+    width: 100%;
+    min-height: 220px;
+    border-radius: 18px;
+    object-fit: cover;
+    border: 1px solid var(--line);
+}
+
+.spotHeroFallback {
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    background: #f8fbff;
+}
+
+.ui-reveal {
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 280ms ease, transform 280ms ease;
+    will-change: opacity, transform;
+}
+
+.ui-reveal.is-visible {
+    opacity: 1;
+    transform: none;
+}
+
