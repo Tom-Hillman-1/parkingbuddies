@@ -7,7 +7,6 @@ import { parseWithSchema } from "../lib/validation";
 
 const router = Router();
 
-const LISTING_REWARD_POINTS = 1;
 const MIN_AUCTION_START_PRICE_GBP = 0.1;
 const MIN_POINTS_COST = 1;
 const DEMO_PAYOUTS_ENABLED = ["1", "true", "yes", "on"].includes(
@@ -19,7 +18,6 @@ const NOMINATIM_HEADERS = {
     "Accept-Language": "en-GB,en;q=0.9",
     "User-Agent": "ParkingBuddies/1.0",
 };
-// credit: request schema validation pattern adapted from Zod docs (https://zod.dev)
 const listingBodySchema = z.record(z.string(), z.unknown());
 const spotIdParamsSchema = z.object({
     id: z.string().uuid("id must be a valid listing ID"),
@@ -494,19 +492,6 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
             insertValues
         );
         const spot = r.rows[0];
-        await client.query(
-            `UPDATE users
-       SET points_balance = points_balance + $1, updated_at = now()
-       WHERE id = $2`,
-            [LISTING_REWARD_POINTS, req.userId]
-        );
-
-        await client.query(
-            `INSERT INTO reward_transactions (user_id, type, amount, reason, related_spot_id)
-       VALUES ($1,'earn',$2,'listing_upload',$3)`,
-            [req.userId, LISTING_REWARD_POINTS, spot.id]
-        );
-
         await client.query("COMMIT");
         return res.status(201).json({ ok: true, parking_spot: spot });
     } catch (e) {
@@ -640,38 +625,36 @@ router.delete("/:id", requireAuth, async (req: AuthRequest, res) => {
             await client.query("ROLLBACK");
             return res.status(404).json({ ok: false, error: "Parking spot not found or not owned by user" });
         }
+        const activityR = await client.query(
+            `SELECT
+                 EXISTS(SELECT 1 FROM bookings WHERE parking_spot_id = $1) AS has_bookings,
+                 EXISTS(
+                     SELECT 1
+                     FROM payments p
+                     JOIN bookings b ON b.id = p.booking_id
+                     WHERE b.parking_spot_id = $1
+                 ) AS has_payments,
+                 EXISTS(SELECT 1 FROM auction_bids WHERE parking_spot_id = $1) AS has_bids`,
+            [spotId]
+        );
+        const activity = activityR.rows[0] as {
+            has_bookings?: boolean;
+            has_payments?: boolean;
+            has_bids?: boolean;
+        };
+        if (activity?.has_bookings || activity?.has_payments || activity?.has_bids) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({
+                ok: false,
+                error: "This listing has booking or bidding history and cannot be deleted.",
+            });
+        }
         await client.query(
             `UPDATE reward_transactions
              SET related_spot_id = NULL
              WHERE related_spot_id = $1`,
             [spotId]
         );
-        const bookingIdsRes = await client.query(
-            `SELECT id FROM bookings WHERE parking_spot_id = $1`,
-            [spotId]
-        );
-        const bookingIds = bookingIdsRes.rows.map((r: { id: string }) => r.id);
-        if (bookingIds.length > 0) {
-            await client.query(
-                `DELETE FROM payments
-                 WHERE booking_id = ANY($1::uuid[])`,
-                [bookingIds]
-            );
-        }
-
-        await client.query(
-            `DELETE FROM bookings
-             WHERE parking_spot_id = $1`,
-            [spotId]
-        );
-        try {
-            await client.query(
-                `DELETE FROM auction_bids
-                 WHERE parking_spot_id = $1`,
-                [spotId]
-            );
-        } catch {
-        }
 
         await client.query(
             `DELETE FROM parking_spots

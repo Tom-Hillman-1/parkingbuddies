@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import type { PoolClient } from "pg";
 import type Stripe from "stripe";
+import { randomUUID } from "crypto";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import { stripe } from "../stripe";
@@ -17,22 +18,26 @@ const DEMO_PAYOUTS_ENABLED = ["1", "true", "yes", "on"].includes(
 );
 const DEMO_CONNECT_ACCOUNT_PREFIX = "acct_demo_";
 
-// credit: request schema validation pattern adapted from Zod docs (https://zod.dev)
 const connectOnboardBodySchema = z.object({
     mode: z.enum(["stripe", "demo"]).optional(),
 });
 
 const checkoutSessionBodySchema = z.object({
-    booking_id: z.string().trim().min(1),
+    booking_id: z.string().uuid("booking_id must be a valid booking ID"),
 });
 
 const auctionIntentBodySchema = z.object({
-    spot_id: z.string().trim().min(1),
+    spot_id: z.string().uuid("spot_id must be a valid listing ID"),
     amount_gbp: z.coerce.number(),
+    idempotency_key: z.string().trim().min(8).max(120).optional(),
+});
+
+const cancelAuctionIntentBodySchema = z.object({
+    payment_intent_id: z.string().trim().regex(/^pi_[A-Za-z0-9_]+$/, "payment_intent_id must be a Stripe PaymentIntent ID"),
 });
 
 const bookingReceiptParamsSchema = z.object({
-    bookingId: z.string().trim().min(1),
+    bookingId: z.string().uuid("bookingId must be a valid booking ID"),
 });
 
 const bookingReceiptQuerySchema = z.object({
@@ -616,28 +621,32 @@ router.post("/checkout-session", requireAuth, async (req: AuthRequest, res) => {
             paymentIntentData.on_behalf_of = ownerAccountUsable;
         }
 
-        // credit: Stripe Checkout session flow follows official Stripe docs/samples
-        const session = await stripe.checkout.sessions.create({
-            mode: "payment",
-            payment_method_types: ["card"],
-            success_url: `${baseUrl}/pay/${booking_id}?success=1&session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${baseUrl}/pay/${booking_id}?canceled=1`,
-            customer_email: typeof booking.driver_email === "string" ? booking.driver_email.trim().toLowerCase() : undefined,
-            line_items: [
-                {
-                    quantity: 1,
-                    price_data: {
-                        currency: "gbp",
-                        unit_amount: amountPence,
-                        product_data: {
-                            name: title,
-                            description: `Location: ${address}\nWhen: ${when}\nBooking: ${booking_id}`,
+        const session = await stripe.checkout.sessions.create(
+            {
+                mode: "payment",
+                payment_method_types: ["card"],
+                success_url: `${baseUrl}/pay/${booking_id}?success=1&session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${baseUrl}/pay/${booking_id}?canceled=1`,
+                customer_email: typeof booking.driver_email === "string" ? booking.driver_email.trim().toLowerCase() : undefined,
+                line_items: [
+                    {
+                        quantity: 1,
+                        price_data: {
+                            currency: "gbp",
+                            unit_amount: amountPence,
+                            product_data: {
+                                name: title,
+                                description: `Location: ${address}\nWhen: ${when}\nBooking: ${booking_id}`,
+                            },
                         },
                     },
-                },
-            ],
-            payment_intent_data: paymentIntentData,
-        });
+                ],
+                payment_intent_data: paymentIntentData,
+            },
+            {
+                idempotencyKey: `checkout_session_${booking_id}`,
+            }
+        );
 
         const paymentIntentId =
             typeof session.payment_intent === "string" ? session.payment_intent : null;
@@ -672,7 +681,7 @@ router.post("/checkout-session", requireAuth, async (req: AuthRequest, res) => {
 router.post("/auction-intent", requireAuth, async (req: AuthRequest, res) => {
     const parsedBody = parseWithSchema(auctionIntentBodySchema, req.body ?? {}, res, "auction_intent");
     if (!parsedBody.ok) return;
-    const { spot_id, amount_gbp } = parsedBody.data;
+    const { spot_id, amount_gbp, idempotency_key } = parsedBody.data;
 
     const amount = toMoney(amount_gbp);
     if (amount <= 0) {
@@ -725,7 +734,9 @@ router.post("/auction-intent", requireAuth, async (req: AuthRequest, res) => {
             paymentIntentPayload.on_behalf_of = ownerAccountUsable;
         }
 
-        const intent = await stripe.paymentIntents.create(paymentIntentPayload);
+        const intent = await stripe.paymentIntents.create(paymentIntentPayload, {
+            idempotencyKey: idempotency_key || `auction_intent_${req.userId}_${spot_id}_${amountPence}_${randomUUID()}`,
+        });
 
         return res.json({
             ok: true,
@@ -733,6 +744,41 @@ router.post("/auction-intent", requireAuth, async (req: AuthRequest, res) => {
             payment_intent_id: intent.id,
         });
     } catch (e) {
+        return res.status(500).json({ ok: false, error: String(e) });
+    }
+});
+
+router.post("/auction-intent/cancel", requireAuth, async (req: AuthRequest, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    const parsedBody = parseWithSchema(cancelAuctionIntentBodySchema, req.body ?? {}, res, "auction_intent_cancel");
+    if (!parsedBody.ok) return;
+    const paymentIntentId = parsedBody.data.payment_intent_id;
+
+    try {
+        const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+        if (intent.metadata?.type !== "auction_bid" || intent.metadata?.user_id !== userId) {
+            return res.status(403).json({ ok: false, error: "Not allowed to cancel this payment intent" });
+        }
+
+        if (intent.status === "canceled") {
+            return res.json({ ok: true, canceled: true, already_canceled: true });
+        }
+
+        if (intent.status === "succeeded") {
+            return res.status(400).json({ ok: false, error: "Cannot cancel a captured payment intent" });
+        }
+
+        await stripe.paymentIntents.cancel(paymentIntentId);
+        return res.json({ ok: true, canceled: true });
+    } catch (e) {
+        const stripeCode =
+            e && typeof e === "object" && "code" in e
+                ? String((e as { code?: unknown }).code ?? "")
+                : "";
+        if (stripeCode === "payment_intent_unexpected_state") {
+            return res.status(400).json({ ok: false, error: "Payment intent is in a non-cancellable state" });
+        }
         return res.status(500).json({ ok: false, error: String(e) });
     }
 });
@@ -779,24 +825,23 @@ router.get("/booking/:bookingId/receipt", requireAuth, async (req: AuthRequest, 
             const session = await stripe.checkout.sessions.retrieve(sessionId, {
                 expand: ["payment_intent"],
             });
+            const sessionBookingId = asNonEmptyString(session.metadata?.booking_id);
+            if (sessionBookingId && sessionBookingId !== bookingId) {
+                return res.status(403).json({ ok: false, error: "Session does not belong to this booking" });
+            }
             const intent = session.payment_intent;
             const paymentIntentId =
                 asNonEmptyString(typeof intent === "string" ? intent : intent && typeof intent === "object" ? intent.id : null);
             if (paymentIntentId) {
+                const intentObject =
+                    typeof intent === "object" && intent && "metadata" in intent
+                        ? (intent as Stripe.PaymentIntent)
+                        : await stripe.paymentIntents.retrieve(paymentIntentId);
+                const metadataBookingId = asNonEmptyString(intentObject.metadata?.booking_id);
+                if (metadataBookingId && metadataBookingId !== bookingId) {
+                    return res.status(403).json({ ok: false, error: "Payment intent does not belong to this booking" });
+                }
                 providerRef = paymentIntentId;
-                const normalizedStatus =
-                    session.payment_status === "paid"
-                        ? "succeeded"
-                        : "pending";
-                await syncBookingPaymentFromReceipt(bookingId, providerRef, 0, normalizedStatus);
-
-                await pool.query(
-                    `UPDATE bookings
-                     SET payment_provider_ref = $1,
-                         updated_at = now()
-                     WHERE id = $2`,
-                    [providerRef, bookingId]
-                );
             }
         }
 

@@ -42,10 +42,17 @@ export function capitalizeLabel(value: string, fallback = "Unknown") {
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
-export function calcUnitsForMinutes(minutes: number, unit: PriceUnit) {
+export function calcUnitsForMinutes(
+    minutes: number,
+    unit: PriceUnit,
+    hourlyMode: "booking" | "auction" = "booking"
+) {
     if (!Number.isFinite(minutes) || minutes <= 0) return 0;
     if (unit === "hour") {
-        const roundedMinutes = Math.max(60, Math.ceil(minutes / 60) * 60);
+        const roundedMinutes =
+            hourlyMode === "booking"
+                ? Math.max(5, Math.ceil(minutes / 5) * 5)
+                : Math.max(60, Math.ceil(minutes / 60) * 60);
         return roundedMinutes / 60;
     }
     if (unit === "day") return Math.max(1, Math.ceil(minutes / (24 * 60)));

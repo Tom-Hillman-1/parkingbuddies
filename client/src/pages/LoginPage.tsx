@@ -23,12 +23,11 @@ export default function LoginPage() {
     const [msg, setMsg] = useState<string | null>(null);
     const [showPass, setShowPass] = useState(false);
 
-    // credit: react-hook-form + zod form setup pattern adapted from official docs
     const form = useForm<LoginFormValues>({
         resolver: zodResolver(loginSchema),
         defaultValues: {
             email: remembered ? localStorage.getItem("pb_email") ?? "" : "",
-            password: remembered ? localStorage.getItem("pb_password") ?? "" : "",
+            password: "",
             remember: remembered,
         },
     });
@@ -40,14 +39,13 @@ export default function LoginPage() {
         setMsg(null);
         try {
             await login(values.email, values.password);
+            localStorage.removeItem("pb_password");
             if (values.remember) {
                 localStorage.setItem("pb_remember", "true");
                 localStorage.setItem("pb_email", values.email);
-                localStorage.setItem("pb_password", values.password);
             } else {
                 localStorage.removeItem("pb_remember");
                 localStorage.removeItem("pb_email");
-                localStorage.removeItem("pb_password");
             }
             nav(redirectTarget);
         } catch (error: unknown) {

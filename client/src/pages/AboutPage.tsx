@@ -421,6 +421,7 @@ export default function AboutPage() {
                     {error && <p className="aboutPremiumNotice aboutPremiumNotice--err">{error}</p>}
                 </form>
             </section>
+            <div id="contact-bottom" aria-hidden="true" />
         </div>
     );
 }

@@ -19,8 +19,28 @@ function setTime(d: Date, hhmm: string) {
     const h = Number(rawH ?? 0);
     const m = Number(rawM ?? 0);
     const out = new Date(d);
-    out.setHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0);
+    out.setUTCHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0);
     return out;
+}
+
+function parseYmdStartUtc(ymd: string) {
+    return new Date(`${ymd}T00:00:00Z`);
+}
+
+function parseYmdEndUtc(ymd: string) {
+    return new Date(`${ymd}T23:59:59Z`);
+}
+
+function parseYmdTimeUtc(ymd: string, hhmm: string) {
+    return new Date(`${ymd}T${hhmm}:00Z`);
+}
+
+function sameUtcDate(a: Date, b: Date) {
+    return (
+        a.getUTCFullYear() === b.getUTCFullYear() &&
+        a.getUTCMonth() === b.getUTCMonth() &&
+        a.getUTCDate() === b.getUTCDate()
+    );
 }
 
 export function isWindowSlot(raw: any) {
@@ -86,8 +106,8 @@ function buildAvailabilityWindows(spot: any, maxDaysForward = 30): AvailabilityW
             if (!isWindowSlot(window)) continue;
 
             if (window.mode === "continuous") {
-                const start = new Date(`${window.date_from}T${window.start}:00`);
-                const end = new Date(`${window.date_to}T${window.end}:00`);
+                const start = parseYmdTimeUtc(window.date_from, window.start);
+                const end = parseYmdTimeUtc(window.date_to, window.end);
                 if (!(start < end)) continue;
                 if (end <= now || start >= maxEnd) continue;
                 windows.push({
@@ -98,16 +118,16 @@ function buildAvailabilityWindows(spot: any, maxDaysForward = 30): AvailabilityW
             }
 
             const blocked = new Set(normalizeExcludeDows(window.exclude_dows));
-            const rangeStart = new Date(`${window.date_from}T00:00:00`);
-            const rangeEnd = new Date(`${window.date_to}T23:59:59`);
+            const rangeStart = parseYmdStartUtc(window.date_from);
+            const rangeEnd = parseYmdEndUtc(window.date_to);
             const firstDay = rangeStart > now ? new Date(rangeStart) : new Date(now);
-            firstDay.setHours(0, 0, 0, 0);
+            firstDay.setUTCHours(0, 0, 0, 0);
             const lastDay = rangeEnd < maxEnd ? new Date(rangeEnd) : new Date(maxEnd);
-            lastDay.setHours(23, 59, 59, 999);
+            lastDay.setUTCHours(23, 59, 59, 999);
 
-            for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
+            for (let d = new Date(firstDay); d <= lastDay; d.setUTCDate(d.getUTCDate() + 1)) {
                 const day = new Date(d);
-                if (blocked.has(day.getDay())) continue;
+                if (blocked.has(day.getUTCDay())) continue;
                 const start = setTime(day, window.start);
                 const end = setTime(day, window.end);
                 if (end <= now) continue;
@@ -120,18 +140,18 @@ function buildAvailabilityWindows(spot: any, maxDaysForward = 30): AvailabilityW
     const rules = extractAvailabilityRules(spot);
     if (!rules.length) return [];
 
-    const dateFrom = a?.date_from ? new Date(`${a.date_from}T00:00:00`) : null;
-    const dateTo = a?.date_to ? new Date(`${a.date_to}T23:59:59`) : null;
+    const dateFrom = a?.date_from ? parseYmdStartUtc(a.date_from) : null;
+    const dateTo = a?.date_to ? parseYmdEndUtc(a.date_to) : null;
     const startDay = dateFrom && dateFrom > now ? new Date(dateFrom) : new Date(now);
-    startDay.setHours(0, 0, 0, 0);
+    startDay.setUTCHours(0, 0, 0, 0);
 
     const hardEnd = dateTo && dateTo < maxEnd ? new Date(dateTo) : maxEnd;
-    hardEnd.setHours(23, 59, 59, 999);
+    hardEnd.setUTCHours(23, 59, 59, 999);
 
     const windows: AvailabilityWindow[] = [];
-    for (let d = new Date(startDay); d <= hardEnd; d.setDate(d.getDate() + 1)) {
+    for (let d = new Date(startDay); d <= hardEnd; d.setUTCDate(d.getUTCDate() + 1)) {
         const day = new Date(d);
-        const dow = day.getDay();
+        const dow = day.getUTCDay();
         const dayRules = rules.filter((r) => r.dow === dow);
         for (const r of dayRules) {
             const start = setTime(day, r.start);
@@ -233,16 +253,16 @@ export function isSlotAllowed(spot: any, start: Date, end: Date) {
     if (a?.type === "window_slots" && Array.isArray(a.windows)) {
         for (const window of a.windows) {
             if (!isWindowSlot(window)) continue;
-            const slotStart = new Date(`${window.date_from}T${window.start}:00`);
-            const slotEnd = new Date(`${window.date_to}T${window.end}:00`);
+            const slotStart = parseYmdTimeUtc(window.date_from, window.start);
+            const slotEnd = parseYmdTimeUtc(window.date_to, window.end);
             if (!(slotStart < slotEnd)) continue;
             if (start < slotStart || end > slotEnd) continue;
 
             if (window.mode === "continuous") return true;
 
-            if (start.toDateString() !== end.toDateString()) continue;
+            if (!sameUtcDate(start, end)) continue;
             const blocked = new Set(normalizeExcludeDows(window.exclude_dows));
-            if (blocked.has(start.getDay())) continue;
+            if (blocked.has(start.getUTCDay())) continue;
             const ruleStart = setTime(start, window.start);
             const ruleEnd = setTime(start, window.end);
             if (start >= ruleStart && end <= ruleEnd) return true;
@@ -254,15 +274,15 @@ export function isSlotAllowed(spot: any, start: Date, end: Date) {
     if (!rules.length) return false;
 
     const isTwentyFourSeven = a?.type === "24_7";
-    const dateFrom = a?.date_from ? new Date(`${a.date_from}T00:00:00`) : null;
-    const dateTo = a?.date_to ? new Date(`${a.date_to}T23:59:59`) : null;
+    const dateFrom = a?.date_from ? parseYmdStartUtc(a.date_from) : null;
+    const dateTo = a?.date_to ? parseYmdEndUtc(a.date_to) : null;
     if (dateFrom && start < dateFrom) return false;
     if (dateTo && end > dateTo) return false;
 
     if (isTwentyFourSeven) return true;
 
-    if (start.toDateString() !== end.toDateString()) return false;
-    const dow = start.getDay();
+    if (!sameUtcDate(start, end)) return false;
+    const dow = start.getUTCDay();
     const dayRules = rules.filter((r) => r.dow === dow);
     if (!dayRules.length) return false;
 

@@ -189,7 +189,7 @@
     min-height: 176px;
     padding: 0.94rem 0.9rem;
     position: relative;
-    overflow: hidden;
+    overflow: visible;
     display: grid;
     align-content: start;
     gap: 0.36rem;
@@ -647,37 +647,42 @@
     position: relative;
     display: inline-flex;
     align-items: center;
+    z-index: 8;
 }
 
 .wizardTooltipBtn {
-    width: 1.08rem;
-    height: 1.08rem;
+    width: 1.28rem;
+    height: 1.28rem;
+    display: grid;
+    place-items: center;
     border-radius: 999px;
-    border: 1px solid #ccd8e8;
-    background: #f4f8fd;
-    color: #5f7592;
-    font-size: 0.66rem;
-    font-weight: 700;
+    border: 1px solid #b8cde7;
+    background: linear-gradient(160deg, #ffffff 0%, #e9f2ff 100%);
+    color: #1f5b98;
+    font-size: 0.72rem;
+    font-weight: 800;
     line-height: 1;
     cursor: pointer;
+    box-shadow: 0 4px 10px rgba(19, 53, 97, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
 
 .wizardTooltipBubble {
     position: absolute;
-    top: calc(100% + 0.46rem);
-    left: 0;
+    top: calc(100% + 0.56rem);
+    left: 50%;
     z-index: 6;
-    width: min(220px, 78vw);
-    border: 1px solid #d9e3f0;
-    border-radius: 10px;
-    background: #fff;
-    box-shadow: 0 8px 18px rgba(16, 24, 40, 0.12);
-    color: #344b67;
-    font-size: 0.77rem;
-    line-height: 1.44;
-    padding: 0.46rem 0.54rem;
+    width: min(250px, calc(100vw - 2.2rem));
+    border: 1px solid #d5e2f3;
+    border-radius: 12px;
+    background: linear-gradient(170deg, #ffffff 0%, #f5f9ff 100%);
+    box-shadow: 0 14px 28px rgba(16, 24, 40, 0.16);
+    color: #304b69;
+    font-size: 0.78rem;
+    line-height: 1.48;
+    padding: 0.52rem 0.62rem;
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translate(-50%, -4px);
     transition: opacity 140ms ease, transform 140ms ease;
     pointer-events: none;
 }
@@ -685,13 +690,33 @@
 .wizardTooltip:hover .wizardTooltipBubble,
 .wizardTooltip:focus-within .wizardTooltipBubble {
     opacity: 1;
-    transform: translateY(0);
+    transform: translate(-50%, 0);
 }
 
 .wizardTooltip:hover .wizardTooltipBtn,
 .wizardTooltip:focus-within .wizardTooltipBtn {
-    border-color: #95b2d4;
-    background: #eef5fd;
+    border-color: #8eb2dc;
+    background: linear-gradient(160deg, #ffffff 0%, #e0ecff 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px rgba(24, 72, 132, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.94);
+}
+
+.wizardTooltipBtn:focus-visible {
+    outline: 2px solid #76b6ff;
+    outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+    .wizardTooltipBubble {
+        left: auto;
+        right: 0;
+        transform: translateY(-4px);
+    }
+
+    .wizardTooltip:hover .wizardTooltipBubble,
+    .wizardTooltip:focus-within .wizardTooltipBubble {
+        transform: translateY(0);
+    }
 }
 
 .wizardMap {

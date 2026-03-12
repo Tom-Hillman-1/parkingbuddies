@@ -115,7 +115,7 @@ async function seed() {
                 "owner@demo.com",
                 "Demo Owner",
                 passwordHash,
-                1400,
+                1474,
                 "acct_demo_owner_connected",
                 true,
                 true,
@@ -140,7 +140,7 @@ async function seed() {
                 "driver@demo.com",
                 "Demo Driver",
                 passwordHash,
-                650,
+                632,
                 null,
                 false,
                 false,
@@ -150,6 +150,14 @@ async function seed() {
 
         const ownerId = ownerR.rows[0].id;
         const driverId = driverR.rows[0].id;
+
+        await client.query(
+            `INSERT INTO reward_transactions (user_id, type, amount, reason)
+             VALUES
+                 ($1, 'earn', 1400, 'seed_opening_balance'),
+                 ($2, 'earn', 650, 'seed_opening_balance')`,
+            [ownerId, driverId]
+        );
 
         const listingRows = [];
         listingRows.push(

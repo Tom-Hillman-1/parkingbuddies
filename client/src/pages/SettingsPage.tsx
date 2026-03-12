@@ -67,7 +67,6 @@ export default function SettingsPage() {
         openConnectDashboard,
     } = useStripeConnect(token);
 
-    // credit: form validation setup pattern adapted from react-hook-form + zod docs
     const profileForm = useForm<ProfileFormValues>({
         resolver: zodResolver(profileSchema),
         defaultValues: { name: "", email: "", homeAddress: "" },
@@ -77,7 +76,6 @@ export default function SettingsPage() {
         defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
     });
 
-    // credit: query loading pattern adapted from TanStack Query docs
     const settingsQuery = useQuery<SettingsQueryData>({
         queryKey: ["settings-page", token],
         enabled: Boolean(token),
@@ -101,8 +99,6 @@ export default function SettingsPage() {
                     home_address: null,
                 };
             }
-
-            await refreshConnectStatus(true);
             return {
                 name: settings.name ?? "",
                 email: settings.email ?? "",
@@ -110,6 +106,11 @@ export default function SettingsPage() {
             };
         },
     });
+
+    useEffect(() => {
+        if (!token) return;
+        void refreshConnectStatus(true);
+    }, [token, refreshConnectStatus]);
 
     useEffect(() => {
         if (!settingsQuery.data) return;

@@ -1,48 +1,49 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import "./index.css";
-import CreateListingPage from "./pages/CreateListingPage";
 import "leaflet/dist/leaflet.css";
-import PayBookingPage from "./pages/PayBookingPage";
-import SettingsPage from "./pages/SettingsPage";
 import App from "./App";
 import { AuthProvider } from "./lib/auth";
+const HomePage = lazy(() => import("./pages/HomePage"));
+const SpotDetailsPage = lazy(() => import("./pages/SpotDetailsPage"));
+const LoginPage = lazy(() => import("./pages/LoginPage"));
+const SignupPage = lazy(() => import("./pages/SignupPage"));
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));
+const AboutPage = lazy(() => import("./pages/AboutPage"));
+const CreateListingPage = lazy(() => import("./pages/CreateListingPage"));
+const PayBookingPage = lazy(() => import("./pages/PayBookingPage"));
+const BidReceiptPage = lazy(() => import("./pages/BidReceiptPage"));
+const BidConfirmPage = lazy(() => import("./pages/BidConfirmPage"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 
-import HomePage from "./pages/HomePage";
-import SpotDetailsPage from "./pages/SpotDetailsPage";
-import LoginPage from "./pages/LoginPage";
-import SignupPage from "./pages/SignupPage";
-import DashboardPage from "./pages/DashboardPage";
-import AboutPage from "./pages/AboutPage";
-import BidReceiptPage from "./pages/BidReceiptPage";
-import BidConfirmPage from "./pages/BidConfirmPage";
-
-// credit: Query client provider pattern adapted from TanStack Query docs (MIT)
 const queryClient = new QueryClient();
+const routeFallback = <div style={{ padding: 24 }}>Loading page...</div>;
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
         <QueryClientProvider client={queryClient}>
             <AuthProvider>
                 <BrowserRouter>
-                    <Routes>
-                        <Route element={<App />}>
-                            <Route path="/" element={<HomePage />} />
-                            <Route path="/spots/:id" element={<SpotDetailsPage />} />
-                            <Route path="/login" element={<LoginPage />} />
-                            <Route path="/signup" element={<SignupPage />} />
-                            <Route path="/dashboard" element={<DashboardPage />} />
-                            <Route path="/about" element={<AboutPage />} />
-                            <Route path="*" element={<Navigate to="/" replace />} />
-                            <Route path="/create-listing" element={<CreateListingPage />} />
-                            <Route path="/pay/:bookingId" element={<PayBookingPage />} />
-                            <Route path="/bids/:bidId" element={<BidReceiptPage />} />
-                            <Route path="/bids/confirm" element={<BidConfirmPage />} />
-                            <Route path="/settings" element={<SettingsPage />} />
-                        </Route>
-                    </Routes>
+                    <Suspense fallback={routeFallback}>
+                        <Routes>
+                            <Route element={<App />}>
+                                <Route path="/" element={<HomePage />} />
+                                <Route path="/spots/:id" element={<SpotDetailsPage />} />
+                                <Route path="/login" element={<LoginPage />} />
+                                <Route path="/signup" element={<SignupPage />} />
+                                <Route path="/dashboard" element={<DashboardPage />} />
+                                <Route path="/about" element={<AboutPage />} />
+                                <Route path="*" element={<Navigate to="/" replace />} />
+                                <Route path="/create-listing" element={<CreateListingPage />} />
+                                <Route path="/pay/:bookingId" element={<PayBookingPage />} />
+                                <Route path="/bids/:bidId" element={<BidReceiptPage />} />
+                                <Route path="/bids/confirm" element={<BidConfirmPage />} />
+                                <Route path="/settings" element={<SettingsPage />} />
+                            </Route>
+                        </Routes>
+                    </Suspense>
                 </BrowserRouter>
             </AuthProvider>
         </QueryClientProvider>

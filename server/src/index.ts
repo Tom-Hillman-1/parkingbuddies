@@ -13,7 +13,31 @@ import auctionsRoutes from "./routes/auctions";
 dotenv.config();
 
 const app = express();
-app.use(cors());
+const localFallbackOrigins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+];
+const configuredOrigins = [
+    process.env.FRONTEND_URL,
+    process.env.CLIENT_URL,
+    ...(process.env.CORS_ORIGINS ?? "")
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean),
+]
+    .filter((origin): origin is string => Boolean(origin));
+const allowedOrigins = new Set(configuredOrigins.length ? configuredOrigins : localFallbackOrigins);
+
+app.use(
+    cors({
+        origin(origin, callback) {
+            // Allow non-browser tools (curl/postman) that send no Origin.
+            if (!origin) return callback(null, true);
+            if (allowedOrigins.has(origin)) return callback(null, true);
+            return callback(new Error("CORS origin is not allowed"));
+        },
+    })
+);
 app.post("/payments/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
 app.use(express.json({ limit: "5mb" }));
 

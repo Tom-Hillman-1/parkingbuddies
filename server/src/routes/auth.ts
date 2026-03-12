@@ -14,7 +14,6 @@ import { parseWithSchema } from "../lib/validation";
 
 const router = Router();
 const SIGNUP_REWARD_POINTS = 1;
-// credit: request schema validation pattern adapted from Zod docs (https://zod.dev)
 const signupBodySchema = z.object({
     email: z.string(),
     name: z.string(),

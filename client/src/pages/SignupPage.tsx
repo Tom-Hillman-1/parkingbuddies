@@ -32,7 +32,6 @@ export default function SignupPage() {
     const [showPass, setShowPass] = useState(false);
     const [msg, setMsg] = useState<string | null>(null);
 
-    // credit: react-hook-form + zod form setup pattern adapted from official docs
     const form = useForm<SignupFormValues>({
         resolver: zodResolver(signupSchema),
         defaultValues: {

@@ -338,7 +338,8 @@
     }
 
     .aboutPremiumInfoGrid {
-        grid-template-columns: minmax(0, 1fr);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.8rem;
     }
 }
 
@@ -356,10 +357,11 @@
     .aboutPremiumActions,
     .aboutPremiumFormActions {
         width: 100%;
+        justify-content: flex-start;
     }
 
     .aboutPremiumBtn {
-        width: 100%;
+        width: auto;
     }
 
     .aboutShowcaseRail {
@@ -372,6 +374,14 @@
     }
 
     .aboutPremiumFormRow {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.58rem;
+    }
+}
+
+@media (max-width: 540px) {
+    .aboutPremiumFormRow,
+    .aboutPremiumInfoGrid {
         grid-template-columns: minmax(0, 1fr);
     }
 }

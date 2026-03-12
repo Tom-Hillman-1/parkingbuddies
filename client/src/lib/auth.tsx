@@ -36,6 +36,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
+    const clearAuthState = useCallback(() => {
+        localStorage.removeItem(TOKEN_KEY);
+        setToken(null);
+        setUser(null);
+    }, []);
+
     const refreshMe = useCallback(async () => {
         if (!token) {
             setUser(null);
@@ -52,9 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 await refreshMe();
             } catch {
                 if (!active) return;
-                localStorage.removeItem(TOKEN_KEY);
-                setToken(null);
-                setUser(null);
+                clearAuthState();
             } finally {
                 if (active) setIsLoading(false);
             }
@@ -62,20 +66,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return () => {
             active = false;
         };
-    }, [refreshMe]);
+    }, [refreshMe, clearAuthState]);
 
     useEffect(() => {
         if (!token) return;
         const onFocus = () => {
-            refreshMe().catch(() => {});
+            refreshMe().catch(clearAuthState);
         };
         const onVisibility = () => {
             if (document.visibilityState === "visible") {
-                refreshMe().catch(() => {});
+                refreshMe().catch(clearAuthState);
             }
         };
         const interval = window.setInterval(() => {
-            refreshMe().catch(() => {});
+            refreshMe().catch(clearAuthState);
         }, 30000);
 
         window.addEventListener("focus", onFocus);
@@ -85,7 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             window.removeEventListener("focus", onFocus);
             document.removeEventListener("visibilitychange", onVisibility);
         };
-    }, [token, refreshMe]);
+    }, [token, refreshMe, clearAuthState]);
 
     const login = useCallback(async (email: string, password: string) => {
         const r = await apiPost<{ token: string }>("/auth/login", { email, password });
@@ -104,10 +108,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const logout = useCallback(() => {
-        localStorage.removeItem(TOKEN_KEY);
-        setToken(null);
-        setUser(null);
-    }, []);
+        clearAuthState();
+    }, [clearAuthState]);
 
     const value = useMemo<AuthContextValue>(
         () => ({ token, user, isLoading, login, signup, logout, refreshMe }),

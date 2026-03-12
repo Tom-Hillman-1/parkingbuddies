@@ -11,22 +11,25 @@ import { parseWithSchema } from "../lib/validation";
 const router = Router();
 const PENDING_BOOKING_HOLD_MINUTES = 30;
 
-// credit: request schema validation pattern adapted from Zod docs (https://zod.dev)
 const spotIdParamsSchema = z.object({
-    spotId: z.string().trim().min(1),
+    spotId: z.string().uuid("spotId must be a valid listing ID"),
 });
 
 const createBidBodySchema = z.object({
     pay_method: z.enum(["money", "points"]).optional(),
     amount_gbp: z.coerce.number().optional(),
     amount_points: z.coerce.number().optional(),
-    payment_intent_id: z.string().trim().min(1).optional(),
+    payment_intent_id: z.string().trim().regex(/^pi_[A-Za-z0-9_]+$/, "payment_intent_id must be a Stripe PaymentIntent ID").optional(),
     start_time: z.string().trim().min(1),
     end_time: z.string().trim().min(1),
 });
 
 const bidActionBodySchema = z.object({
-    bid_id: z.string().trim().min(1),
+    bid_id: z.string().uuid("bid_id must be a valid bid ID"),
+});
+
+const bidIdParamsSchema = z.object({
+    bidId: z.string().uuid("bidId must be a valid bid ID"),
 });
 
 function isValidDurationMinutes(minutes: number) {
@@ -45,14 +48,196 @@ function normalizeAuctionUnit(rawUnit: unknown): PriceUnit {
     return rawUnit === "day" || rawUnit === "week" ? rawUnit : "hour";
 }
 
+async function cancelPaymentIntentSilently(paymentIntentId: string | null | undefined) {
+    if (!paymentIntentId) return;
+    try {
+        await stripe.paymentIntents.cancel(paymentIntentId);
+    } catch {
+    }
+}
+
 async function loadAuctionSpot(client: any, spotId: string) {
     const spotR = await client.query(AUCTION_SPOT_MUTATION_SELECT, [spotId]);
     if (!spotR.rowCount) return null;
     return spotR.rows[0] as any;
 }
 
+async function updateAcceptedMoneyBidFailureState(
+    bidId: string,
+    bookingId: string,
+    paymentStatus: "failed" | "refunded"
+) {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        await client.query(
+            `UPDATE auction_bids
+             SET status = 'rejected', updated_at = now()
+             WHERE id = $1`,
+            [bidId]
+        );
+        await client.query(
+            `UPDATE bookings
+             SET status = 'cancelled', updated_at = now()
+             WHERE id = $1`,
+            [bookingId]
+        );
+        await client.query(
+            `UPDATE payments
+             SET status = $2,
+                 updated_at = now()
+             WHERE booking_id = $1`,
+            [bookingId, paymentStatus]
+        );
+        await client.query("COMMIT");
+    } catch (e) {
+        await client.query("ROLLBACK");
+        throw e;
+    } finally {
+        client.release();
+    }
+}
+
+router.get("/owner/bids", requireAuth, async (req: AuthRequest, res) => {
+    try {
+        const r = await pool.query(
+            `SELECT
+                 b.id,
+                 b.parking_spot_id,
+                 b.amount_gbp,
+                 b.amount_points,
+                 b.pay_method,
+                 b.status,
+                 b.created_at,
+                 b.start_time,
+                 b.end_time,
+                 u.name AS bidder_name,
+                 u.email AS bidder_email,
+                 ps.title AS spot_title
+             FROM auction_bids b
+                      JOIN parking_spots ps ON ps.id = b.parking_spot_id
+                      JOIN users u ON u.id = b.bidder_user_id
+             WHERE ps.owner_user_id = $1
+               AND ps.mode = 'auction'
+             ORDER BY b.created_at DESC`,
+            [req.userId]
+        );
+
+        return res.json({ ok: true, bids: r.rows });
+    } catch (e) {
+        return res.status(500).json({ ok: false, error: String(e) });
+    }
+});
+
+router.get("/me/pending", requireAuth, async (req: AuthRequest, res) => {
+    try {
+        const r = await pool.query(
+            `SELECT b.id, b.parking_spot_id, b.amount_gbp, b.amount_points, b.pay_method, b.status, b.created_at, b.start_time, b.end_time, ps.title AS spot_title
+             FROM auction_bids b
+                      JOIN parking_spots ps ON ps.id = b.parking_spot_id
+             WHERE b.bidder_user_id = $1
+               AND b.status = 'pending'
+             ORDER BY b.created_at DESC`,
+            [req.userId]
+        );
+        return res.json({ ok: true, bids: r.rows });
+    } catch (e) {
+        return res.status(500).json({ ok: false, error: String(e) });
+    }
+});
+
+router.get("/bids/:bidId", requireAuth, async (req: AuthRequest, res) => {
+    const parsedParams = parseWithSchema(bidIdParamsSchema, req.params ?? {}, res, "auction_bid_get");
+    if (!parsedParams.ok) return;
+    const bidId = parsedParams.data.bidId;
+    try {
+        const r = await pool.query(
+            `SELECT b.id,
+                    b.parking_spot_id,
+                    b.bidder_user_id,
+                    b.amount_gbp,
+                    b.amount_points,
+                    b.pay_method,
+                    b.status,
+                    b.created_at,
+                    b.start_time,
+                    b.end_time,
+                    ps.title AS spot_title,
+                    ps.address_text AS spot_address,
+                    ps.price_unit AS price_unit,
+                    ps.owner_user_id
+             FROM auction_bids b
+                      JOIN parking_spots ps ON ps.id = b.parking_spot_id
+             WHERE b.id = $1`,
+            [bidId]
+        );
+        if (!r.rowCount) {
+            return res.status(404).json({ ok: false, error: "Bid not found" });
+        }
+
+        const row = r.rows[0] as any;
+        if (row.bidder_user_id !== req.userId && row.owner_user_id !== req.userId) {
+            return res.status(403).json({ ok: false, error: "Not authorized to view this bid" });
+        }
+
+        let bookingId: string | null = null;
+        let paymentStatus: string | null = null;
+        if ((row.pay_method ?? "money") === "money" && row.start_time && row.end_time) {
+            const paymentR = await pool.query(
+                `SELECT
+                     b.id AS booking_id,
+                     pay.status AS payment_status
+                 FROM bookings b
+                 LEFT JOIN LATERAL (
+                     SELECT p.status
+                     FROM payments p
+                     WHERE p.booking_id = b.id
+                     ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC, p.id DESC
+                     LIMIT 1
+                 ) pay ON TRUE
+                 WHERE b.parking_spot_id = $1
+                   AND b.driver_user_id = $2
+                   AND b.start_time = $3
+                   AND b.end_time = $4
+                   AND b.pay_method = 'money'
+                 ORDER BY b.created_at DESC
+                 LIMIT 1`,
+                [row.parking_spot_id, row.bidder_user_id, row.start_time, row.end_time]
+            );
+            if (paymentR.rowCount) {
+                bookingId = paymentR.rows[0].booking_id ?? null;
+                paymentStatus = paymentR.rows[0].payment_status ?? null;
+            }
+        }
+
+        return res.json({
+            ok: true,
+            bid: {
+                id: row.id,
+                parking_spot_id: row.parking_spot_id,
+                amount_gbp: row.amount_gbp,
+                amount_points: row.amount_points,
+                pay_method: row.pay_method ?? "money",
+                status: row.status ?? "pending",
+                created_at: row.created_at,
+                start_time: row.start_time,
+                end_time: row.end_time,
+                spot_title: row.spot_title,
+                spot_address: row.spot_address,
+                price_unit: row.price_unit ?? "hour",
+                booking_id: bookingId,
+                payment_status: paymentStatus,
+            },
+        });
+    } catch (e) {
+        return res.status(500).json({ ok: false, error: String(e) });
+    }
+});
+
 router.get("/:spotId", async (req, res) => {
-    const spotId = req.params.spotId;
+    const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "auction_get");
+    if (!parsedParams.ok) return;
+    const spotId = parsedParams.data.spotId;
 
     try {
         const spotR = await pool.query(
@@ -140,140 +325,6 @@ router.get("/:spotId", async (req, res) => {
     }
 });
 
-router.get("/owner/bids", requireAuth, async (req: AuthRequest, res) => {
-    try {
-        const r = await pool.query(
-            `SELECT
-                 b.id,
-                 b.parking_spot_id,
-                 b.amount_gbp,
-                 b.amount_points,
-                 b.pay_method,
-                 b.status,
-                 b.created_at,
-                 b.start_time,
-                 b.end_time,
-                 u.name AS bidder_name,
-                 u.email AS bidder_email,
-                 ps.title AS spot_title
-             FROM auction_bids b
-                      JOIN parking_spots ps ON ps.id = b.parking_spot_id
-                      JOIN users u ON u.id = b.bidder_user_id
-             WHERE ps.owner_user_id = $1
-               AND ps.mode = 'auction'
-             ORDER BY b.created_at DESC`,
-            [req.userId]
-        );
-
-        return res.json({ ok: true, bids: r.rows });
-    } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
-    }
-});
-
-router.get("/me/pending", requireAuth, async (req: AuthRequest, res) => {
-    try {
-        const r = await pool.query(
-            `SELECT b.id, b.parking_spot_id, b.amount_gbp, b.amount_points, b.pay_method, b.status, b.created_at, b.start_time, b.end_time, ps.title AS spot_title
-             FROM auction_bids b
-                      JOIN parking_spots ps ON ps.id = b.parking_spot_id
-             WHERE b.bidder_user_id = $1
-               AND b.status = 'pending'
-             ORDER BY b.created_at DESC`,
-            [req.userId]
-        );
-        return res.json({ ok: true, bids: r.rows });
-    } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
-    }
-});
-
-router.get("/bids/:bidId", requireAuth, async (req: AuthRequest, res) => {
-    const bidId = req.params.bidId;
-    try {
-        const r = await pool.query(
-            `SELECT b.id,
-                    b.parking_spot_id,
-                    b.bidder_user_id,
-                    b.amount_gbp,
-                    b.amount_points,
-                    b.pay_method,
-                    b.status,
-                    b.created_at,
-                    b.start_time,
-                    b.end_time,
-                    ps.title AS spot_title,
-                    ps.address_text AS spot_address,
-                    ps.price_unit AS price_unit,
-                    ps.owner_user_id
-             FROM auction_bids b
-                      JOIN parking_spots ps ON ps.id = b.parking_spot_id
-             WHERE b.id = $1`,
-            [bidId]
-        );
-        if (!r.rowCount) {
-            return res.status(404).json({ ok: false, error: "Bid not found" });
-        }
-
-        const row = r.rows[0] as any;
-        if (row.bidder_user_id !== req.userId && row.owner_user_id !== req.userId) {
-            return res.status(403).json({ ok: false, error: "Not authorized to view this bid" });
-        }
-
-        let bookingId: string | null = null;
-        let paymentStatus: string | null = null;
-        if ((row.pay_method ?? "money") === "money" && row.start_time && row.end_time) {
-            const paymentR = await pool.query(
-                `SELECT
-                     b.id AS booking_id,
-                     pay.status AS payment_status
-                 FROM bookings b
-                 LEFT JOIN LATERAL (
-                     SELECT p.status
-                     FROM payments p
-                     WHERE p.booking_id = b.id
-                     ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC, p.id DESC
-                     LIMIT 1
-                 ) pay ON TRUE
-                 WHERE b.parking_spot_id = $1
-                   AND b.driver_user_id = $2
-                   AND b.start_time = $3
-                   AND b.end_time = $4
-                   AND b.pay_method = 'money'
-                 ORDER BY b.created_at DESC
-                 LIMIT 1`,
-                [row.parking_spot_id, row.bidder_user_id, row.start_time, row.end_time]
-            );
-            if (paymentR.rowCount) {
-                bookingId = paymentR.rows[0].booking_id ?? null;
-                paymentStatus = paymentR.rows[0].payment_status ?? null;
-            }
-        }
-
-        return res.json({
-            ok: true,
-            bid: {
-                id: row.id,
-                parking_spot_id: row.parking_spot_id,
-                amount_gbp: row.amount_gbp,
-                amount_points: row.amount_points,
-                pay_method: row.pay_method ?? "money",
-                status: row.status ?? "pending",
-                created_at: row.created_at,
-                start_time: row.start_time,
-                end_time: row.end_time,
-                spot_title: row.spot_title,
-                spot_address: row.spot_address,
-                price_unit: row.price_unit ?? "hour",
-                booking_id: bookingId,
-                payment_status: paymentStatus,
-            },
-        });
-    } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
-    }
-});
-
 router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
     const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "auction_bid");
     if (!parsedParams.ok) return;
@@ -285,11 +336,11 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
     const amount = toMoney(parsedBody.data.amount_gbp);
     const amountPoints = Number(parsedBody.data.amount_points);
     const paymentIntentId = parsedBody.data.payment_intent_id;
+    const paymentIntentIdValue = typeof paymentIntentId === "string" ? paymentIntentId : "";
     const startRaw = parsedBody.data.start_time;
     const endRaw = parsedBody.data.end_time;
 
     if (payMethod === "money") {
-        const paymentIntentIdValue = typeof paymentIntentId === "string" ? paymentIntentId : "";
         if (!amount || amount <= 0) {
             return res.status(400).json({ ok: false, error: "Invalid bid amount" });
         }
@@ -312,22 +363,26 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
 
     const client = await pool.connect();
     let bidId: string | null = null;
+    const rollbackWith = async (status: number, error: string, cancelIntent = false) => {
+        await client.query("ROLLBACK");
+        if (cancelIntent) {
+            await cancelPaymentIntentSilently(paymentIntentIdValue);
+        }
+        return res.status(status).json({ ok: false, error });
+    };
     try {
         await client.query("BEGIN");
         await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [spotId]);
 
         const spot = await loadAuctionSpot(client, spotId);
         if (!spot) {
-            await client.query("ROLLBACK");
-            return res.status(404).json({ ok: false, error: "Listing not found" });
+            return rollbackWith(404, "Listing not found", payMethod === "money");
         }
         if (spot.mode !== "auction") {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Listing is not an auction" });
+            return rollbackWith(400, "Listing is not an auction", payMethod === "money");
         }
         if (spot.owner_user_id === req.userId) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Owners cannot bid on their own listings" });
+            return rollbackWith(400, "Owners cannot bid on their own listings", payMethod === "money");
         }
 
         const unit = normalizeAuctionUnit(spot.price_unit);
@@ -336,56 +391,46 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
         const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
         const maxEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
         if (end > maxEnd || !isValidDurationMinutes(minutes)) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Selected slot exceeds the allowed booking window." });
+            return rollbackWith(400, "Selected slot exceeds the allowed booking window.", payMethod === "money");
         }
 
         if (!isSlotAllowed(spot, start, end)) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Requested slot is outside listing availability" });
+            return rollbackWith(400, "Requested slot is outside listing availability", payMethod === "money");
         }
 
         const capacity = Math.max(1, Number(spot.capacity_total ?? 1));
         const overlapCount = await countOverlappingBookings(client, spotId, start.toISOString(), end.toISOString());
         if (overlapCount >= capacity) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Selected slot is no longer available" });
+            return rollbackWith(400, "Selected slot is no longer available", payMethod === "money");
         }
 
         if (payMethod === "money") {
             const startPrice = toMoney(spot.auction_start_price_gbp);
             if (startPrice < 0.1) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: "This auction does not accept money bids" });
+                return rollbackWith(400, "This auction does not accept money bids", true);
             }
             const units = calcAuctionUnits(minutes, unit);
             const minTotal = Math.round(startPrice * units * 100) / 100;
             if (amount < minTotal) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: `Bid must be at least GBP ${minTotal.toFixed(2)} for this ${unit} slot` });
+                return rollbackWith(400, `Bid must be at least GBP ${minTotal.toFixed(2)} for this ${unit} slot`, true);
             }
-            const paymentIntentIdValue = typeof paymentIntentId === "string" ? paymentIntentId : "";
             const intent = await stripe.paymentIntents.retrieve(paymentIntentIdValue);
             if (
                 intent.metadata?.user_id !== req.userId ||
                 intent.metadata?.spot_id !== spotId ||
                 intent.metadata?.owner_user_id !== spot.owner_user_id
             ) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: "Payment intent does not match this bid" });
+                return rollbackWith(400, "Payment intent does not match this bid", true);
             }
             const amountPence = Math.round(amount * 100);
             if (intent.amount !== amountPence || intent.currency !== "gbp") {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: "Payment amount mismatch" });
+                return rollbackWith(400, "Payment amount mismatch", true);
             }
             if (intent.capture_method !== "manual") {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: "Invalid auction authorization type" });
+                return rollbackWith(400, "Invalid auction authorization type", true);
             }
             if (intent.status !== "requires_capture") {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: "Card authorization not completed" });
+                return rollbackWith(400, "Card authorization not completed", true);
             }
 
             const insertR = await client.query(
@@ -397,17 +442,14 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
             bidId = insertR.rows[0]?.id ?? null;
         } else {
             if (!spot.allow_points) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: "This auction does not accept points" });
+                return rollbackWith(400, "This auction does not accept points");
             }
             const minPoints = Number(spot.points_cost ?? 0);
             if (!Number.isFinite(minPoints) || minPoints <= 0) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: "Invalid points cost for this listing" });
+                return rollbackWith(400, "Invalid points cost for this listing");
             }
             if (amountPoints < minPoints) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: `Bid must be at least ${minPoints} pts per ${unit}` });
+                return rollbackWith(400, `Bid must be at least ${minPoints} pts per ${unit}`);
             }
 
             const units = calcAuctionUnits(minutes, unit);
@@ -417,13 +459,11 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
                 [req.userId]
             );
             if (!userR.rowCount) {
-                await client.query("ROLLBACK");
-                return res.status(404).json({ ok: false, error: "User not found" });
+                return rollbackWith(404, "User not found");
             }
             const balance = Number(userR.rows[0].points_balance ?? 0);
             if (balance < totalPoints) {
-                await client.query("ROLLBACK");
-                return res.status(400).json({ ok: false, error: `Not enough points (${totalPoints} required)` });
+                return rollbackWith(400, `Not enough points (${totalPoints} required)`);
             }
 
             const insertR = await client.query(
@@ -438,6 +478,9 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
         await client.query("COMMIT");
     } catch (e) {
         await client.query("ROLLBACK");
+        if (payMethod === "money") {
+            await cancelPaymentIntentSilently(paymentIntentIdValue);
+        }
         return res.status(500).json({ ok: false, error: String(e) });
     } finally {
         client.release();
@@ -455,6 +498,8 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
     const bidId = parsedBody.data.bid_id;
 
     const client = await pool.connect();
+    let acceptedBookingId: string | null = null;
+    let acceptedPaymentIntentId: string | null = null;
     try {
         await client.query("BEGIN");
         await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [spotId]);
@@ -514,7 +559,7 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
         }
 
         if ((bidInfo.pay_method ?? "money") === "money") {
-            const captured = await stripe.paymentIntents.capture(bidInfo.payment_intent_id);
+            acceptedPaymentIntentId = bidInfo.payment_intent_id;
 
             await client.query(
                 `UPDATE auction_bids
@@ -532,29 +577,33 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
                     status,
                     pay_method,
                     total_price_gbp,
-                    total_points
+                    total_points,
+                    payment_provider_ref
                 )
-                 VALUES ($1,$2,$3,$4,'confirmed','money',$5,0)
+                 VALUES ($1,$2,$3,$4,'pending','money',$5,0,$6)
                  RETURNING id`,
-                [spotId, bidInfo.bidder_user_id, start.toISOString(), end.toISOString(), bidInfo.amount_gbp]
+                [spotId, bidInfo.bidder_user_id, start.toISOString(), end.toISOString(), bidInfo.amount_gbp, acceptedPaymentIntentId]
             );
 
-            const bookingId = bookingR.rows[0]?.id;
-            if (bookingId) {
-                await client.query(
-                    `INSERT INTO payments (
-                        booking_id,
-                        provider,
-                        provider_ref,
-                        status,
-                        amount_gbp,
-                        created_at,
-                        updated_at
-                    )
-                     VALUES ($1, 'stripe', $2, 'succeeded', $3, now(), now())`,
-                    [bookingId, captured.id, bidInfo.amount_gbp]
-                );
+            acceptedBookingId = bookingR.rows[0]?.id ?? null;
+            if (!acceptedBookingId) {
+                await client.query("ROLLBACK");
+                return res.status(500).json({ ok: false, error: "Failed to reserve booking for accepted bid" });
             }
+
+            await client.query(
+                `INSERT INTO payments (
+                    booking_id,
+                    provider,
+                    provider_ref,
+                    status,
+                    amount_gbp,
+                    created_at,
+                    updated_at
+                )
+                 VALUES ($1, 'stripe', $2, 'pending', $3, now(), now())`,
+                [acceptedBookingId, acceptedPaymentIntentId, bidInfo.amount_gbp]
+            );
         } else {
             const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
             const units = calcAuctionUnits(minutes, unit);
@@ -639,7 +688,54 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
         client.release();
     }
 
-    return res.json({ ok: true, auction: { accepted_bid_id: bidId } });
+    if (acceptedBookingId && acceptedPaymentIntentId) {
+        try {
+            await stripe.paymentIntents.capture(acceptedPaymentIntentId);
+        } catch (captureError: unknown) {
+            try {
+                await updateAcceptedMoneyBidFailureState(bidId, acceptedBookingId, "failed");
+            } catch {
+            }
+            return res.status(400).json({
+                ok: false,
+                error: `Card capture failed after acceptance: ${String(captureError)}`,
+            });
+        }
+
+        const finalizeClient = await pool.connect();
+        try {
+            await finalizeClient.query("BEGIN");
+            await finalizeClient.query(
+                `UPDATE bookings
+                 SET status = 'confirmed', updated_at = now()
+                 WHERE id = $1`,
+                [acceptedBookingId]
+            );
+            await finalizeClient.query(
+                `UPDATE payments
+                 SET status = 'succeeded',
+                     updated_at = now()
+                 WHERE booking_id = $1`,
+                [acceptedBookingId]
+            );
+            await finalizeClient.query("COMMIT");
+        } catch (finalizeError: unknown) {
+            await finalizeClient.query("ROLLBACK");
+            try {
+                await stripe.refunds.create({ payment_intent: acceptedPaymentIntentId });
+                await updateAcceptedMoneyBidFailureState(bidId, acceptedBookingId, "refunded");
+            } catch {
+            }
+            return res.status(500).json({
+                ok: false,
+                error: `Booking finalization failed after capture: ${String(finalizeError)}`,
+            });
+        } finally {
+            finalizeClient.release();
+        }
+    }
+
+    return res.json({ ok: true, auction: { accepted_bid_id: bidId, booking_id: acceptedBookingId } });
 });
 
 router.post("/:spotId/reject", requireAuth, async (req: AuthRequest, res) => {
@@ -651,8 +747,10 @@ router.post("/:spotId/reject", requireAuth, async (req: AuthRequest, res) => {
     const bidId = parsedBody.data.bid_id;
 
     const client = await pool.connect();
+    let paymentIntentToCancel: string | null = null;
     try {
         await client.query("BEGIN");
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [spotId]);
 
         const spotR = await client.query(
             `SELECT id, owner_user_id, mode
@@ -676,7 +774,7 @@ router.post("/:spotId/reject", requireAuth, async (req: AuthRequest, res) => {
         }
 
         const bidR = await client.query(
-            `SELECT id, payment_intent_id FROM auction_bids
+            `SELECT id, payment_intent_id, status FROM auction_bids
              WHERE id = $1 AND parking_spot_id = $2`,
             [bidId, spotId]
         );
@@ -684,13 +782,12 @@ router.post("/:spotId/reject", requireAuth, async (req: AuthRequest, res) => {
             await client.query("ROLLBACK");
             return res.status(404).json({ ok: false, error: "Bid not found" });
         }
-        const pi = bidR.rows[0]?.payment_intent_id;
-        if (pi) {
-            try {
-                await stripe.paymentIntents.cancel(pi);
-            } catch {
-            }
+        const bidStatus = String(bidR.rows[0]?.status ?? "pending");
+        if (bidStatus !== "pending") {
+            await client.query("ROLLBACK");
+            return res.status(400).json({ ok: false, error: "Only pending bids can be rejected" });
         }
+        paymentIntentToCancel = bidR.rows[0]?.payment_intent_id ?? null;
 
         await client.query(
             `UPDATE auction_bids
@@ -700,13 +797,17 @@ router.post("/:spotId/reject", requireAuth, async (req: AuthRequest, res) => {
         );
 
         await client.query("COMMIT");
-        return res.json({ ok: true, rejected_bid_id: bidId });
     } catch (e) {
         await client.query("ROLLBACK");
         return res.status(500).json({ ok: false, error: String(e) });
     } finally {
         client.release();
     }
+
+    if (paymentIntentToCancel) {
+        await cancelPaymentIntentSilently(paymentIntentToCancel);
+    }
+    return res.json({ ok: true, rejected_bid_id: bidId });
 });
 
 export default router;

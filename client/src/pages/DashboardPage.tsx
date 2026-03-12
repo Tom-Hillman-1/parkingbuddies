@@ -221,7 +221,6 @@ export default function DashboardPage() {
     const payoutsRef = useRef<HTMLDivElement | null>(null);
 
     const { connect, connectBusy, refreshConnectStatus, beginConnectOnboarding, openConnectDashboard } = useStripeConnect(token);
-    // credit: server-state query pattern adapted from TanStack Query docs (MIT)
     const dashboardQuery = useQuery<DashboardData>({
         queryKey: ["dashboard-data", token],
         enabled: Boolean(token),
@@ -238,7 +237,6 @@ export default function DashboardPage() {
                 apiGet<{ bids: AuctionBid[] }>("/auctions/owner/bids", token),
                 apiGet<{ bids: AuctionBid[] }>("/auctions/me/pending", token),
             ]);
-            await refreshConnectStatus(true);
             return {
                 me: meRes.user,
                 bookings: bookingsRes.bookings ?? [],
@@ -251,6 +249,11 @@ export default function DashboardPage() {
             };
         },
     });
+
+    useEffect(() => {
+        if (!token) return;
+        void refreshConnectStatus(true);
+    }, [token, refreshConnectStatus]);
 
     const dashboardData = dashboardQuery.data;
     const me = dashboardData?.me ?? null;

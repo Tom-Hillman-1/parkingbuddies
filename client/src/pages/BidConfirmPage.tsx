@@ -8,7 +8,6 @@ import { useAuth } from "../lib/auth";
 import { ReceiptCard, ReceiptRow } from "../components/ReceiptCard";
 import { calcUnitsForMinutes, formatDateTimeCompact, type PriceUnit } from "./pagesShared";
 
-// credit: Stripe Elements bootstrap pattern aligned to Stripe docs
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string);
 const POUND = String.fromCharCode(163);
 type SpotSummary = { id: string; title: string; address_text: string; price_unit?: PriceUnit };
@@ -39,6 +38,13 @@ function BidCardForm({
     const elements = useElements();
     const [busy, setBusy] = useState(false);
 
+    function buildIntentKey() {
+        const normalizedStart = start.replace(/[^0-9A-Za-z]/g, "");
+        const normalizedEnd = end.replace(/[^0-9A-Za-z]/g, "");
+        const amount = Math.round(amountGbp * 100);
+        return `bid_${spotId}_${normalizedStart}_${normalizedEnd}_${amount}_${Date.now()}`;
+    }
+
     async function confirm() {
         if (!stripe || !elements) return;
         if (!Number.isFinite(amountGbp) || amountGbp <= 0) {
@@ -46,19 +52,25 @@ function BidCardForm({
             return;
         }
         setBusy(true);
+        let paymentIntentId: string | null = null;
+        let bidSubmitted = false;
         try {
             const intent = await apiPost<{ client_secret: string; payment_intent_id: string }>(
                 "/payments/auction-intent",
-                { spot_id: spotId, amount_gbp: amountGbp },
+                {
+                    spot_id: spotId,
+                    amount_gbp: amountGbp,
+                    idempotency_key: buildIntentKey(),
+                },
                 token
             );
+            paymentIntentId = intent.payment_intent_id;
             const card = elements.getElement(CardElement);
             if (!card) {
                 onError("Card input not ready");
                 setBusy(false);
                 return;
             }
-            // credit: manual-capture card confirmation flow follows Stripe's documented PaymentIntent pattern
             const result = await stripe.confirmCardPayment(intent.client_secret, {
                 payment_method: { card },
             });
@@ -72,16 +84,24 @@ function BidCardForm({
                 `/auctions/${spotId}/bid`,
                 {
                     amount_gbp: amountGbp,
-                    payment_intent_id: intent.payment_intent_id,
+                    payment_intent_id: paymentIntentId,
                     start_time: start,
                     end_time: end,
                     pay_method: "money",
                 },
                 token
             );
+            bidSubmitted = true;
 
             onDone();
         } catch (error: unknown) {
+            if (paymentIntentId && !bidSubmitted) {
+                try {
+                    await apiPost("/payments/auction-intent/cancel", { payment_intent_id: paymentIntentId }, token);
+                } catch {
+                    // Best-effort cleanup only.
+                }
+            }
             onError(readErrorMessage(error, "Authorization failed"));
         } finally {
             setBusy(false);
@@ -143,7 +163,7 @@ export default function BidConfirmPage() {
         if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return 0;
         return Math.round((e.getTime() - s.getTime()) / 60000);
     }, [start, end]);
-    const units = useMemo(() => calcUnitsForMinutes(minutes, unit), [minutes, unit]);
+    const units = useMemo(() => calcUnitsForMinutes(minutes, unit, "auction"), [minutes, unit]);
 
     const totalMoney = useMemo(() => {
         const n = Number(moneyPerUnit);

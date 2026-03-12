@@ -93,7 +93,6 @@ export default function SpotDetailsPage() {
     const navigate = useNavigate();
     const { token, user } = useAuth();
 
-    // credit: server-state loading/caching pattern follows TanStack Query docs (https://tanstack.com/query)
     const spotQuery = useQuery({
         queryKey: ["spot", id],
         enabled: !!id,
@@ -269,7 +268,7 @@ export default function SpotDetailsPage() {
     }, [payMethod, pointsMinTotal, pointsAmount]);
 
     const auctionMinPerUnit = toFiniteNumber(spot?.auction_start_price_gbp);
-    const bidUnits = useMemo(() => calcUnitsForMinutes(durationMinutes, listingUnit), [durationMinutes, listingUnit]);
+    const bidUnits = useMemo(() => calcUnitsForMinutes(durationMinutes, listingUnit, "auction"), [durationMinutes, listingUnit]);
     const bidTotalMoney = useMemo(() => {
         const perUnit = Number(bidMoneyPerHour);
         if (!Number.isFinite(perUnit) || perUnit <= 0) return 0;

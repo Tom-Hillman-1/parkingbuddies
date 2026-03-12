@@ -12,7 +12,6 @@ function formatValidationMessage(error: ZodError) {
     return `${path}: ${first.message}`;
 }
 
-// credit: request schema validation pattern inspired by Zod docs (https://zod.dev)
 export function parseWithSchema<TSchema extends ZodTypeAny>(
     schema: TSchema,
     payload: unknown,

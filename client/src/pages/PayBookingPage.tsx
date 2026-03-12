@@ -44,7 +44,6 @@ export default function PayBookingPage() {
     const sessionId = searchParams.get("session_id") ?? undefined;
     const receiptQueryString = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
 
-    // credit: server-state loading pattern adapted from TanStack Query docs
     const bookingQuery = useQuery({
         queryKey: ["booking-payment", id, token],
         enabled: Boolean(token && id),
@@ -105,7 +104,6 @@ export default function PayBookingPage() {
     }, [shouldPollReceipt, refetchReceipt]);
 
     const checkoutMutation = useMutation({
-        // credit: Stripe Checkout redirect pattern aligned to Stripe docs
         mutationFn: async () => {
             if (!token || !booking) throw new Error("Missing booking context.");
             return apiPost<{ url: string }>("/payments/checkout-session", { booking_id: booking.id }, token);
@@ -170,6 +168,16 @@ export default function PayBookingPage() {
 
             {!loading && !loadErr && booking && (
                 <>
+                    {booking.pay_method === "money" && paymentComplete && (
+                        <div className="paymentSuccessNotice">
+                            <strong>Payment confirmed</strong>
+                            <span>
+                                Your booking is confirmed and{" "}
+                                {hasStripeReceipt ? "your Stripe receipt is ready below." : "your receipt details are syncing below."}
+                            </span>
+                        </div>
+                    )}
+
                     {requiresPayment && !successCheckout && (
                         <div className="card formSection" style={{ marginBottom: 14 }}>
                             <div className="h3">Continue in Stripe</div>
@@ -184,30 +192,12 @@ export default function PayBookingPage() {
                         </div>
                     )}
 
-                    {requiresPayment && successCheckout && (
-                        <div className="card formSection" style={{ marginBottom: 14 }}>
-                            <div className="h3">Payment completed successfully</div>
-                            <div className="muted" style={{ marginTop: 6 }}>
-                                Thanks for confirming payment on Stripe. We are syncing your official receipt now.
-                            </div>
-                        </div>
-                    )}
-
-                    {!requiresPayment && booking.pay_method === "money" && (
-                        <div className="card formSection">
-                            <div className="h3">Payment already completed</div>
-                            <div className="muted" style={{ marginTop: 6 }}>
-                                Open your official Stripe receipt below.
-                            </div>
-                        </div>
-                    )}
-
                     {booking.pay_method === "money" && hasStripeReceipt && (
                         <ReceiptCard
                             kicker="STRIPE RECEIPT"
                             title="Official summary"
                             subtitle="Details provided directly by Stripe."
-                            className="receiptCard--confirm"
+                            className="receiptCard--confirm payReceiptCard"
                             actions={
                                 <>
                                     <a
@@ -219,7 +209,7 @@ export default function PayBookingPage() {
                                         Open Stripe receipt
                                     </a>
                                     <Link to="/dashboard" className="btn">Back to dashboard</Link>
-                                    <Link to="/about#contact-us" className="btn">Contact support</Link>
+                                    <Link to="/about#contact-bottom" className="btn">Contact support</Link>
                                 </>
                             }
                         >
@@ -263,10 +253,7 @@ export default function PayBookingPage() {
 
                     {contactSyncing && (
                         <div className="card formSection" style={{ marginTop: 14 }}>
-                            <div className="h3">Payment confirmed, contact syncing</div>
-                            <div className="muted" style={{ marginTop: 6 }}>
-                                Your payment is complete. Owner contact details will appear here shortly.
-                            </div>
+                            <div className="muted">Owner contact details will appear here shortly.</div>
                         </div>
                     )}
                 </>

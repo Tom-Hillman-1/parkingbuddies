@@ -29,6 +29,7 @@ type RawAvailabilityWindow = {
 };
 export type DraftSnapshot = {
     mode: Mode;
+    parkingType: "private" | "public";
     title: string;
     description: string;
     ownerContactEmail: string;

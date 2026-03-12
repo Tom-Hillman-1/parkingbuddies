@@ -107,11 +107,14 @@ type ListingSubmitPayload = {
     owner_contact_phone: string | null;
     owner_contact_info: string | null;
     availability: ReturnType<typeof toAvailabilityPayload>;
-    parking_type: "private";
+    parking_type: "private" | "public";
     capacity_total: number;
     capacity_available: number;
     auction_start_price_gbp?: number;
 };
+
+const MAX_IMAGE_FILE_BYTES = 2 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 function buildEditSnapshot(listing: ParkingSpot, ownerContact: OwnerContactForEdit): DraftSnapshot {
     const rawAvailability = listing.availability_json;
@@ -142,6 +145,7 @@ function buildEditSnapshot(listing: ParkingSpot, ownerContact: OwnerContactForEd
 
     return {
         mode: normalizeMode(listing.mode),
+        parkingType: listing.parking_type === "public" ? "public" : "private",
         title: asString(listing.title),
         description: asString(listing.description),
         ownerContactEmail: asString(ownerContact.owner_contact_email),
@@ -181,6 +185,7 @@ export default function CreateListingPage() {
     const [ownerContactEmail, setOwnerContactEmail] = useState("");
     const [ownerContactPhone, setOwnerContactPhone] = useState("");
     const [ownerContactInfo, setOwnerContactInfo] = useState("");
+    const [parkingType, setParkingType] = useState<"private" | "public">("private");
     const [capacityTotal, setCapacityTotal] = useState("1");
 
     const [priceUnit, setPriceUnit] = useState<PriceUnit>("hour");
@@ -225,7 +230,6 @@ export default function CreateListingPage() {
     const parsedCoords = parseCoordinates(lat, lng);
     const mapCenter = parsedCoords ?? { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] };
 
-    // credit: server-state loading/caching pattern follows TanStack Query docs (https://tanstack.com/query)
     const editSnapshotQuery = useQuery({
         queryKey: ["listing-edit-snapshot", editId, token],
         enabled: Boolean(isEdit && token && editId),
@@ -253,6 +257,7 @@ export default function CreateListingPage() {
 
     function applySnapshot(snapshot: DraftSnapshot) {
         setMode(snapshot.mode);
+        setParkingType(snapshot.parkingType);
         setTitle(snapshot.title);
         setDescription(snapshot.description);
         setOwnerContactEmail(snapshot.ownerContactEmail);
@@ -504,15 +509,29 @@ export default function CreateListingPage() {
     function onImageFileChange(event: ChangeEvent<HTMLInputElement>) {
         const file = event.target.files?.[0];
         if (!file) return;
-        if (!file.type.startsWith("image/")) {
-            setError("Please choose an image file.");
+        if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+            setError("Please choose a JPG, PNG, or WEBP image.");
+            event.target.value = "";
+            return;
+        }
+        if (file.size > MAX_IMAGE_FILE_BYTES) {
+            setError("Image must be 2MB or smaller.");
+            event.target.value = "";
             return;
         }
 
         const reader = new FileReader();
         reader.onload = () => {
             const result = typeof reader.result === "string" ? reader.result : "";
-            if (!result) return;
+            if (!result) {
+                setError("Could not read that image file.");
+                return;
+            }
+            if (result.length > 4_500_000) {
+                setError("Image is too large after encoding. Please use a smaller file.");
+                event.target.value = "";
+                return;
+            }
             setImageUrl(result);
             setError("");
         };
@@ -616,7 +635,7 @@ export default function CreateListingPage() {
                   owner_contact_phone: normalizedOwnerContactPhone || null,
                   owner_contact_info: normalizedOwnerContactInfo || null,
                   availability: availabilityPayloadResult.payload,
-                  parking_type: "private",
+                  parking_type: parkingType,
                   capacity_total: setupCapacity,
                   capacity_available: setupCapacity,
                   ...(mode === "auction" ? { auction_start_price_gbp: allowMoney ? auctionStartNum : 0 } : {}),
@@ -654,6 +673,7 @@ export default function CreateListingPage() {
     const stepHint = stepIssueByStep[activeStep];
 
     const currentStepReady = stepReady[activeStep];
+    const showFooterStepHint = activeStep === 1 || activeStep === 6;
 
     const priceSummary =
         mode === "free"
@@ -670,6 +690,7 @@ export default function CreateListingPage() {
         : "No availability set";
     const confirmRows: Array<{ label: string; value: string }> = [
         { label: "Model", value: modeLabel(mode) },
+        { label: "Parking type", value: parkingType === "public" ? "Public lot / shared spaces" : "Private space" },
         { label: "Spaces", value: `${setupCapacity || 1} ${setupCapacity === 1 ? "space" : "spaces"}` },
         { label: "Pricing", value: priceSummary },
         { label: "Availability", value: availabilitySummary },
@@ -702,19 +723,18 @@ export default function CreateListingPage() {
             return (
                 <div className="stack">
                     <label>
-                        <span>Listing name</span>
+                        <span>Title*</span>
                         <input
                             className="input"
                             value={title}
                             onChange={(event) => setTitle(event.target.value)}
                             placeholder="Example: Secure driveway near station"
                         />
-                        <div className="createFieldHint">Use a clear name drivers can scan quickly.</div>
-                        {titleIssue && title.length > 0 && <div className="createInlineError">Use at least 3 characters.</div>}
+                        {titleIssue && <div className="createInlineError">{titleIssue}</div>}
                     </label>
 
                     <label>
-                        <span>Description (optional)</span>
+                        <span>Description</span>
                         <textarea
                             className="input"
                             rows={5}
@@ -722,14 +742,41 @@ export default function CreateListingPage() {
                             onChange={(event) => setDescription(event.target.value)}
                             placeholder="Access notes, gate details, size limits, and nearby landmarks."
                         />
-                        <div className="createFieldHint">Leave blank, or write at least 5 characters.</div>
                         {descriptionIssue && description.length > 0 && (
-                            <div className="createInlineError">Use at least 5 characters, or leave blank.</div>
+                            <div className="createInlineError">Use at least 5 characters.</div>
                         )}
                     </label>
 
+                    <div className="wizardLabelRow wizardLabelRow--small">
+                        <span className="wizardPricingHead">Parking type</span>
+                    </div>
+                    <div className="wizardOptionGrid" role="radiogroup" aria-label="Parking type">
+                        <button
+                            type="button"
+                            role="radio"
+                            aria-checked={parkingType === "private"}
+                            className={`wizardOptionCard${parkingType === "private" ? " is-active" : ""}`}
+                            onClick={() => setParkingType("private")}
+                        >
+                            <span className="wizardOptionTitle">Private</span>
+                        </button>
+                        <button
+                            type="button"
+                            role="radio"
+                            aria-checked={parkingType === "public"}
+                            className={`wizardOptionCard${parkingType === "public" ? " is-active" : ""}`}
+                            onClick={() => setParkingType("public")}
+                        >
+                            <span className="wizardOptionTitle">Public / shared</span>
+                        </button>
+                    </div>
+
+                    <div className="createFieldHint">
+                        The contact details below will only be shared with drivers after booking is complete.
+                    </div>
+
                     <label>
-                        <span>Owner email (private)</span>
+                        <span>Email</span>
                         <input
                             className="input"
                             type="email"
@@ -737,22 +784,20 @@ export default function CreateListingPage() {
                             onChange={(event) => setOwnerContactEmail(event.target.value)}
                             placeholder="owner@email.com"
                         />
-                        <div className="createFieldHint">Only shown to drivers after they book this spot.</div>
                     </label>
 
                     <label>
-                        <span>Owner phone (private)</span>
+                        <span>Phone</span>
                         <input
                             className="input"
                             value={ownerContactPhone}
                             onChange={(event) => setOwnerContactPhone(event.target.value)}
                             placeholder="07123 456789"
                         />
-                        <div className="createFieldHint">Use a number drivers can call or message on booking day.</div>
                     </label>
 
                     <label>
-                        <span>Additional booking info (private)</span>
+                        <span>Additional instructions and information</span>
                         <textarea
                             className="input"
                             rows={3}
@@ -760,7 +805,6 @@ export default function CreateListingPage() {
                             onChange={(event) => setOwnerContactInfo(event.target.value)}
                             placeholder="Gate code, where to park, or arrival notes."
                         />
-                        <div className="createFieldHint">This is hidden from public listing pages.</div>
                     </label>
                 </div>
             );
@@ -961,7 +1005,7 @@ export default function CreateListingPage() {
         }
     }
 
-    const actionHint = error || (!currentStepReady && stepHint ? stepHint : "");
+    const actionHint = error || (!currentStepReady && showFooterStepHint && stepHint ? stepHint : "");
 
     if (!token) {
         const next = `${location.pathname}${location.search}`;
@@ -973,7 +1017,7 @@ export default function CreateListingPage() {
 
     return (
         <div className="container createWizardPage">
-            {editSnapshotQuery.isPending ? (
+            {isEdit && editSnapshotQuery.isPending ? (
                 <div className="card formSection createFlowLocked">
                     <div className="h3">Loading listing details...</div>
                     <div className="muted">Pulling your saved information and availability settings.</div>

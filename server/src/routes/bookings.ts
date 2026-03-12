@@ -12,9 +12,8 @@ const router = Router();
 type Mode = "free" | "rent" | "auction";
 const PENDING_BOOKING_HOLD_MINUTES = 30;
 
-// credit: request schema validation pattern adapted from Zod docs (https://zod.dev)
 const bookingCreateBodySchema = z.object({
-    parking_spot_id: z.string().trim().min(1),
+    parking_spot_id: z.string().uuid("parking_spot_id must be a valid listing ID"),
     start_time: z.string().trim().min(1),
     end_time: z.string().trim().min(1),
     pay_method: z.enum(["money", "points"]).optional(),
@@ -44,6 +43,16 @@ type AvailabilityJson =
               exclude_dows?: number[];
           }>; 
       };
+
+async function expireStalePendingBookings() {
+    await pool.query(
+        `UPDATE bookings
+         SET status = 'cancelled', updated_at = now()
+         WHERE status = 'pending'
+           AND created_at < now() - ($1 * interval '1 minute')`,
+        [PENDING_BOOKING_HOLD_MINUTES]
+    );
+}
 
 function isIsoDateString(s: unknown): s is string {
     return typeof s === "string" && !Number.isNaN(Date.parse(s));
@@ -184,6 +193,7 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
 
     const client = await pool.connect();
     try {
+        await expireStalePendingBookings();
         await client.query("BEGIN");
         const spotR = await client.query(
             `SELECT
@@ -362,10 +372,11 @@ router.get("/spot/:id", async (req, res) => {
     const end = typeof req.query.end === "string" ? req.query.end : null;
 
     try {
+        await expireStalePendingBookings();
         let r;
         if (start && end && isIsoDateString(start) && isIsoDateString(end)) {
             r = await pool.query(
-                `SELECT id, parking_spot_id, start_time, end_time, status
+                `SELECT start_time, end_time
                  FROM bookings
                  WHERE parking_spot_id = $1
                    AND (
@@ -378,7 +389,7 @@ router.get("/spot/:id", async (req, res) => {
             );
         } else {
             r = await pool.query(
-                `SELECT id, parking_spot_id, start_time, end_time, status
+                `SELECT start_time, end_time
                  FROM bookings
                  WHERE parking_spot_id = $1
                    AND (
@@ -426,13 +437,13 @@ router.get("/me", requireAuth, async (req: AuthRequest, res) => {
                      pay.status AS payment_status
                  FROM bookings b
                           JOIN parking_spots ps ON ps.id = b.parking_spot_id
-                          LEFT JOIN LATERAL (
-                              SELECT p.status
-                              FROM payments p
-                              WHERE p.booking_id = b.id
-                              ORDER BY p.created_at DESC, p.id DESC
-                              LIMIT 1
-                          ) pay ON TRUE
+                           LEFT JOIN LATERAL (
+                               SELECT p.status
+                               FROM payments p
+                               WHERE p.booking_id = b.id
+                               ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC, p.id DESC
+                               LIMIT 1
+                           ) pay ON TRUE
                  WHERE b.driver_user_id = $1
                  ORDER BY b.created_at DESC`,
             [req.userId]
@@ -493,10 +504,9 @@ router.get("/owner", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.get("/:id", requireAuth, async (req: AuthRequest, res) => {
-    const bookingId = typeof req.params.id === "string" ? req.params.id : "";
-    if (!/^[0-9a-fA-F-]{36}$/.test(bookingId)) {
-        return res.status(404).json({ ok: false, error: "Booking not found" });
-    }
+    const parsedParams = parseWithSchema(bookingIdParamsSchema, req.params ?? {}, res, "booking_get");
+    if (!parsedParams.ok) return;
+    const bookingId = parsedParams.data.id;
     try {
         const r = await pool.query(
             `SELECT
@@ -533,17 +543,17 @@ router.get("/:id", requireAuth, async (req: AuthRequest, res) => {
                      pay.status AS payment_status
                  FROM bookings b
                  JOIN parking_spots ps ON ps.id = b.parking_spot_id
-                 LEFT JOIN LATERAL (
-                     SELECT
-                         p.id,
-                         p.provider,
-                         p.provider_ref,
-                         p.status
-                     FROM payments p
-                     WHERE p.booking_id = b.id
-                     ORDER BY p.created_at DESC, p.id DESC
-                     LIMIT 1
-                 ) pay ON TRUE
+                  LEFT JOIN LATERAL (
+                      SELECT
+                          p.id,
+                          p.provider,
+                          p.provider_ref,
+                          p.status
+                      FROM payments p
+                      WHERE p.booking_id = b.id
+                      ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC, p.id DESC
+                      LIMIT 1
+                  ) pay ON TRUE
                  WHERE b.id = $1 AND b.driver_user_id = $2`,
             [bookingId, req.userId]
         );

@@ -85,7 +85,7 @@ export default function BidReceiptPage() {
         const end = new Date(bid.end_time);
         if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
         const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
-        const units = calcUnitsForMinutes(minutes, bid.price_unit ?? "hour");
+        const units = calcUnitsForMinutes(minutes, bid.price_unit ?? "hour", "auction");
         return Math.ceil(Number(bid.amount_points ?? 0) * units);
     }, [bid?.start_time, bid?.end_time, bid?.amount_points, bid?.price_unit]);
 
