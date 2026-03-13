@@ -11,8 +11,7 @@ exports.up = (pgm) => {
             ADD COLUMN IF NOT EXISTS auction_end timestamptz,
             ADD COLUMN IF NOT EXISTS auction_start_price_gbp numeric(10,2),
             ADD COLUMN IF NOT EXISTS parking_type varchar(12) NOT NULL DEFAULT 'private',
-            ADD COLUMN IF NOT EXISTS capacity_total integer NOT NULL DEFAULT 1,
-            ADD COLUMN IF NOT EXISTS capacity_available integer NOT NULL DEFAULT 1;
+            ADD COLUMN IF NOT EXISTS capacity_total integer NOT NULL DEFAULT 1;
     `);
 
     pgm.sql(`
@@ -32,4 +31,3 @@ exports.up = (pgm) => {
 exports.down = (_pgm) => {
     // No-op guard migration.
 };
-

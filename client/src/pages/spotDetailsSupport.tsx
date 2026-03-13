@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { formatDateTimeCompact, pad2, parseYmd, timeToMinutes, toFiniteNumber, toLocalDateInput } from "./pagesShared";
 
 type WindowSlot = {
-    mode: "continuous" | "split";
+    mode: "continuous";
     date_from: string;
     date_to: string;
     start: string;
@@ -17,19 +17,13 @@ type RawWindowSlot = {
 };
 
 export type AvailabilityJson = {
-    type: "24_7" | "same_everyday" | "custom_weekly" | "window_slots";
-    start?: string;
-    end?: string;
-    rules?: Array<{ dow: number; start: string; end: string }>;
-    date_from?: string;
-    date_to?: string;
+    type: "window_slots";
     windows?: Array<{
-        mode?: "continuous" | "split";
+        mode?: "continuous";
         date_from: string;
         date_to: string;
         start: string;
         end: string;
-        exclude_dows?: number[];
     }>;
 };
 
@@ -248,7 +242,7 @@ function toWindowSlot(raw: unknown): WindowSlot | null {
     if (!raw || typeof raw !== "object") return null;
     const source = raw as RawWindowSlot;
 
-    if (source.mode && source.mode !== "continuous" && source.mode !== "split") return null;
+    if (source.mode && source.mode !== "continuous") return null;
     if (typeof source.date_from !== "string" || typeof source.date_to !== "string") return null;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(source.date_from) || !/^\d{4}-\d{2}-\d{2}$/.test(source.date_to)) return null;
     if (source.date_from > source.date_to) return null;
@@ -258,7 +252,7 @@ function toWindowSlot(raw: unknown): WindowSlot | null {
     if (source.date_from === source.date_to && timeToMinutes(source.start) >= timeToMinutes(source.end)) return null;
 
     return {
-        mode: source.mode === "split" ? "split" : "continuous",
+        mode: "continuous",
         date_from: source.date_from,
         date_to: source.date_to,
         start: source.start,
@@ -267,7 +261,7 @@ function toWindowSlot(raw: unknown): WindowSlot | null {
 }
 
 function getWindowSlots(spot: AvailabilitySpot) {
-    const windows = spot.availability_json?.type === "window_slots" ? spot.availability_json.windows : [];
+    const windows = spot.availability_json?.windows;
     if (!Array.isArray(windows)) return [] as WindowSlot[];
     return windows.map((window) => toWindowSlot(window)).filter((window): window is WindowSlot => Boolean(window));
 }
@@ -294,20 +288,7 @@ function isDaySelectable(spot: AvailabilitySpot, day: Date) {
     if (dayStart < startOfDay(new Date())) return false;
 
     const windows = getWindowSlots(spot);
-    if (windows.length > 0) {
-        return windows.some((window) => windowMatchesDay(window, dayStart));
-    }
-
-    const availability = spot.availability_json;
-    const key = toLocalDateInput(dayStart);
-    if (availability?.date_from && key < availability.date_from) return false;
-    if (availability?.date_to && key > availability.date_to) return false;
-
-    const isTwentyFourSeven = !availability || availability.type === "24_7";
-    if (isTwentyFourSeven) return true;
-
-    const rules = extractAvailabilityRules(spot);
-    return rules.some((rule) => rule.dow === dayStart.getDay());
+    return windows.some((window) => windowMatchesDay(window, dayStart));
 }
 
 export function getAutoStartForDate(spot: AvailabilitySpot | null, ymd: string) {
@@ -330,24 +311,7 @@ export function getAutoStartForDate(spot: AvailabilitySpot | null, ymd: string) 
         if (isSameDay(start, now) && now > start) return now;
         return start;
     }
-
-    const availability = spot.availability_json;
-    const isTwentyFourSeven = !availability || availability.type === "24_7";
-
-    let start = new Date(base);
-    if (!isTwentyFourSeven) {
-        const todayRules = extractAvailabilityRules(spot)
-            .filter((rule) => rule.dow === base.getDay())
-            .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
-
-        if (todayRules.length > 0) {
-            start = setTime(base, todayRules[0].start);
-        }
-    }
-
-    const now = nextWholeQuarterHour();
-    if (isSameDay(start, now) && now > start) return now;
-    return start;
+    return nextWholeQuarterHour();
 }
 
 function getDayAvailabilityLabel(spot: AvailabilitySpot, day: Date) {
@@ -358,17 +322,12 @@ function getDayAvailabilityLabel(spot: AvailabilitySpot, day: Date) {
         const joined = Array.from(new Set(labels)).join(", ");
         return joined.length > 22 ? `${joined.slice(0, 22)}...` : joined;
     }
-
-    const rules = extractAvailabilityRules(spot).filter((rule) => rule.dow === day.getDay());
-    if (!rules.length) return "Unavailable";
-
-    const joined = rules.map((rule) => `${rule.start}-${rule.end}`).join(", ");
-    return joined.length > 22 ? `${joined.slice(0, 22)}...` : joined;
+    return "Unavailable";
 }
 
 function formatWindowLabelForDay(slot: WindowSlot, day: Date) {
     const dayKey = toLocalDateInput(startOfDay(day));
-    if (slot.mode !== "continuous" || slot.date_from === slot.date_to) {
+    if (slot.date_from === slot.date_to) {
         return `${slot.start}-${slot.end}`;
     }
     if (dayKey === slot.date_from) return `${slot.start}-00:00`;
@@ -377,14 +336,6 @@ function formatWindowLabelForDay(slot: WindowSlot, day: Date) {
 }
 
 export function formatAvailability(spot: AvailabilitySpot) {
-    const availability = spot.availability_json;
-    if (!availability) return "24/7";
-
-    if (availability?.type === "24_7") return "24/7";
-    if (availability?.type === "same_everyday" && availability.start && availability.end) {
-        return `Daily ${availability.start}-${availability.end}`;
-    }
-
     const windows = getWindowSlots(spot);
     if (windows.length > 0) {
         if (windows.length === 1) {
@@ -394,10 +345,6 @@ export function formatAvailability(spot: AvailabilitySpot) {
         return `${windows.length} custom slots`;
     }
 
-    if (availability?.type === "custom_weekly" && Array.isArray(availability.rules)) {
-        return availability.rules.map((rule) => `${dayShort(rule.dow)} ${rule.start}-${rule.end}`).join(", ");
-    }
-
     return "Not specified";
 }
 
@@ -405,61 +352,7 @@ export function isSlotAllowed(spot: AvailabilitySpot, start: Date, end: Date) {
     if (!(start < end)) return false;
 
     const windows = getWindowSlots(spot);
-    if (windows.length > 0) {
-        return windows.some((window) => isWindowRangeAllowed(window, start, end));
-    }
-
-    const availability = spot.availability_json;
-    const rules = extractAvailabilityRules(spot);
-    if (!rules.length) return true;
-
-    const from = availability?.date_from ? new Date(`${availability.date_from}T00:00:00`) : null;
-    const to = availability?.date_to ? new Date(`${availability.date_to}T23:59:59`) : null;
-
-    if (from && start < from) return false;
-    if (to && end > to) return false;
-
-    const isTwentyFourSeven = !availability || availability.type === "24_7";
-    if (isTwentyFourSeven) return true;
-
-    if (!isSameDay(start, end)) return false;
-
-    const dayRules = rules.filter((rule) => rule.dow === start.getDay());
-    if (!dayRules.length) return false;
-
-    for (const rule of dayRules) {
-        const ruleStart = setTime(start, rule.start);
-        const ruleEnd = setTime(start, rule.end);
-        if (start >= ruleStart && end <= ruleEnd) return true;
-    }
-
-    return false;
-}
-
-function extractAvailabilityRules(spot: AvailabilitySpot): Array<{ dow: number; start: string; end: string }> {
-    const availability = spot.availability_json;
-    if (!availability) {
-        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: "00:00", end: "23:59" }));
-    }
-
-    if (availability?.type === "24_7") {
-        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start: "00:00", end: "23:59" }));
-    }
-
-    if (availability?.type === "same_everyday" && availability.start && availability.end) {
-        const start = availability.start;
-        const end = availability.end;
-        return Array.from({ length: 7 }).map((_, dow) => ({ dow, start, end }));
-    }
-
-    if (availability?.type === "custom_weekly" && Array.isArray(availability.rules)) {
-        return availability.rules.filter(
-            (rule): rule is { dow: number; start: string; end: string } =>
-                typeof rule?.dow === "number" && typeof rule?.start === "string" && typeof rule?.end === "string"
-        );
-    }
-
-    return [];
+    return windows.some((window) => isWindowRangeAllowed(window, start, end));
 }
 
 export function parseDurationQuery(raw: string) {
@@ -577,8 +470,4 @@ function isSameDay(a: Date, b: Date) {
 
 export function roundMoney(value: number) {
     return Math.round(value * 100) / 100;
-}
-
-function dayShort(dow: number) {
-    return WEEKDAYS[dow] ?? "Day";
 }

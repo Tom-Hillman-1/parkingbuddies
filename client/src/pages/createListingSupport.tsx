@@ -200,7 +200,6 @@ export function toAvailabilityPayload(windows: AvailabilityWindowInput[]) {
             date_to: window.to,
             start: window.start,
             end: window.end,
-            exclude_dows: [],
         })),
     };
 }

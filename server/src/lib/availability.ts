@@ -1,11 +1,18 @@
-const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
-
-type AvailabilityRule = { dow: number; start: string; end: string };
 type AvailabilityWindow = { start: Date; end: Date };
 type Queryable = {
     query: (text: string, params?: unknown[]) => Promise<{ rows: Array<{ count?: number | string }> }>;
 };
 const PENDING_BOOKING_HOLD_MINUTES = 30;
+const LONDON_TIME_ZONE = "Europe/London";
+const londonDateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: LONDON_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+});
 
 function parseTimeToMinutes(hhmm: string) {
     const [rawH, rawM] = hhmm.split(":");
@@ -14,38 +21,23 @@ function parseTimeToMinutes(hhmm: string) {
     return h * 60 + m;
 }
 
-function setTime(d: Date, hhmm: string) {
-    const [rawH, rawM] = hhmm.split(":");
-    const h = Number(rawH ?? 0);
-    const m = Number(rawM ?? 0);
-    const out = new Date(d);
-    out.setUTCHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0);
-    return out;
-}
-
-function parseYmdStartUtc(ymd: string) {
-    return new Date(`${ymd}T00:00:00Z`);
-}
-
-function parseYmdEndUtc(ymd: string) {
-    return new Date(`${ymd}T23:59:59Z`);
-}
-
 function parseYmdTimeUtc(ymd: string, hhmm: string) {
     return new Date(`${ymd}T${hhmm}:00Z`);
 }
 
-function sameUtcDate(a: Date, b: Date) {
-    return (
-        a.getUTCFullYear() === b.getUTCFullYear() &&
-        a.getUTCMonth() === b.getUTCMonth() &&
-        a.getUTCDate() === b.getUTCDate()
-    );
+function londonDateTimeKey(date: Date) {
+    const parts = londonDateTimeFormatter.formatToParts(date);
+    const year = parts.find((part) => part.type === "year")?.value ?? "0000";
+    const month = parts.find((part) => part.type === "month")?.value ?? "01";
+    const day = parts.find((part) => part.type === "day")?.value ?? "01";
+    const hour = parts.find((part) => part.type === "hour")?.value ?? "00";
+    const minute = parts.find((part) => part.type === "minute")?.value ?? "00";
+    return `${year}-${month}-${day}T${hour}:${minute}`;
 }
 
 export function isWindowSlot(raw: any) {
     if (!raw || typeof raw !== "object") return false;
-    if (raw.mode !== "continuous" && raw.mode !== "split") return false;
+    if (raw.mode !== "continuous") return false;
     if (typeof raw.date_from !== "string" || typeof raw.date_to !== "string") return false;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(raw.date_from) || !/^\d{4}-\d{2}-\d{2}$/.test(raw.date_to)) return false;
     if (raw.date_from > raw.date_to) return false;
@@ -54,111 +46,27 @@ export function isWindowSlot(raw: any) {
 
     const startMin = parseTimeToMinutes(raw.start);
     const endMin = parseTimeToMinutes(raw.end);
-    if (raw.mode === "split" && startMin >= endMin) return false;
-    if (raw.mode === "continuous" && raw.date_from === raw.date_to && startMin >= endMin) return false;
+    if (raw.date_from === raw.date_to && startMin >= endMin) return false;
     return true;
-}
-
-export function normalizeExcludeDows(raw: any): number[] {
-    if (!Array.isArray(raw)) return [];
-    return Array.from(
-        new Set(raw.map((value) => Number(value)).filter((dow) => Number.isInteger(dow) && dow >= 0 && dow <= 6))
-    );
-}
-
-function extractAvailabilityRules(spot: any): AvailabilityRule[] {
-    const rules: AvailabilityRule[] = [];
-    const a = spot?.availability_json;
-    if (!a) {
-        return ALL_DAYS.map((dow) => ({ dow, start: "00:00", end: "23:59" }));
-    }
-
-    if (a?.type === "24_7") {
-        return ALL_DAYS.map((dow) => ({ dow, start: "00:00", end: "23:59" }));
-    }
-    if (a?.type === "same_everyday" && a.start && a.end) {
-        return ALL_DAYS.map((dow) => ({ dow, start: a.start, end: a.end }));
-    }
-    if (a?.type === "custom_weekly" && Array.isArray(a.rules)) {
-        return a.rules.slice();
-    }
-    if (a?.type === "window_slots" && Array.isArray(a.windows)) {
-        for (const window of a.windows) {
-            if (!isWindowSlot(window) || window.mode !== "split") continue;
-            const blocked = new Set(normalizeExcludeDows(window.exclude_dows));
-            for (const dow of ALL_DAYS) {
-                if (!blocked.has(dow)) rules.push({ dow, start: window.start, end: window.end });
-            }
-        }
-        if (rules.length) return rules;
-    }
-    return rules;
 }
 
 function buildAvailabilityWindows(spot: any, maxDaysForward = 30): AvailabilityWindow[] {
     const a: any = spot?.availability_json;
+    if (a?.type !== "window_slots" || !Array.isArray(a.windows)) return [];
+
     const now = new Date();
     const maxEnd = new Date(now.getTime() + maxDaysForward * 24 * 60 * 60 * 1000);
-
-    if (a?.type === "window_slots" && Array.isArray(a.windows)) {
-        const windows: AvailabilityWindow[] = [];
-        for (const window of a.windows) {
-            if (!isWindowSlot(window)) continue;
-
-            if (window.mode === "continuous") {
-                const start = parseYmdTimeUtc(window.date_from, window.start);
-                const end = parseYmdTimeUtc(window.date_to, window.end);
-                if (!(start < end)) continue;
-                if (end <= now || start >= maxEnd) continue;
-                windows.push({
-                    start: start < now ? new Date(now) : start,
-                    end: end > maxEnd ? new Date(maxEnd) : end,
-                });
-                continue;
-            }
-
-            const blocked = new Set(normalizeExcludeDows(window.exclude_dows));
-            const rangeStart = parseYmdStartUtc(window.date_from);
-            const rangeEnd = parseYmdEndUtc(window.date_to);
-            const firstDay = rangeStart > now ? new Date(rangeStart) : new Date(now);
-            firstDay.setUTCHours(0, 0, 0, 0);
-            const lastDay = rangeEnd < maxEnd ? new Date(rangeEnd) : new Date(maxEnd);
-            lastDay.setUTCHours(23, 59, 59, 999);
-
-            for (let d = new Date(firstDay); d <= lastDay; d.setUTCDate(d.getUTCDate() + 1)) {
-                const day = new Date(d);
-                if (blocked.has(day.getUTCDay())) continue;
-                const start = setTime(day, window.start);
-                const end = setTime(day, window.end);
-                if (end <= now) continue;
-                windows.push({ start, end });
-            }
-        }
-        return windows;
-    }
-
-    const rules = extractAvailabilityRules(spot);
-    if (!rules.length) return [];
-
-    const dateFrom = a?.date_from ? parseYmdStartUtc(a.date_from) : null;
-    const dateTo = a?.date_to ? parseYmdEndUtc(a.date_to) : null;
-    const startDay = dateFrom && dateFrom > now ? new Date(dateFrom) : new Date(now);
-    startDay.setUTCHours(0, 0, 0, 0);
-
-    const hardEnd = dateTo && dateTo < maxEnd ? new Date(dateTo) : maxEnd;
-    hardEnd.setUTCHours(23, 59, 59, 999);
-
     const windows: AvailabilityWindow[] = [];
-    for (let d = new Date(startDay); d <= hardEnd; d.setUTCDate(d.getUTCDate() + 1)) {
-        const day = new Date(d);
-        const dow = day.getUTCDay();
-        const dayRules = rules.filter((r) => r.dow === dow);
-        for (const r of dayRules) {
-            const start = setTime(day, r.start);
-            const end = setTime(day, r.end);
-            if (end <= now) continue;
-            windows.push({ start, end });
-        }
+    for (const window of a.windows) {
+        if (!isWindowSlot(window)) continue;
+        const start = parseYmdTimeUtc(window.date_from, window.start);
+        const end = parseYmdTimeUtc(window.date_to, window.end);
+        if (!(start < end)) continue;
+        if (end <= now || start >= maxEnd) continue;
+        windows.push({
+            start: start < now ? new Date(now) : start,
+            end: end > maxEnd ? new Date(maxEnd) : end,
+        });
     }
     return windows;
 }
@@ -250,71 +158,36 @@ export function isSlotAllowed(spot: any, start: Date, end: Date) {
     if (!(start < end)) return false;
 
     const a: any = spot?.availability_json;
-    if (a?.type === "window_slots" && Array.isArray(a.windows)) {
-        for (const window of a.windows) {
-            if (!isWindowSlot(window)) continue;
-            const slotStart = parseYmdTimeUtc(window.date_from, window.start);
-            const slotEnd = parseYmdTimeUtc(window.date_to, window.end);
-            if (!(slotStart < slotEnd)) continue;
-            if (start < slotStart || end > slotEnd) continue;
+    if (a?.type !== "window_slots" || !Array.isArray(a.windows)) return false;
 
-            if (window.mode === "continuous") return true;
+    const startKey = londonDateTimeKey(start);
+    const endKey = londonDateTimeKey(end);
 
-            if (!sameUtcDate(start, end)) continue;
-            const blocked = new Set(normalizeExcludeDows(window.exclude_dows));
-            if (blocked.has(start.getUTCDay())) continue;
-            const ruleStart = setTime(start, window.start);
-            const ruleEnd = setTime(start, window.end);
-            if (start >= ruleStart && end <= ruleEnd) return true;
+    for (const window of a.windows) {
+        if (!isWindowSlot(window)) continue;
+        const slotStartKey = `${window.date_from}T${window.start}`;
+        const slotEndKey = `${window.date_to}T${window.end}`;
+        if (startKey >= slotStartKey && endKey <= slotEndKey) {
+            return true;
         }
-        return false;
-    }
-
-    const rules = extractAvailabilityRules(spot);
-    if (!rules.length) return false;
-
-    const isTwentyFourSeven = a?.type === "24_7";
-    const dateFrom = a?.date_from ? parseYmdStartUtc(a.date_from) : null;
-    const dateTo = a?.date_to ? parseYmdEndUtc(a.date_to) : null;
-    if (dateFrom && start < dateFrom) return false;
-    if (dateTo && end > dateTo) return false;
-
-    if (isTwentyFourSeven) return true;
-
-    if (!sameUtcDate(start, end)) return false;
-    const dow = start.getUTCDay();
-    const dayRules = rules.filter((r) => r.dow === dow);
-    if (!dayRules.length) return false;
-
-    for (const r of dayRules) {
-        const ruleStart = setTime(start, r.start);
-        const ruleEnd = setTime(start, r.end);
-        if (start >= ruleStart && end <= ruleEnd) return true;
     }
     return false;
 }
 
 export function availabilityDateRange(availability: any) {
-    const dateFrom =
-        typeof availability?.date_from === "string"
-            ? availability.date_from
-            : Array.isArray(availability?.windows)
-                ? availability.windows
-                      .map((window: any) => (typeof window?.date_from === "string" ? window.date_from : null))
-                      .filter((value: string | null): value is string => Boolean(value))
-                      .sort()[0] ?? null
-                : null;
+    if (!Array.isArray(availability?.windows)) {
+        return { dateFrom: null, dateTo: null };
+    }
 
-    const dateTo =
-        typeof availability?.date_to === "string"
-            ? availability.date_to
-            : Array.isArray(availability?.windows)
-                ? availability.windows
-                      .map((window: any) => (typeof window?.date_to === "string" ? window.date_to : null))
-                      .filter((value: string | null): value is string => Boolean(value))
-                      .sort()
-                      .at(-1) ?? null
-                : null;
+    const dates = availability.windows
+        .filter((window: any) => isWindowSlot(window))
+        .map((window: any) => ({
+            dateFrom: window.date_from as string,
+            dateTo: window.date_to as string,
+        }));
+
+    const dateFrom = dates.map((entry: { dateFrom: string; dateTo: string }) => entry.dateFrom).sort()[0] ?? null;
+    const dateTo = dates.map((entry: { dateFrom: string; dateTo: string }) => entry.dateTo).sort().at(-1) ?? null;
 
     return { dateFrom, dateTo };
 }

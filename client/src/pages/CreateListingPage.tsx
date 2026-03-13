@@ -109,7 +109,6 @@ type ListingSubmitPayload = {
     availability: ReturnType<typeof toAvailabilityPayload>;
     parking_type: "private" | "public";
     capacity_total: number;
-    capacity_available: number;
     auction_start_price_gbp?: number;
 };
 
@@ -637,7 +636,6 @@ export default function CreateListingPage() {
                   availability: availabilityPayloadResult.payload,
                   parking_type: parkingType,
                   capacity_total: setupCapacity,
-                  capacity_available: setupCapacity,
                   ...(mode === "auction" ? { auction_start_price_gbp: allowMoney ? auctionStartNum : 0 } : {}),
               }
             : null;

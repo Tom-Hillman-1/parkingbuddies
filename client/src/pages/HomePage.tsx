@@ -5,6 +5,19 @@ import SpotsMap from "../components/SpotsMap";
 import { apiGet } from "../lib/api";
 import type { ParkingSpot } from "../types";
 import { capitalizeLabel, toFiniteNumber } from "./pagesShared";
+import {
+    buildSearchWindow,
+    formatSearchWindowSummary,
+    type HomeSearchState,
+} from "./homeSearchUtils";
+import { HomeDatePickerDialog } from "./homeSearchSupport";
+import {
+    DURATION_OPTIONS,
+    isSlotAllowed as isSpotSlotAllowed,
+    nextWholeQuarterHour,
+    normalizeTimeInput,
+    toTimeInput,
+} from "./spotDetailsSupport";
 
 type SortMode = "distance" | "price_low" | "price_high";
 type ModeFilter = Record<ParkingSpot["mode"], boolean>;
@@ -15,6 +28,7 @@ const HOME_HERO_CITY_URL = new URL("../assets/city.json", import.meta.url).href;
 
 function priceValue(spot: ParkingSpot) {
     if (spot.mode === "free") return 0;
+    if (spot.mode === "auction") return Math.max(0, toFiniteNumber(spot.auction_start_price_gbp));
     return Math.max(0, toFiniteNumber(spot.price_gbp));
 }
 
@@ -58,11 +72,26 @@ export default function HomePage() {
     const [heroBackgroundAnimationData, setHeroBackgroundAnimationData] = useState<Record<string, unknown> | null>(null);
     const [heroCityAnimationData, setHeroCityAnimationData] = useState<Record<string, unknown> | null>(null);
 
-    const [query, setQuery] = useState("");
+    const [draftSearch, setDraftSearch] = useState<HomeSearchState>(() => ({
+        query: "",
+        maxPrice: "",
+        date: "",
+        startTime: toTimeInput(nextWholeQuarterHour()),
+        durationMinutes: 60,
+    }));
+    const [activeSearch, setActiveSearch] = useState<HomeSearchState>(() => ({
+        query: "",
+        maxPrice: "",
+        date: "",
+        startTime: toTimeInput(nextWholeQuarterHour()),
+        durationMinutes: 60,
+    }));
     const [sort, setSort] = useState<SortMode>("distance");
     const [modeFilter, setModeFilter] = useState<ModeFilter>({ free: true, rent: true, auction: true });
     const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(null);
     const [locStatus, setLocStatus] = useState<string | null>(null);
+    const [searchDialogOpen, setSearchDialogOpen] = useState(false);
+    const [searchFeedback, setSearchFeedback] = useState<string | null>(null);
 
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -125,15 +154,21 @@ export default function HomePage() {
     }, []);
 
     const filtered = useMemo(() => {
-        const q = query.trim().toLowerCase();
+        const q = activeSearch.query.trim().toLowerCase();
+        const maxPrice = activeSearch.maxPrice.trim() ? toFiniteNumber(activeSearch.maxPrice, Number.POSITIVE_INFINITY) : Number.POSITIVE_INFINITY;
+        const searchWindow = buildSearchWindow(activeSearch);
 
         return spots.filter((spot) => {
             if (!modeFilter[spot.mode]) return false;
-            if (!q) return true;
-            const searchable = `${spot.title} ${spot.address_text} ${spot.description}`.toLowerCase();
-            return searchable.includes(q);
+            if (q) {
+                const searchable = `${spot.title} ${spot.address_text} ${spot.description}`.toLowerCase();
+                if (!searchable.includes(q)) return false;
+            }
+            if (Number.isFinite(maxPrice) && priceValue(spot) > maxPrice) return false;
+            if (searchWindow && !isSpotSlotAllowed(spot, searchWindow.start, searchWindow.end)) return false;
+            return true;
         });
-    }, [spots, query, modeFilter]);
+    }, [spots, activeSearch, modeFilter]);
 
     const anchor = useMemo(() => {
         if (userLoc) return userLoc;
@@ -196,9 +231,37 @@ export default function HomePage() {
     }
 
     function resetFilters() {
-        setQuery("");
+        const initialSearch = {
+            query: "",
+            maxPrice: "",
+            date: "",
+            startTime: toTimeInput(nextWholeQuarterHour()),
+            durationMinutes: 60,
+        };
+        setDraftSearch(initialSearch);
+        setActiveSearch(initialSearch);
         setSort("distance");
         setModeFilter({ free: true, rent: true, auction: true });
+        setSearchFeedback(null);
+    }
+
+    function submitSearch(event?: React.FormEvent) {
+        event?.preventDefault();
+        const next = {
+            ...draftSearch,
+            query: draftSearch.query.trim(),
+            maxPrice: draftSearch.maxPrice.trim(),
+            startTime: normalizeTimeInput(draftSearch.startTime),
+        };
+
+        if (next.maxPrice && toFiniteNumber(next.maxPrice, -1) < 0) {
+            setSearchFeedback("Maximum price must be zero or higher.");
+            return;
+        }
+
+        setActiveSearch(next);
+        setSearchFeedback(null);
+        spotsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
     function requestLocation() {
@@ -237,6 +300,13 @@ export default function HomePage() {
         return window.matchMedia("(max-width: 1040px)").matches;
     }
 
+    const activeSearchCount = [
+        activeSearch.query ? 1 : 0,
+        activeSearch.date ? 1 : 0,
+        activeSearch.maxPrice ? 1 : 0,
+    ].reduce((sum, value) => sum + value, 0);
+    const activeWindowSummary = formatSearchWindowSummary(activeSearch);
+
     return (
         <div className="home">
             <section className="home-hero container">
@@ -273,15 +343,23 @@ export default function HomePage() {
 
             <section className="home-content container">
                 <aside className="home-left">
-                    <div className="card home-controls">
+                    <form className="card home-controls home-controls--search" onSubmit={submitSearch}>
+                        <div className="home-controlsHead">
+                            <div>
+                                <div className="field-label">Home search</div>
+                                <div className="tiny muted">Search by location, time, and price, then view matching spots below.</div>
+                            </div>
+                            <div className="home-searchBadge">{activeSearchCount} filter{activeSearchCount === 1 ? "" : "s"} active</div>
+                        </div>
+
                         <label className="field">
-                            <span className="field-label">Search</span>
+                            <span className="field-label">Location</span>
                             <div className="search-inline">
                                 <input
                                     className="input input--search"
-                                    value={query}
-                                    onChange={(event) => setQuery(event.target.value)}
-                                    placeholder="Search by area, street, or landmark"
+                                    value={draftSearch.query}
+                                    onChange={(event) => setDraftSearch((current) => ({ ...current, query: event.target.value }))}
+                                    placeholder="Area, street, or landmark"
                                 />
                                 <button
                                     type="button"
@@ -293,6 +371,73 @@ export default function HomePage() {
                                 </button>
                             </div>
                         </label>
+
+                        <div className="control-grid home-searchGrid">
+                            <label className="field home-sort-glass">
+                                <span className="field-label">Time window</span>
+                                <button
+                                    type="button"
+                                    className="input home-searchPickerBtn"
+                                    onClick={() => setSearchDialogOpen(true)}
+                                >
+                                    <span>{formatSearchWindowSummary(draftSearch)}</span>
+                                    <span className="home-searchPickerHint">{draftSearch.date ? "Edit" : "Pick date"}</span>
+                                </button>
+                            </label>
+
+                            <label className="field home-sort-glass">
+                                <span className="field-label">Start time</span>
+                                <input
+                                    className="input"
+                                    type="time"
+                                    step={900}
+                                    value={draftSearch.startTime}
+                                    onChange={(event) =>
+                                        setDraftSearch((current) => ({
+                                            ...current,
+                                            startTime: normalizeTimeInput(event.target.value),
+                                        }))
+                                    }
+                                    disabled={!draftSearch.date}
+                                />
+                            </label>
+
+                            <label className="field home-sort-glass">
+                                <span className="field-label">Duration</span>
+                                <select
+                                    className="input"
+                                    value={draftSearch.durationMinutes}
+                                    onChange={(event) =>
+                                        setDraftSearch((current) => ({
+                                            ...current,
+                                            durationMinutes: Number(event.target.value),
+                                        }))
+                                    }
+                                    disabled={!draftSearch.date}
+                                >
+                                    {DURATION_OPTIONS.slice(0, 24).map((option) => (
+                                        <option key={`home-duration-${option.value}`} value={option.value}>
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+
+                            <label className="field home-sort-glass">
+                                <span className="field-label">Max price (GBP)</span>
+                                <input
+                                    className="input"
+                                    type="number"
+                                    min="0"
+                                    step="0.5"
+                                    value={draftSearch.maxPrice}
+                                    onChange={(event) =>
+                                        setDraftSearch((current) => ({ ...current, maxPrice: event.target.value }))
+                                    }
+                                    placeholder="Any price"
+                                />
+                            </label>
+                        </div>
 
                         <div className="control-grid control-grid--compact">
                             <label className="field home-sort-glass">
@@ -308,8 +453,21 @@ export default function HomePage() {
                                 </select>
                             </label>
 
-                            <button type="button" className="btn btn-ghost" onClick={resetFilters}>Reset</button>
+                            <div className="home-searchActions">
+                                <button type="button" className="btn btn-ghost" onClick={resetFilters}>Reset</button>
+                                <button type="submit" className="btn btn-primary">Search</button>
+                            </div>
                         </div>
+
+                        <div className="home-searchSummary">
+                            <span className="badge">{activeSearch.query || "Any location"}</span>
+                            <span className="badge">{activeWindowSummary}</span>
+                            <span className="badge">
+                                {activeSearch.maxPrice ? `Up to GBP ${toFiniteNumber(activeSearch.maxPrice).toFixed(2)}` : "Any price"}
+                            </span>
+                        </div>
+
+                        {searchFeedback && <div className="spotAlert">{searchFeedback}</div>}
 
                         <div className="mode-toggle" role="group" aria-label="Filter by listing type">
                             {(["rent", "free", "auction"] as const).map((mode) => (
@@ -328,7 +486,7 @@ export default function HomePage() {
                             Showing {visible.length} spots
                             {ranked.length !== spots.length ? ` out of ${spots.length}` : ""}.
                         </p>
-                    </div>
+                    </form>
 
                     <div ref={spotsRef} className="result-grid" role="list" aria-label="Search results">
                         {loading && <div className="card">Loading parking spots...</div>}
@@ -415,6 +573,20 @@ export default function HomePage() {
                     />
                 </section>
             </section>
+
+            <HomeDatePickerDialog
+                open={searchDialogOpen}
+                selectedDate={draftSearch.date}
+                onSelectDate={(date) => setDraftSearch((current) => ({ ...current, date }))}
+                onApply={() => setSearchDialogOpen(false)}
+                onClear={() =>
+                    setDraftSearch((current) => ({
+                        ...current,
+                        date: "",
+                    }))
+                }
+                onClose={() => setSearchDialogOpen(false)}
+            />
         </div>
     );
 }

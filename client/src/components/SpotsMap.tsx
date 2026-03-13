@@ -14,7 +14,6 @@ export type MapSpot = {
     mode: "free" | "rent" | "auction";
     price_gbp: number | string | null | undefined;
     capacity_total?: number;
-    capacity_available?: number;
 };
 
 type PinState = "default" | "hovered" | "selected";
@@ -134,9 +133,6 @@ export default function SpotsMap({
                 {spots.map((spot) => {
                     const isSelected = selectedId === spot.id;
                     const isHovered = hoveredId === spot.id;
-                    const capacity = Math.max(1, Number(spot.capacity_total ?? 1));
-                    const leftRaw = Number(spot.capacity_available);
-                    const left = Number.isFinite(leftRaw) ? Math.max(0, leftRaw) : null;
 
                     const icon = isSelected
                         ? pinIcon.selected
@@ -185,9 +181,6 @@ export default function SpotsMap({
                                     <div className="map-popup__meta">
                                         {moneyLabel(spot.price_gbp, spot.mode)} | {modeLabel(spot.mode)}
                                     </div>
-                                    {capacity > 1 && left != null && (
-                                        <div className="map-popup__meta">{left}/{capacity} spots left</div>
-                                    )}
                                     <Link to={`/spots/${spot.id}`} className="map-popup__link">View details</Link>
                                 </div>
                             </Popup>

@@ -28,6 +28,21 @@ function ymd(daysAhead) {
     return addDays(new Date(), daysAhead).toISOString().slice(0, 10);
 }
 
+function continuousWindow(dateFrom, dateTo, start, end) {
+    return {
+        type: "window_slots",
+        windows: [
+            {
+                mode: "continuous",
+                date_from: dateFrom,
+                date_to: dateTo,
+                start,
+                end,
+            },
+        ],
+    };
+}
+
 async function insertSpot(client, ownerId, data) {
     const r = await client.query(
         `INSERT INTO parking_spots (
@@ -48,11 +63,10 @@ async function insertSpot(client, ownerId, data) {
             auction_start_price_gbp,
             parking_type,
             capacity_total,
-            capacity_available,
             is_active
         )
          VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18
         )
          RETURNING id, title`,
         [
@@ -73,7 +87,6 @@ async function insertSpot(client, ownerId, data) {
             data.auction_start_price_gbp,
             data.parking_type,
             data.capacity_total,
-            data.capacity_available,
             true,
         ]
     );
@@ -173,12 +186,11 @@ async function seed() {
                 lat: 51.5047,
                 lng: -0.0189,
                 image_url: "https://picsum.photos/id/1067/1200/800",
-                availability_json: { type: "same_everyday", start: "06:00", end: "23:00", date_from: ymd(0), date_to: ymd(120) },
+                availability_json: continuousWindow(ymd(0), ymd(120), "06:00", "23:00"),
                 auction_end: null,
                 auction_start_price_gbp: null,
                 parking_type: "private",
                 capacity_total: 1,
-                capacity_available: 1,
             })
         );
 
@@ -195,12 +207,11 @@ async function seed() {
                 lat: 51.5364,
                 lng: -0.1033,
                 image_url: "https://picsum.photos/id/1025/1200/800",
-                availability_json: { type: "24_7", date_from: ymd(0), date_to: ymd(180) },
+                availability_json: continuousWindow(ymd(0), ymd(180), "00:00", "23:59"),
                 auction_end: null,
                 auction_start_price_gbp: null,
                 parking_type: "private",
                 capacity_total: 1,
-                capacity_available: 1,
             })
         );
 
@@ -217,23 +228,11 @@ async function seed() {
                 lat: 51.5242,
                 lng: -0.0786,
                 image_url: "https://picsum.photos/id/1011/1200/800",
-                availability_json: {
-                    type: "custom_weekly",
-                    rules: [
-                        { dow: 1, start: "08:00", end: "19:00" },
-                        { dow: 2, start: "08:00", end: "19:00" },
-                        { dow: 3, start: "08:00", end: "19:00" },
-                        { dow: 4, start: "08:00", end: "19:00" },
-                        { dow: 5, start: "08:00", end: "19:00" },
-                    ],
-                    date_from: ymd(0),
-                    date_to: ymd(90),
-                },
+                availability_json: continuousWindow(ymd(0), ymd(90), "08:00", "19:00"),
                 auction_end: null,
                 auction_start_price_gbp: null,
                 parking_type: "public",
                 capacity_total: 2,
-                capacity_available: 2,
             })
         );
 
@@ -250,12 +249,11 @@ async function seed() {
                 lat: 51.5137,
                 lng: -0.1313,
                 image_url: "https://picsum.photos/id/1074/1200/800",
-                availability_json: { type: "24_7", date_from: ymd(0), date_to: ymd(45) },
+                availability_json: continuousWindow(ymd(0), ymd(45), "00:00", "23:59"),
                 auction_end: addDays(new Date(), 12).toISOString(),
                 auction_start_price_gbp: 2.5,
                 parking_type: "private",
                 capacity_total: 1,
-                capacity_available: 1,
             })
         );
 
@@ -272,12 +270,11 @@ async function seed() {
                 lat: 51.5342,
                 lng: -0.1257,
                 image_url: "https://picsum.photos/id/1033/1200/800",
-                availability_json: { type: "24_7", date_from: ymd(0), date_to: ymd(180) },
+                availability_json: continuousWindow(ymd(0), ymd(180), "00:00", "23:59"),
                 auction_end: null,
                 auction_start_price_gbp: null,
                 parking_type: "private",
                 capacity_total: 1,
-                capacity_available: 1,
             })
         );
 
@@ -294,18 +291,11 @@ async function seed() {
                 lat: 51.4626,
                 lng: -0.1144,
                 image_url: "https://picsum.photos/id/1043/1200/800",
-                availability_json: {
-                    type: "same_everyday",
-                    start: "07:00",
-                    end: "22:00",
-                    date_from: ymd(0),
-                    date_to: ymd(60),
-                },
+                availability_json: continuousWindow(ymd(0), ymd(60), "07:00", "22:00"),
                 auction_end: addDays(new Date(), 8).toISOString(),
                 auction_start_price_gbp: 1.8,
                 parking_type: "private",
                 capacity_total: 1,
-                capacity_available: 1,
             })
         );
 
@@ -322,12 +312,11 @@ async function seed() {
                 lat: 51.5392,
                 lng: -0.1426,
                 image_url: "https://picsum.photos/id/1056/1200/800",
-                availability_json: { type: "24_7", date_from: ymd(0), date_to: ymd(365) },
+                availability_json: continuousWindow(ymd(0), ymd(365), "00:00", "23:59"),
                 auction_end: null,
                 auction_start_price_gbp: null,
                 parking_type: "public",
                 capacity_total: 4,
-                capacity_available: 3,
             })
         );
 
@@ -344,12 +333,11 @@ async function seed() {
                 lat: 51.4769,
                 lng: -0.0005,
                 image_url: "https://picsum.photos/id/1080/1200/800",
-                availability_json: { type: "24_7", date_from: ymd(0), date_to: ymd(180) },
+                availability_json: continuousWindow(ymd(0), ymd(180), "00:00", "23:59"),
                 auction_end: null,
                 auction_start_price_gbp: null,
                 parking_type: "private",
                 capacity_total: 1,
-                capacity_available: 1,
             })
         );
 

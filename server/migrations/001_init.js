@@ -52,10 +52,6 @@ exports.up = (pgm) => {
 
         image_url: { type: "text", notNull: false },
 
-        // availability window (optional)
-        availability_start: { type: "timestamptz", notNull: false },
-        availability_end: { type: "timestamptz", notNull: false },
-
         is_active: { type: "boolean", notNull: true, default: true },
 
         created_at: { type: "timestamptz", notNull: true, default: pgm.func("now()") },

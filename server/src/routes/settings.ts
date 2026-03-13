@@ -16,7 +16,6 @@ const router = Router();
 const profileBodySchema = z.object({
     name: z.string().optional(),
     email: z.string().optional(),
-    home_address: z.string().optional(),
 });
 
 const passwordBodySchema = z.object({
@@ -27,7 +26,7 @@ const passwordBodySchema = z.object({
 router.get("/", requireAuth, async (req: AuthRequest, res) => {
     try {
         const r = await pool.query(
-            `SELECT name, email, home_address
+            `SELECT name, email
              FROM users
              WHERE id = $1`,
             [req.userId]
@@ -44,7 +43,7 @@ router.get("/", requireAuth, async (req: AuthRequest, res) => {
 router.patch("/profile", requireAuth, async (req: AuthRequest, res) => {
     const parsedBody = parseWithSchema(profileBodySchema, req.body ?? {}, res, "settings_profile");
     if (!parsedBody.ok) return;
-    const { name, email, home_address } = parsedBody.data;
+    const { name, email } = parsedBody.data;
 
     const updates: string[] = [];
     const values: unknown[] = [];
@@ -66,15 +65,6 @@ router.patch("/profile", requireAuth, async (req: AuthRequest, res) => {
         values.push(normalizeEmail(email));
     }
 
-    if (home_address !== undefined) {
-        const normalizedHomeAddress = home_address.trim();
-        if (normalizedHomeAddress.length > 240) {
-            return res.status(400).json({ ok: false, error: "Home address must be 240 characters or less" });
-        }
-        updates.push(`home_address = $${i++}`);
-        values.push(normalizedHomeAddress || null);
-    }
-
     if (updates.length === 0) {
         return res.status(400).json({ ok: false, error: "No fields to update" });
     }
@@ -94,7 +84,6 @@ router.patch("/profile", requireAuth, async (req: AuthRequest, res) => {
                  stripe_charges_enabled,
                  stripe_payouts_enabled,
                  stripe_details_submitted,
-                 home_address,
                  created_at,
                  updated_at`,
             values

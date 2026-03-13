@@ -4,16 +4,10 @@
 exports.shorthands = undefined;
 
 exports.up = (pgm) => {
-    pgm.sql(`
-        ALTER TABLE users
-            ADD COLUMN IF NOT EXISTS home_address text;
-    `);
+    // Home address was removed from the app before submission.
+    // Keep this migration as a no-op so the history stays stable.
 };
 
 exports.down = (pgm) => {
-    pgm.sql(`
-        ALTER TABLE users
-            DROP COLUMN IF EXISTS home_address;
-    `);
+    // No-op.
 };
-

@@ -13,7 +13,6 @@ export type ParkingSpot = {
     auction_sold_out?: boolean;
     parking_type?: "private" | "public";
     capacity_total?: number;
-    capacity_available?: number;
 
     allow_points: boolean;
     points_cost: number;
@@ -27,19 +26,13 @@ export type ParkingSpot = {
     owner_contact_phone?: string | null;
     owner_contact_info?: string | null;
     availability_json?: {
-        type: "24_7" | "same_everyday" | "custom_weekly" | "window_slots";
-        date_from?: string;
-        date_to?: string;
-        start?: string;
-        end?: string;
-        rules?: Array<{ dow: number; start: string; end: string }>;
+        type: "window_slots";
         windows?: Array<{
-            mode?: "continuous" | "split";
+            mode?: "continuous";
             date_from: string;
             date_to: string;
             start: string;
             end: string;
-            exclude_dows?: number[];
         }>;
         parking_kind?: string;
     } | null;

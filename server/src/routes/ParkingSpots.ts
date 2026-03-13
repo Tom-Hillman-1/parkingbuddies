@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
-import { availabilityDateRange, isWindowSlot, normalizeExcludeDows, remainingMinutes } from "../lib/availability";
+import { availabilityDateRange, isWindowSlot, remainingMinutes } from "../lib/availability";
 import { parseWithSchema } from "../lib/validation";
 
 const router = Router();
@@ -47,28 +47,17 @@ type ParkingKind =
     | "multi_storey"
     | "ev_charging";
 
-type AvailabilityJson =
-    | { type: "24_7"; date_from?: string; date_to?: string; parking_kind?: ParkingKind }
-    | { type: "same_everyday"; start: string; end: string; date_from?: string; date_to?: string; parking_kind?: ParkingKind }
-    | {
-          type: "custom_weekly";
-          rules: Array<{ dow: number; start: string; end: string }>;
-          date_from?: string;
-          date_to?: string;
-          parking_kind?: ParkingKind;
-      }
-    | {
-          type: "window_slots";
-          windows: Array<{
-              mode: "continuous" | "split";
-              date_from: string;
-              date_to: string;
-              start: string;
-              end: string;
-              exclude_dows?: number[];
-          }>;
-          parking_kind?: ParkingKind;
-      };
+type AvailabilityJson = {
+    type: "window_slots";
+    windows: Array<{
+        mode: "continuous";
+        date_from: string;
+        date_to: string;
+        start: string;
+        end: string;
+    }>;
+    parking_kind?: ParkingKind;
+};
 
 type NormalizedListingInput = {
     title: string;
@@ -79,7 +68,6 @@ type NormalizedListingInput = {
     lng: number;
     parking_type: ParkingType;
     capacity_total: number;
-    capacity_available: number;
     image_url: string | null;
     unit: PriceUnit;
     priceNum: number;
@@ -102,18 +90,8 @@ function isNumber(x: unknown): x is number {
     return typeof x === "number" && Number.isFinite(x);
 }
 
-function isTimeHHMM(x: unknown): x is string {
-    return typeof x === "string" && /^\d{2}:\d{2}$/.test(x);
-}
 function isDateYYYYMMDD(x: unknown): x is string {
     return typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x);
-}
-
-function minutes(hhmm: string) {
-    const [rawH, rawM] = hhmm.split(":");
-    const h = Number(rawH ?? 0);
-    const m = Number(rawM ?? 0);
-    return h * 60 + m;
 }
 
 function parseMode(x: unknown): Mode | null {
@@ -177,103 +155,43 @@ function isDemoConnectAccountId(accountId: string | null | undefined) {
 }
 
 function auctionEndFromAvailability(availability: AvailabilityJson) {
-    if (availability.type === "window_slots") {
-        if (!Array.isArray(availability.windows) || availability.windows.length === 0) return null;
-        const lastDate = availability.windows
-            .map((window) => (isDateYYYYMMDD(window.date_to) ? window.date_to : null))
-            .filter((value): value is string => Boolean(value))
-            .sort()
-            .at(-1);
-        if (!lastDate) return null;
-        return new Date(`${lastDate}T23:59:59.999Z`).toISOString();
-    }
-
-    const dateTo = availability.date_to;
-    if (!isDateYYYYMMDD(dateTo)) return null;
-    return new Date(`${dateTo}T23:59:59.999Z`).toISOString();
+    if (!Array.isArray(availability.windows) || availability.windows.length === 0) return null;
+    const lastDate = availability.windows
+        .map((window) => (isDateYYYYMMDD(window.date_to) ? window.date_to : null))
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1);
+    if (!lastDate) return null;
+    return new Date(`${lastDate}T23:59:59.999Z`).toISOString();
 }
 
 function buildAvailabilityJson(body: any): { ok: true; availability: AvailabilityJson } | { ok: false; error: string } {
     const a = body?.availability;
-    const date_from = isDateYYYYMMDD(a?.date_from) ? a.date_from : undefined;
-    const date_to = isDateYYYYMMDD(a?.date_to) ? a.date_to : undefined;
     const parking_kind = parseParkingKind(body?.parking_kind ?? a?.parking_kind) ?? undefined;
     const kindField = parking_kind ? { parking_kind } : {};
-    if (date_from && date_to && date_from > date_to) {
-        return { ok: false, error: "availability.date_from must be before availability.date_to" };
+    if (a?.type !== "window_slots" || !Array.isArray(a.windows) || a.windows.length === 0) {
+        return { ok: false, error: "availability.windows must be a non-empty array" };
     }
-    if (a && typeof a === "object") {
-        if (a.type === "24_7") return { ok: true, availability: { type: "24_7", date_from, date_to, ...kindField } };
 
-        if (a.type === "same_everyday") {
-            if (!isTimeHHMM(a.start) || !isTimeHHMM(a.end)) {
-                return { ok: false, error: "availability.start/end must be HH:MM" };
-            }
-            if (minutes(a.start) >= minutes(a.end)) {
-                return { ok: false, error: "availability.start must be before availability.end" };
-            }
-            return {
-                ok: true,
-                availability: { type: "same_everyday", start: a.start, end: a.end, date_from, date_to, ...kindField },
-            };
+    const windows = [];
+    for (const rawWindow of a.windows) {
+        if (!isWindowSlot(rawWindow)) {
+            return { ok: false, error: "Each availability window needs valid dates and times" };
         }
-
-        if (a.type === "custom_weekly") {
-            if (!Array.isArray(a.rules) || a.rules.length === 0) {
-                return { ok: false, error: "availability.rules must be a non-empty array" };
-            }
-            const rules = a.rules.map((r: any) => ({
-                dow: Number(r?.dow),
-                start: r?.start,
-                end: r?.end,
-            }));
-
-            for (const r of rules) {
-                if (!Number.isInteger(r.dow) || r.dow < 0 || r.dow > 6) {
-                    return { ok: false, error: "availability.rules.dow must be 0..6" };
-                }
-                if (!isTimeHHMM(r.start) || !isTimeHHMM(r.end)) {
-                    return { ok: false, error: "availability.rules.start/end must be HH:MM" };
-                }
-                if (minutes(r.start) >= minutes(r.end)) {
-                    return { ok: false, error: "availability rule start must be before end" };
-                }
-            }
-
-            return { ok: true, availability: { type: "custom_weekly", rules, date_from, date_to, ...kindField } };
-        }
-
-        if (a.type === "window_slots") {
-            if (!Array.isArray(a.windows) || a.windows.length === 0) {
-                return { ok: false, error: "availability.windows must be a non-empty array" };
-            }
-
-            const windows = [];
-            for (const rawWindow of a.windows) {
-                if (!isWindowSlot(rawWindow)) {
-                    return { ok: false, error: "Each availability window needs valid mode, dates, and times" };
-                }
-                windows.push({
-                    mode: rawWindow.mode,
-                    date_from: rawWindow.date_from,
-                    date_to: rawWindow.date_to,
-                    start: rawWindow.start,
-                    end: rawWindow.end,
-                    exclude_dows: rawWindow.mode === "split" ? normalizeExcludeDows(rawWindow.exclude_dows) : [],
-                });
-            }
-
-            return { ok: true, availability: { type: "window_slots", windows, ...kindField } };
-        }
-
-        return { ok: false, error: "Invalid availability.type" };
+        windows.push({
+            mode: "continuous" as const,
+            date_from: rawWindow.date_from,
+            date_to: rawWindow.date_to,
+            start: rawWindow.start,
+            end: rawWindow.end,
+        });
     }
-    return { ok: false, error: "availability is required" };
+
+    return { ok: true, availability: { type: "window_slots", windows, ...kindField } };
 }
 
 function normalizeListingInput(
     body: any,
-    options?: { enforceCapacityAvailableLimit?: boolean }
 ): { ok: true; data: NormalizedListingInput } | { ok: false; error: string } {
     const titleRaw = body?.title;
     const descriptionRaw = body?.description;
@@ -291,12 +209,8 @@ function normalizeListingInput(
 
     const parking_type = parseParkingType(body?.parking_type) ?? "private";
     const capacity_total = safeInt(body?.capacity_total || 1);
-    const capacity_available = safeInt(body?.capacity_available || capacity_total || 1);
     if (parking_type === "public" && capacity_total <= 0) {
         return { ok: false, error: "capacity_total must be > 0 for public parking" };
-    }
-    if (options?.enforceCapacityAvailableLimit && capacity_available > capacity_total) {
-        return { ok: false, error: "capacity_available cannot exceed capacity_total" };
     }
 
     const allow_points = isBool(body?.allow_points) ? body.allow_points : false;
@@ -323,7 +237,6 @@ function normalizeListingInput(
             lng,
             parking_type,
             capacity_total,
-            capacity_available,
             image_url: body?.image_url ?? null,
             unit: parsePriceUnit(body?.price_unit) ?? "hour",
             priceNum: safeMoney(body?.price_gbp),
@@ -391,7 +304,6 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         lng,
         parking_type,
         capacity_total,
-        capacity_available,
         image_url,
         unit,
         priceNum: initialPriceNum,
@@ -452,7 +364,6 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         auction_start_price_gbp,
         parking_type,
         capacity_total,
-        capacity_available,
         owner_contact_email,
         owner_contact_phone,
         owner_contact_info,
@@ -480,13 +391,12 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         auction_start_price_gbp,
         parking_type,
         capacity_total,
-        capacity_available,
         owner_contact_email,
         owner_contact_phone,
         owner_contact_info
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
       )
       RETURNING *`,
             insertValues
@@ -509,7 +419,7 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
     if (!parsedBody.ok) return;
     const body = parsedBody.data;
     const spotId = parsedParams.data.id;
-    const parsedInput = normalizeListingInput(body, { enforceCapacityAvailableLimit: true });
+    const parsedInput = normalizeListingInput(body);
     if (!parsedInput.ok) return res.status(400).json({ ok: false, error: parsedInput.error });
     const {
         title,
@@ -520,7 +430,6 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
         lng,
         parking_type,
         capacity_total,
-        capacity_available,
         image_url,
         unit,
         priceNum: initialPriceNum,
@@ -560,7 +469,6 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
         auction_start_price_gbp,
         parking_type,
         capacity_total,
-        capacity_available,
         spotId,
         req.userId,
     ];
@@ -587,9 +495,8 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
            auction_start_price_gbp=$17,
            parking_type=$18,
            capacity_total=$19,
-           capacity_available=$20,
            updated_at=now()
-       WHERE id=$21 AND owner_user_id=$22
+       WHERE id=$20 AND owner_user_id=$21
        RETURNING *`,
             updateValues
         );

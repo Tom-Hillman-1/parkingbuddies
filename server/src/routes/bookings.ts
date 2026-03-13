@@ -4,7 +4,7 @@ import type { PoolClient } from "pg";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import { calcBookingUnits, type PriceUnit, toMoney } from "../lib/shared";
-import { countOverlappingBookings, isWindowSlot, normalizeExcludeDows } from "../lib/availability";
+import { countOverlappingBookings, isSlotAllowed } from "../lib/availability";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
 
@@ -26,24 +26,6 @@ const spotIdParamsSchema = z.object({
     id: z.string().uuid("id must be a valid listing ID"),
 });
 
-type AvailabilityJson =
-    | { type: "24_7"; date_from?: string; date_to?: string }
-    | { type: "same_everyday"; start: string; end: string; date_from?: string; date_to?: string }
-    | { type: "custom_weekly"; rules: Array<{ dow: number; start: string; end: string }>; date_from?: string; date_to?: string }
-    | {
-          type: "window_slots";
-          date_from?: string;
-          date_to?: string;
-          windows: Array<{
-              mode: "continuous" | "split";
-              date_from: string;
-              date_to: string;
-              start: string;
-              end: string;
-              exclude_dows?: number[];
-          }>; 
-      };
-
 async function expireStalePendingBookings() {
     await pool.query(
         `UPDATE bookings
@@ -58,119 +40,9 @@ function isIsoDateString(s: unknown): s is string {
     return typeof s === "string" && !Number.isNaN(Date.parse(s));
 }
 
-function hhmmToMinutes(hhmm: string) {
-    const [rawH, rawM] = hhmm.split(":");
-    const h = Number(rawH ?? 0);
-    const m = Number(rawM ?? 0);
-    return h * 60 + m;
-}
-
-function timeHHMMUtc(d: Date) {
-    const hh = String(d.getUTCHours()).padStart(2, "0");
-    const mm = String(d.getUTCMinutes()).padStart(2, "0");
-    return `${hh}:${mm}`;
-}
-
-function sameUtcDate(a: Date, b: Date) {
-    return (
-        a.getUTCFullYear() === b.getUTCFullYear() &&
-        a.getUTCMonth() === b.getUTCMonth() &&
-        a.getUTCDate() === b.getUTCDate()
-    );
-}
-
-function validateWithinWindowUtc(start: Date, end: Date, windowStartHHMM: string, windowEndHHMM: string) {
-    if (!sameUtcDate(start, end)) {
-        return { ok: false as const, error: "Booking must be within a single day for this availability type" };
-    }
-
-    const sMin = hhmmToMinutes(timeHHMMUtc(start));
-    const eMin = hhmmToMinutes(timeHHMMUtc(end));
-    const aMin = hhmmToMinutes(windowStartHHMM);
-    const bMin = hhmmToMinutes(windowEndHHMM);
-
-    if (sMin < aMin || eMin > bMin) {
-        return { ok: false as const, error: `Booking must be within ${windowStartHHMM}-${windowEndHHMM} (UTC)` };
-    }
-
-    return { ok: true as const };
-}
-
 async function rollbackWithError(client: PoolClient, res: Response, status: number, error: string) {
     await client.query("ROLLBACK");
     return res.status(status).json({ ok: false, error });
-}
-
-function validateAvailability(spot: any, start: Date, end: Date): { ok: true } | { ok: false; error: string } {
-    const av: AvailabilityJson | null = spot.availability_json ?? null;
-    if (!av) return { ok: true };
-    if (av?.date_from || av?.date_to) {
-        const from = av.date_from ? new Date(`${av.date_from}T00:00:00Z`) : null;
-        const to = av.date_to ? new Date(`${av.date_to}T23:59:59Z`) : null;
-        if (from && start < from) return { ok: false, error: "Booking is before the available date range" };
-        if (from && end < from) return { ok: false, error: "Booking is before the available date range" };
-        if (to && start > to) return { ok: false, error: "Booking is after the available date range" };
-        if (to && end > to) return { ok: false, error: "Booking is after the available date range" };
-    }
-    if (av && typeof av === "object") {
-        if (av.type === "24_7") return { ok: true };
-
-        if (av.type === "same_everyday") {
-            if (!av.start || !av.end) return { ok: false, error: "Spot availability is misconfigured" };
-            const r = validateWithinWindowUtc(start, end, av.start, av.end);
-            return r.ok ? { ok: true } : r;
-        }
-
-        if (av.type === "custom_weekly") {
-            if (!Array.isArray(av.rules) || av.rules.length === 0) {
-                return { ok: false, error: "Spot availability is misconfigured" };
-            }
-            if (!sameUtcDate(start, end)) {
-                return { ok: false, error: "Booking must be within a single day for this spot's availability rules" };
-            }
-
-            const dow = start.getUTCDay();
-            const todaysRules = av.rules.filter((r) => r.dow === dow);
-
-            if (todaysRules.length === 0) return { ok: false, error: "This spot is not available on that day" };
-            for (const rule of todaysRules) {
-                const r = validateWithinWindowUtc(start, end, rule.start, rule.end);
-                if (r.ok) return { ok: true };
-            }
-
-            return { ok: false, error: "Booking does not fit within the available time windows (UTC)" };
-        }
-
-        if (av.type === "window_slots") {
-            if (!Array.isArray(av.windows) || av.windows.length === 0) {
-                return { ok: false, error: "Spot availability is misconfigured" };
-            }
-
-            for (const window of av.windows) {
-                if (!isWindowSlot(window)) continue;
-
-                const slotStart = new Date(`${window.date_from}T${window.start}:00Z`);
-                const slotEnd = new Date(`${window.date_to}T${window.end}:00Z`);
-                if (!(slotStart < slotEnd)) continue;
-                if (start < slotStart || end > slotEnd) continue;
-
-                if (window.mode === "continuous") {
-                    return { ok: true };
-                }
-
-                if (!sameUtcDate(start, end)) continue;
-                const blocked = new Set(normalizeExcludeDows(window.exclude_dows));
-                if (blocked.has(start.getUTCDay())) continue;
-                const r = validateWithinWindowUtc(start, end, window.start, window.end);
-                if (r.ok) return { ok: true };
-            }
-
-            return { ok: false, error: "Booking does not fit within the available slot windows" };
-        }
-
-        return { ok: false, error: "Spot availability is misconfigured" };
-    }
-    return { ok: false, error: "Spot availability is missing or invalid" };
 }
 
 router.post("/", requireAuth, async (req: AuthRequest, res) => {
@@ -240,9 +112,8 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         const end = requestedEnd;
         const startIso = start.toISOString();
         const endIso = end.toISOString();
-        const avail = validateAvailability(spot, start, end);
-        if (!avail.ok) {
-            return rollbackWithError(client, res, 400, "error" in avail ? avail.error : "Requested slot is unavailable");
+        if (!isSlotAllowed(spot, start, end)) {
+            return rollbackWithError(client, res, 400, "Requested slot is outside listing availability");
         }
         const overlapCount = await countOverlappingBookings(client, parking_spot_id, startIso, endIso);
         const capacity = Math.max(1, Number(spot.capacity_total ?? 1));

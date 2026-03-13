@@ -11,7 +11,6 @@ import type { User } from "../types";
 const profileSchema = z.object({
     name: z.string().trim(),
     email: z.string().trim(),
-    homeAddress: z.string().trim(),
 }).superRefine((value, ctx) => {
     if (value.email && !z.string().email().safeParse(value.email).success) {
         ctx.addIssue({ code: "custom", path: ["email"], message: "Enter a valid email." });
@@ -48,8 +47,8 @@ const passwordSchema = z.object({
 
 type ProfileFormValues = z.infer<typeof profileSchema>;
 type PasswordFormValues = z.infer<typeof passwordSchema>;
-type SettingsResponse = { name: string; email: string; home_address: string | null };
-type SettingsQueryData = { name: string; email: string; homeAddress: string };
+type SettingsResponse = { name: string; email: string };
+type SettingsQueryData = { name: string; email: string };
 
 export default function SettingsPage() {
     const { token, logout } = useAuth();
@@ -69,7 +68,7 @@ export default function SettingsPage() {
 
     const profileForm = useForm<ProfileFormValues>({
         resolver: zodResolver(profileSchema),
-        defaultValues: { name: "", email: "", homeAddress: "" },
+        defaultValues: { name: "", email: "" },
     });
     const passwordForm = useForm<PasswordFormValues>({
         resolver: zodResolver(passwordSchema),
@@ -86,7 +85,6 @@ export default function SettingsPage() {
             let settings: SettingsResponse = {
                 name: meRes.user.name ?? "",
                 email: meRes.user.email ?? "",
-                home_address: null,
             };
 
             try {
@@ -96,13 +94,11 @@ export default function SettingsPage() {
                 settings = {
                     name: meRes.user.name ?? "",
                     email: meRes.user.email ?? "",
-                    home_address: null,
                 };
             }
             return {
                 name: settings.name ?? "",
                 email: settings.email ?? "",
-                homeAddress: settings.home_address ?? "",
             };
         },
     });
@@ -117,7 +113,6 @@ export default function SettingsPage() {
         profileForm.reset({
             name: settingsQuery.data.name,
             email: settingsQuery.data.email,
-            homeAddress: settingsQuery.data.homeAddress,
         });
     }, [settingsQuery.data, profileForm]);
 
@@ -174,7 +169,6 @@ export default function SettingsPage() {
                 {
                     name: values.name.trim() || undefined,
                     email: values.email.trim() || undefined,
-                    home_address: values.homeAddress.trim() || undefined,
                 },
                 token
             );
@@ -253,15 +247,6 @@ export default function SettingsPage() {
                             {profileForm.formState.errors.email && (
                                 <div className="spotAlert">{profileForm.formState.errors.email.message}</div>
                             )}
-
-                            <label>
-                                <span>Home base (optional)</span>
-                                <input
-                                    className="input"
-                                    placeholder="e.g. 12 Example Road, London"
-                                    {...profileForm.register("homeAddress")}
-                                />
-                            </label>
 
                             <div className="rowInline">
                                 <button onClick={saveProfile} disabled={profileForm.formState.isSubmitting} className="btn btn-primary">
