@@ -6,7 +6,7 @@ import { randomUUID } from "crypto";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import { stripe } from "../stripe";
-import { moneyBookingRewardPoints, toMoney } from "../lib/shared";
+import { moneyBookingRewardPoints, moneyHostingRewardPoints, toMoney } from "../lib/shared";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
 
@@ -247,34 +247,60 @@ async function upsertLatestPaymentRow(
     }
 }
 
-async function awardMoneyBookingRewardIfNeeded(client: PoolClient, booking: any) {
+async function awardMoneyBookingRewardsIfNeeded(client: PoolClient, booking: any) {
     const paid = toMoney(booking.total_price_gbp) > 0;
     if (!paid) return;
-    const points = moneyBookingRewardPoints(booking.total_price_gbp);
-    if (points <= 0) return;
+    const driverPoints = moneyBookingRewardPoints(booking.total_price_gbp);
+    const ownerPoints = moneyHostingRewardPoints(booking.total_price_gbp);
 
-    const existingRewardR = await client.query(
+    const existingDriverRewardR = await client.query(
         `SELECT 1
          FROM reward_transactions
          WHERE user_id = $1
-           AND reason = 'booking_purchase'
+           AND reason = ANY($3::text[])
            AND related_booking_id = $2
          LIMIT 1`,
-        [booking.driver_user_id, booking.id]
+        [booking.driver_user_id, booking.id, ["booking_purchase", "booking_purchase_cashback"]]
     );
-    if (existingRewardR.rowCount) return;
+    if (!existingDriverRewardR.rowCount && driverPoints > 0) {
+        await client.query(
+            `UPDATE users
+             SET points_balance = points_balance + $1, updated_at = now()
+             WHERE id = $2`,
+            [driverPoints, booking.driver_user_id]
+        );
+
+        await client.query(
+            `INSERT INTO reward_transactions (user_id, type, amount, reason, related_booking_id, related_spot_id)
+             VALUES ($1, 'earn', $2, 'booking_purchase_cashback', $3, $4)`,
+            [booking.driver_user_id, driverPoints, booking.id, booking.parking_spot_id]
+        );
+    }
+
+    if (!booking.owner_user_id || booking.owner_user_id === booking.driver_user_id || ownerPoints <= 0) return;
+
+    const existingOwnerRewardR = await client.query(
+        `SELECT 1
+         FROM reward_transactions
+         WHERE user_id = $1
+           AND reason = 'booking_hosting_bonus'
+           AND related_booking_id = $2
+         LIMIT 1`,
+        [booking.owner_user_id, booking.id]
+    );
+    if (existingOwnerRewardR.rowCount) return;
 
     await client.query(
         `UPDATE users
          SET points_balance = points_balance + $1, updated_at = now()
          WHERE id = $2`,
-        [points, booking.driver_user_id]
+        [ownerPoints, booking.owner_user_id]
     );
 
     await client.query(
         `INSERT INTO reward_transactions (user_id, type, amount, reason, related_booking_id, related_spot_id)
-         VALUES ($1, 'earn', $2, 'booking_purchase', $3, $4)`,
-        [booking.driver_user_id, points, booking.id, booking.parking_spot_id]
+         VALUES ($1, 'earn', $2, 'booking_hosting_bonus', $3, $4)`,
+        [booking.owner_user_id, ownerPoints, booking.id, booking.parking_spot_id]
     );
 }
 
@@ -317,7 +343,7 @@ async function finalizePaymentIntent(paymentIntent: Stripe.PaymentIntent) {
             );
         }
 
-        await awardMoneyBookingRewardIfNeeded(client, booking);
+        await awardMoneyBookingRewardsIfNeeded(client, booking);
         await client.query("COMMIT");
     } catch (e) {
         await client.query("ROLLBACK");
@@ -363,9 +389,10 @@ async function syncBookingPaymentFromReceipt(
     try {
         await client.query("BEGIN");
         const bookingR = await client.query(
-            `SELECT id, driver_user_id, parking_spot_id, pay_method, status, total_price_gbp
-             FROM bookings
-             WHERE id = $1
+            `SELECT b.id, b.driver_user_id, b.parking_spot_id, b.pay_method, b.status, b.total_price_gbp, ps.owner_user_id
+             FROM bookings b
+             JOIN parking_spots ps ON ps.id = b.parking_spot_id
+             WHERE b.id = $1
              FOR UPDATE`,
             [bookingId]
         );
@@ -391,7 +418,7 @@ async function syncBookingPaymentFromReceipt(
                     [bookingId]
                 );
             }
-            await awardMoneyBookingRewardIfNeeded(client, booking);
+        await awardMoneyBookingRewardsIfNeeded(client, booking);
         }
 
         await client.query("COMMIT");

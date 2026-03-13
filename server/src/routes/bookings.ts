@@ -48,7 +48,7 @@ async function rollbackWithError(client: PoolClient, res: Response, status: numb
 router.post("/", requireAuth, async (req: AuthRequest, res) => {
     const parsedBody = parseWithSchema(bookingCreateBodySchema, req.body ?? {}, res, "booking");
     if (!parsedBody.ok) return;
-    const { parking_spot_id, start_time, end_time, pay_method, points_amount } = parsedBody.data;
+    const { parking_spot_id, start_time, end_time, pay_method } = parsedBody.data;
 
     if (!isIsoDateString(start_time) || !isIsoDateString(end_time)) {
         return res.status(400).json({ ok: false, error: "start_time and end_time must be ISO date strings" });
@@ -138,14 +138,7 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
             }
 
             const minPoints = Math.ceil(perUnitPoints * units);
-            const requested = Number(points_amount);
-            if (!Number.isFinite(requested) || requested <= 0) {
-                return rollbackWithError(client, res, 400, `Points amount is required (min ${minPoints})`);
-            }
-            if (requested < minPoints) {
-                return rollbackWithError(client, res, 400, `Points amount must be at least ${minPoints}`);
-            }
-            total_points = Math.ceil(requested);
+            total_points = minPoints;
             status = "confirmed";
         } else {
             const perUnitPrice = toMoney(spot.price_gbp);

@@ -1,5 +1,14 @@
-import { useMemo, useState } from "react";
-import { formatDateTimeCompact, pad2, parseYmd, timeToMinutes, toFiniteNumber, toLocalDateInput } from "./pagesShared";
+import { useEffect, useMemo, useState } from "react";
+import {
+    formatDateDisplay,
+    formatDateTimeCompact,
+    formatMonthYearLabel,
+    pad2,
+    parseYmd,
+    timeToMinutes,
+    toFiniteNumber,
+    toLocalDateInput,
+} from "./pagesShared";
 
 type WindowSlot = {
     mode: "continuous";
@@ -43,27 +52,26 @@ export const DURATION_OPTIONS = buildDurationOptions();
 
 export type SlotCalendarProps<TSpot extends AvailabilitySpot> = {
     spot: TSpot;
-    selectedDate: string;
-    startAt: Date;
-    endAt: Date;
+    startDate: string;
+    endDate?: string | null;
     onPickDate: (date: string) => void;
     disabled?: boolean;
 };
 
 export function SlotCalendar<TSpot extends AvailabilitySpot>({
     spot,
-    selectedDate,
-    startAt,
-    endAt,
+    startDate,
+    endDate,
     onPickDate,
     disabled,
 }: SlotCalendarProps<TSpot>) {
-    const [visibleMonth, setVisibleMonth] = useState(() => monthAnchorFromYmd(selectedDate));
+    const [visibleMonth, setVisibleMonth] = useState(() => monthAnchorFromYmd(startDate));
     const cells = useMemo(() => buildCalendarMonthCells(visibleMonth), [visibleMonth]);
-    const monthLabel = useMemo(
-        () => visibleMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
-        [visibleMonth]
-    );
+    const monthLabel = useMemo(() => formatMonthYearLabel(visibleMonth), [visibleMonth]);
+
+    useEffect(() => {
+        setVisibleMonth(monthAnchorFromYmd(startDate));
+    }, [startDate]);
 
     return (
         <div className="slotCal">
@@ -97,8 +105,8 @@ export function SlotCalendar<TSpot extends AvailabilitySpot>({
 
                     const key = toLocalDateInput(day);
                     const available = isDaySelectable(spot, day);
-                    const inRange = isDayInSelectedRange(day, startAt, endAt);
-                    const selected = selectedDate === key;
+                    const inRange = isDayInSelectedRange(day, startDate, endDate);
+                    const selected = key === startDate || key === endDate;
 
                     return (
                         <button
@@ -120,39 +128,50 @@ export function SlotCalendar<TSpot extends AvailabilitySpot>({
 
 export type SlotDialogProps = {
     open: boolean;
-    dateLabel: string;
+    spot: AvailabilitySpot;
+    startDateLabel: string;
+    endDateLabel: string;
     startTime: string;
     setStartTime: (value: string) => void;
-    durationMinutes: number;
-    setDurationMinutes: (value: number) => void;
+    endTime: string;
+    setEndTime: (value: string) => void;
     onApply: () => void;
     onClose: () => void;
 };
 
 export function SlotDialog({
     open,
-    dateLabel,
+    spot,
+    startDateLabel,
+    endDateLabel,
     startTime,
     setStartTime,
-    durationMinutes,
-    setDurationMinutes,
+    endTime,
+    setEndTime,
     onApply,
     onClose,
 }: SlotDialogProps) {
-    if (!open) return null;
+    const formattedStartDate = formatDateDisplay(startDateLabel, startDateLabel);
+    const formattedEndDate = formatDateDisplay(endDateLabel, endDateLabel);
+    const parsedStartDate = parseYmd(startDateLabel);
+    const parsedEndDate = parseYmd(endDateLabel);
+    const slotStart = parsedStartDate ? setTime(parsedStartDate, normalizeTimeInput(startTime)) : null;
+    const slotEnd = parsedEndDate ? setTime(parsedEndDate, normalizeTimeInput(endTime)) : null;
+    const slotRangeValid = !!slotStart && !!slotEnd && slotStart < slotEnd;
+    const slotAllowed = !!slotStart && !!slotEnd && isSlotAllowed(spot, slotStart, slotEnd);
 
-    const parsedDate = parseYmd(dateLabel);
-    const slotStart = parsedDate ? setTime(parsedDate, normalizeTimeInput(startTime)) : null;
-    const slotEnd = slotStart ? addMinutes(slotStart, durationMinutes) : null;
+    if (!open) return null;
 
     return (
         <div className="slotDialogBackdrop" role="dialog" aria-modal="true">
             <div className="card slotDialog">
                 <div className="h3">Pick slot timing</div>
-                <div className="tiny muted">{dateLabel}</div>
+                <div className="tiny muted">
+                    {formattedStartDate} {" -> "} {formattedEndDate}
+                </div>
 
                 <label className="field">
-                    <span>Start time</span>
+                    <span>Start time on {formattedStartDate}</span>
                     <input
                         className="input"
                         type="time"
@@ -163,33 +182,31 @@ export function SlotDialog({
                 </label>
 
                 <label className="field">
-                    <span>Duration</span>
-                    <select
+                    <span>End time on {formattedEndDate}</span>
+                    <input
                         className="input"
-                        value={durationMinutes}
-                        onChange={(e) => setDurationMinutes(clampDurationMinutes(Number(e.target.value)))}
-                    >
-                        {DURATION_OPTIONS.map((option) => (
-                            <option key={`duration-option-${option.value}`} value={option.value}>
-                                {option.label}
-                            </option>
-                        ))}
-                    </select>
+                        type="time"
+                        step={900}
+                        value={normalizeTimeInput(endTime)}
+                        onChange={(e) => setEndTime(normalizeTimeInput(e.target.value))}
+                    />
                 </label>
-
-                <div className="slotDialogPreview">Slot length: {formatDurationLabel(durationMinutes)}.</div>
 
                 {slotStart && slotEnd && (
                     <div className="slotDialogPreview">
                         {formatDateTimeCompact(slotStart.toISOString())} {" -> "} {formatDateTimeCompact(slotEnd.toISOString())}
                     </div>
                 )}
+                {!slotRangeValid && <div className="slotDialogPreview">End time must be after the start time.</div>}
+                {slotRangeValid && !slotAllowed && (
+                    <div className="slotDialogPreview">That range sits outside this listing&apos;s availability window.</div>
+                )}
 
                 <div className="rowInline" style={{ justifyContent: "flex-end" }}>
                     <button type="button" className="btn" onClick={onClose}>
                         Cancel
                     </button>
-                    <button type="button" className="btn btn-primary" onClick={onApply}>
+                    <button type="button" className="btn btn-primary" onClick={onApply} disabled={!slotRangeValid}>
                         Apply
                     </button>
                 </div>
@@ -227,11 +244,10 @@ function addMonths(date: Date, amount: number) {
     return new Date(date.getFullYear(), date.getMonth() + amount, 1);
 }
 
-function isDayInSelectedRange(day: Date, startAt: Date, endAt: Date) {
-    const dayStart = startOfDay(day);
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate() + 1);
-    return dayEnd.getTime() > startAt.getTime() && dayStart.getTime() < endAt.getTime();
+function isDayInSelectedRange(day: Date, startDate: string, endDate?: string | null) {
+    if (!endDate || endDate <= startDate) return false;
+    const dayKey = toLocalDateInput(startOfDay(day));
+    return dayKey > startDate && dayKey < endDate;
 }
 
 function isTimeHHMM(value: string) {
@@ -340,7 +356,7 @@ export function formatAvailability(spot: AvailabilitySpot) {
     if (windows.length > 0) {
         if (windows.length === 1) {
             const window = windows[0];
-            return `${window.date_from} ${window.start} -> ${window.date_to} ${window.end}`;
+            return `${formatDateDisplay(window.date_from)} ${window.start} -> ${formatDateDisplay(window.date_to)} ${window.end}`;
         }
         return `${windows.length} custom slots`;
     }

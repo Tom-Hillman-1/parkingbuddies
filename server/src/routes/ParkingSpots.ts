@@ -3,6 +3,11 @@ import { z } from "zod";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import { availabilityDateRange, isWindowSlot, remainingMinutes } from "../lib/availability";
+import {
+    derivedPointsCostFromMoney,
+    LISTING_PUBLISH_REWARD_POINTS,
+    MAX_LISTING_PUBLISH_REWARDS,
+} from "../lib/shared";
 import { parseWithSchema } from "../lib/validation";
 
 const router = Router();
@@ -218,7 +223,8 @@ function normalizeListingInput(
     if (allow_points && mode !== "rent" && mode !== "auction") {
         return { ok: false, error: "Points can only be enabled for rent or auction listings" };
     }
-    if (allow_points && points_cost < MIN_POINTS_COST) {
+    const moneyPriceForValidation = mode === "auction" ? safeMoney(body?.auction_start_price_gbp) : safeMoney(body?.price_gbp);
+    if (allow_points && points_cost < MIN_POINTS_COST && moneyPriceForValidation <= 0) {
         return { ok: false, error: "points_cost must be >= 1 when allow_points is true" };
     }
 
@@ -254,9 +260,11 @@ function resolveListingPricing(
     mode: Mode,
     availability: AvailabilityJson,
     initialPriceNum: number,
-    allowPoints: boolean
-): { ok: true; data: { priceNum: number; auction_end: string | null; auction_start_price_gbp: number | null } } | { ok: false; error: string } {
+    allowPoints: boolean,
+    requestedPointsCost: number
+): { ok: true; data: { priceNum: number; pointsCost: number; auction_end: string | null; auction_start_price_gbp: number | null } } | { ok: false; error: string } {
     let priceNum = initialPriceNum;
+    let pointsCost = allowPoints ? requestedPointsCost : 0;
     let auction_end: string | null = null;
     let auction_start_price_gbp: number | null = null;
 
@@ -278,6 +286,7 @@ function resolveListingPricing(
         }
 
         auction_start_price_gbp = hasMoneyPricing ? ap : null;
+        pointsCost = allowPoints && auction_start_price_gbp ? derivedPointsCostFromMoney(auction_start_price_gbp) : pointsCost;
         priceNum = 0;
     }
 
@@ -285,8 +294,14 @@ function resolveListingPricing(
     if (mode === "rent" && priceNum <= 0 && !allowPoints) {
         return { ok: false, error: "rent mode requires price_gbp > 0" };
     }
+    if (mode === "rent" && allowPoints && priceNum > 0) {
+        pointsCost = derivedPointsCostFromMoney(priceNum);
+    }
+    if (allowPoints && pointsCost < MIN_POINTS_COST) {
+        return { ok: false, error: "points_cost must be >= 1 when allow_points is true" };
+    }
 
-    return { ok: true, data: { priceNum, auction_end, auction_start_price_gbp } };
+    return { ok: true, data: { priceNum, pointsCost, auction_end, auction_start_price_gbp } };
 }
 
 router.post("/", requireAuth, async (req: AuthRequest, res) => {
@@ -343,9 +358,9 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
     const av = buildAvailabilityJson(body);
     if (!av.ok) return res.status(400).json({ ok: false, error: av.error });
 
-    const pricing = resolveListingPricing(body, mode, av.availability, initialPriceNum, allow_points);
+    const pricing = resolveListingPricing(body, mode, av.availability, initialPriceNum, allow_points, points_cost);
     if (!pricing.ok) return res.status(400).json({ ok: false, error: pricing.error });
-    const { priceNum, auction_end, auction_start_price_gbp } = pricing.data;
+    const { priceNum, pointsCost, auction_end, auction_start_price_gbp } = pricing.data;
     const insertValues = [
         req.userId,
         title,
@@ -354,7 +369,7 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         priceNum,
         unit,
         allow_points,
-        points_cost,
+        pointsCost,
         address_text,
         lat,
         lng,
@@ -402,6 +417,28 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
             insertValues
         );
         const spot = r.rows[0];
+        const listingRewardCountR = await client.query(
+            `SELECT COUNT(*)::int AS reward_count
+             FROM reward_transactions
+             WHERE user_id = $1
+               AND reason = 'listing_publish_bonus'`,
+            [req.userId]
+        );
+        const listingRewardCount = Number(listingRewardCountR.rows[0]?.reward_count ?? 0);
+        if (listingRewardCount < MAX_LISTING_PUBLISH_REWARDS) {
+            await client.query(
+                `UPDATE users
+                 SET points_balance = points_balance + $1, updated_at = now()
+                 WHERE id = $2`,
+                [LISTING_PUBLISH_REWARD_POINTS, req.userId]
+            );
+            await client.query(
+                `INSERT INTO reward_transactions (user_id, type, amount, reason, related_spot_id)
+                 VALUES ($1, 'earn', $2, 'listing_publish_bonus', $3)`,
+                [req.userId, LISTING_PUBLISH_REWARD_POINTS, spot.id]
+            );
+            spot.owner_listing_bonus_points = LISTING_PUBLISH_REWARD_POINTS;
+        }
         await client.query("COMMIT");
         return res.status(201).json({ ok: true, parking_spot: spot });
     } catch (e) {
@@ -443,9 +480,9 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
     const av = buildAvailabilityJson(body);
     if (!av.ok) return res.status(400).json({ ok: false, error: av.error });
 
-    const pricing = resolveListingPricing(body, mode, av.availability, initialPriceNum, allow_points);
+    const pricing = resolveListingPricing(body, mode, av.availability, initialPriceNum, allow_points, points_cost);
     if (!pricing.ok) return res.status(400).json({ ok: false, error: pricing.error });
-    const { priceNum, auction_end, auction_start_price_gbp } = pricing.data;
+    const { priceNum, pointsCost, auction_end, auction_start_price_gbp } = pricing.data;
     const updateBaseValues = [
         title,
         description,
@@ -453,7 +490,7 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
         priceNum,
         unit,
         allow_points,
-        points_cost,
+        pointsCost,
         address_text,
         lat,
         lng,

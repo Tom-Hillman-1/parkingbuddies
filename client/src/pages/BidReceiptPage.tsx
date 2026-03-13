@@ -68,13 +68,19 @@ export default function BidReceiptPage() {
         return bid.status;
     }, [bid?.status]);
 
-    const paymentLabel = bid?.pay_method === "points" ? "Points" : "Card";
+    const paymentLabel = bid?.pay_method === "points" ? "Points bid" : "Card authorization";
     const paymentStatusLabel = useMemo(() => {
         if (!bid) return "-";
-        if (bid.pay_method === "points") return "Applied on owner approval";
+        if (bid.pay_method === "points") {
+            const status = String(bid.status ?? "").toLowerCase();
+            if (status === "accepted") return "Deducted on owner approval";
+            if (status === "pending") return "Not deducted yet";
+            if (status === "rejected") return "No points deducted";
+            return "Pending owner decision";
+        }
         const status = String(bid.status ?? "").toLowerCase();
         if (status === "accepted") return bid.payment_status ?? "Paid";
-        if (status === "pending") return "Authorized (awaiting owner approval)";
+        if (status === "pending") return "Authorized only, not charged yet";
         if (status === "rejected") return "Authorization released";
         return bid.payment_status ?? "-";
     }, [bid]);
@@ -133,7 +139,9 @@ export default function BidReceiptPage() {
                         <div className="h3">Next steps</div>
                         <div className="muted" style={{ marginTop: 6 }}>
                             {bid.status === "pending"
-                                ? "Your bid is pending approval from the owner."
+                                ? bid.pay_method === "points"
+                                    ? "Your points bid is pending approval. No points leave your balance unless the owner accepts it."
+                                    : "Your card is only authorized at this stage. You are charged only if the owner accepts the bid."
                                 : bid.status === "accepted"
                                     ? "Your bid was accepted and the booking is confirmed."
                                     : "This bid was rejected by the owner."}

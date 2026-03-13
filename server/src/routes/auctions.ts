@@ -2,6 +2,7 @@ import { Router } from "express";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import jwt from "jsonwebtoken";
+import { randomUUID } from "crypto";
 import { stripe } from "../stripe";
 import { countOverlappingBookings, isSlotAllowed, remainingMinutes } from "../lib/availability";
 import { calcAuctionUnits, type PriceUnit, toMoney } from "../lib/shared";
@@ -10,6 +11,10 @@ import { parseWithSchema } from "../lib/validation";
 
 const router = Router();
 const PENDING_BOOKING_HOLD_MINUTES = 30;
+const DEMO_MONEY_AUTH_ENABLED = ["1", "true", "yes", "on"].includes(
+    String(process.env.DEMO_BYPASS_CONNECT ?? "").toLowerCase()
+);
+const DEMO_AUCTION_AUTH_PREFIX = "demo_auction_auth_";
 
 const spotIdParamsSchema = z.object({
     spotId: z.string().uuid("spotId must be a valid listing ID"),
@@ -20,6 +25,7 @@ const createBidBodySchema = z.object({
     amount_gbp: z.coerce.number().optional(),
     amount_points: z.coerce.number().optional(),
     payment_intent_id: z.string().trim().regex(/^pi_[A-Za-z0-9_]+$/, "payment_intent_id must be a Stripe PaymentIntent ID").optional(),
+    demo_authorization: z.coerce.boolean().optional(),
     start_time: z.string().trim().min(1),
     end_time: z.string().trim().min(1),
 });
@@ -48,8 +54,12 @@ function normalizeAuctionUnit(rawUnit: unknown): PriceUnit {
     return rawUnit === "day" || rawUnit === "week" ? rawUnit : "hour";
 }
 
+function isDemoAuctionAuthorizationId(value: unknown) {
+    return typeof value === "string" && value.startsWith(DEMO_AUCTION_AUTH_PREFIX);
+}
+
 async function cancelPaymentIntentSilently(paymentIntentId: string | null | undefined) {
-    if (!paymentIntentId) return;
+    if (!paymentIntentId || isDemoAuctionAuthorizationId(paymentIntentId)) return;
     try {
         await stripe.paymentIntents.cancel(paymentIntentId);
     } catch {
@@ -111,6 +121,7 @@ router.get("/owner/bids", requireAuth, async (req: AuthRequest, res) => {
                  b.created_at,
                  b.start_time,
                  b.end_time,
+                 ps.price_unit,
                  u.name AS bidder_name,
                  u.email AS bidder_email,
                  ps.title AS spot_title
@@ -132,7 +143,7 @@ router.get("/owner/bids", requireAuth, async (req: AuthRequest, res) => {
 router.get("/me/pending", requireAuth, async (req: AuthRequest, res) => {
     try {
         const r = await pool.query(
-            `SELECT b.id, b.parking_spot_id, b.amount_gbp, b.amount_points, b.pay_method, b.status, b.created_at, b.start_time, b.end_time, ps.title AS spot_title
+            `SELECT b.id, b.parking_spot_id, b.amount_gbp, b.amount_points, b.pay_method, b.status, b.created_at, b.start_time, b.end_time, ps.price_unit, ps.title AS spot_title
              FROM auction_bids b
                       JOIN parking_spots ps ON ps.id = b.parking_spot_id
              WHERE b.bidder_user_id = $1
@@ -337,6 +348,7 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
     const amountPoints = Number(parsedBody.data.amount_points);
     const paymentIntentId = parsedBody.data.payment_intent_id;
     const paymentIntentIdValue = typeof paymentIntentId === "string" ? paymentIntentId : "";
+    const wantsDemoAuthorization = parsedBody.data.demo_authorization === true;
     const startRaw = parsedBody.data.start_time;
     const endRaw = parsedBody.data.end_time;
 
@@ -344,7 +356,7 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
         if (!amount || amount <= 0) {
             return res.status(400).json({ ok: false, error: "Invalid bid amount" });
         }
-        if (!paymentIntentIdValue.trim()) {
+        if (!paymentIntentIdValue.trim() && !(wantsDemoAuthorization && DEMO_MONEY_AUTH_ENABLED)) {
             return res.status(400).json({ ok: false, error: "payment_intent_id is required" });
         }
     } else {
@@ -414,30 +426,37 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
             if (amount < minTotal) {
                 return rollbackWith(400, `Bid must be at least GBP ${minTotal.toFixed(2)} for this ${unit} slot`, true);
             }
-            const intent = await stripe.paymentIntents.retrieve(paymentIntentIdValue);
-            if (
-                intent.metadata?.user_id !== req.userId ||
-                intent.metadata?.spot_id !== spotId ||
-                intent.metadata?.owner_user_id !== spot.owner_user_id
-            ) {
-                return rollbackWith(400, "Payment intent does not match this bid", true);
-            }
-            const amountPence = Math.round(amount * 100);
-            if (intent.amount !== amountPence || intent.currency !== "gbp") {
-                return rollbackWith(400, "Payment amount mismatch", true);
-            }
-            if (intent.capture_method !== "manual") {
-                return rollbackWith(400, "Invalid auction authorization type", true);
-            }
-            if (intent.status !== "requires_capture") {
-                return rollbackWith(400, "Card authorization not completed", true);
+            const authorizationRef =
+                wantsDemoAuthorization && DEMO_MONEY_AUTH_ENABLED
+                    ? `${DEMO_AUCTION_AUTH_PREFIX}${randomUUID().replace(/-/g, "")}`
+                    : paymentIntentIdValue;
+
+            if (!isDemoAuctionAuthorizationId(authorizationRef)) {
+                const intent = await stripe.paymentIntents.retrieve(paymentIntentIdValue);
+                if (
+                    intent.metadata?.user_id !== req.userId ||
+                    intent.metadata?.spot_id !== spotId ||
+                    intent.metadata?.owner_user_id !== spot.owner_user_id
+                ) {
+                    return rollbackWith(400, "Payment intent does not match this bid", true);
+                }
+                const amountPence = Math.round(amount * 100);
+                if (intent.amount !== amountPence || intent.currency !== "gbp") {
+                    return rollbackWith(400, "Payment amount mismatch", true);
+                }
+                if (intent.capture_method !== "manual") {
+                    return rollbackWith(400, "Invalid auction authorization type", true);
+                }
+                if (intent.status !== "requires_capture") {
+                    return rollbackWith(400, "Card authorization not completed", true);
+                }
             }
 
             const insertR = await client.query(
                 `INSERT INTO auction_bids (parking_spot_id, bidder_user_id, amount_gbp, payment_intent_id, start_time, end_time, status, pay_method)
                  VALUES ($1,$2,$3,$4,$5,$6,'pending','money')
                  RETURNING id`,
-                [spotId, req.userId, amount.toFixed(2), paymentIntentIdValue, start.toISOString(), end.toISOString()]
+                [spotId, req.userId, amount.toFixed(2), authorizationRef, start.toISOString(), end.toISOString()]
             );
             bidId = insertR.rows[0]?.id ?? null;
         } else {
@@ -560,6 +579,7 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
 
         if ((bidInfo.pay_method ?? "money") === "money") {
             acceptedPaymentIntentId = bidInfo.payment_intent_id;
+            const demoAuthorization = isDemoAuctionAuthorizationId(acceptedPaymentIntentId);
 
             await client.query(
                 `UPDATE auction_bids
@@ -601,8 +621,8 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
                     created_at,
                     updated_at
                 )
-                 VALUES ($1, 'stripe', $2, 'pending', $3, now(), now())`,
-                [acceptedBookingId, acceptedPaymentIntentId, bidInfo.amount_gbp]
+                 VALUES ($1, $2, $3, 'pending', $4, now(), now())`,
+                [acceptedBookingId, demoAuthorization ? "demo" : "stripe", acceptedPaymentIntentId, bidInfo.amount_gbp]
             );
         } else {
             const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
@@ -689,17 +709,19 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
     }
 
     if (acceptedBookingId && acceptedPaymentIntentId) {
-        try {
-            await stripe.paymentIntents.capture(acceptedPaymentIntentId);
-        } catch (captureError: unknown) {
+        if (!isDemoAuctionAuthorizationId(acceptedPaymentIntentId)) {
             try {
-                await updateAcceptedMoneyBidFailureState(bidId, acceptedBookingId, "failed");
-            } catch {
+                await stripe.paymentIntents.capture(acceptedPaymentIntentId);
+            } catch (captureError: unknown) {
+                try {
+                    await updateAcceptedMoneyBidFailureState(bidId, acceptedBookingId, "failed");
+                } catch {
+                }
+                return res.status(400).json({
+                    ok: false,
+                    error: `Card capture failed after acceptance: ${String(captureError)}`,
+                });
             }
-            return res.status(400).json({
-                ok: false,
-                error: `Card capture failed after acceptance: ${String(captureError)}`,
-            });
         }
 
         const finalizeClient = await pool.connect();

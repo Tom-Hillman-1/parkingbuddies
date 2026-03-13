@@ -106,6 +106,9 @@ export default function App() {
             <main className="app-main">
                 <Outlet />
             </main>
+            <footer className="site-footer">
+                <p className="site-footer-text">ParkingBuddies project © {new Date().getFullYear()}. All rights reserved.</p>
+            </footer>
         </div>
     );
 }

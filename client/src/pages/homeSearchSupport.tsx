@@ -1,19 +1,29 @@
 import { useEffect, useMemo } from "react";
 import { DayPicker } from "react-day-picker";
 import "react-day-picker/style.css";
-import { parseYmd, toLocalDateInput } from "./pagesShared";
+import { formatDateDisplay, parseYmd, toLocalDateInput } from "./pagesShared";
 
 export function HomeDatePickerDialog({
     open,
     selectedDate,
+    startTime,
+    durationMinutes,
+    durationOptions,
     onSelectDate,
+    onStartTimeChange,
+    onDurationChange,
     onApply,
     onClear,
     onClose,
 }: {
     open: boolean;
     selectedDate: string;
+    startTime: string;
+    durationMinutes: number;
+    durationOptions: Array<{ value: number; label: string }>;
     onSelectDate: (value: string) => void;
+    onStartTimeChange: (value: string) => void;
+    onDurationChange: (value: number) => void;
     onApply: () => void;
     onClear: () => void;
     onClose: () => void;
@@ -57,21 +67,53 @@ export function HomeDatePickerDialog({
                     </button>
                 </div>
 
-                <div className="homeDatePickerShell">
-                    <DayPicker
-                        mode="single"
-                        selected={selected}
-                        onSelect={(day) => onSelectDate(day ? toLocalDateInput(day) : "")}
-                        disabled={{ before: today }}
-                        defaultMonth={selected ?? today}
-                        showOutsideDays
-                        className="homeDayPicker"
-                    />
-                </div>
+                <div className="homeDateDialogBody">
+                    <div className="homeDatePickerShell">
+                        <DayPicker
+                            mode="single"
+                            selected={selected}
+                            onSelect={(day) => onSelectDate(day ? toLocalDateInput(day) : "")}
+                            disabled={{ before: today }}
+                            defaultMonth={selected ?? today}
+                            showOutsideDays
+                            className="homeDayPicker"
+                        />
+                    </div>
 
-                <div className="homeDateDialogSummary">
-                    <span className="homeDateDialogLabel">Selected date</span>
-                    <strong>{selectedDate || "Any date"}</strong>
+                    <aside className="homeDateDialogSide">
+                        <div className="homeDateDialogSummary">
+                            <span className="homeDateDialogLabel">Selected date</span>
+                            <strong>{selectedDate ? formatDateDisplay(selectedDate) : "Any date"}</strong>
+                        </div>
+
+                        <label className="homeDateField">
+                            <span className="homeDateDialogLabel">Start time</span>
+                            <input
+                                className="homeFilterInput"
+                                type="time"
+                                step={900}
+                                value={startTime}
+                                onChange={(event) => onStartTimeChange(event.target.value)}
+                                disabled={!selectedDate}
+                            />
+                        </label>
+
+                        <label className="homeDateField">
+                            <span className="homeDateDialogLabel">Duration</span>
+                            <select
+                                className="homeFilterInput"
+                                value={durationMinutes}
+                                onChange={(event) => onDurationChange(Number(event.target.value))}
+                                disabled={!selectedDate}
+                            >
+                                {durationOptions.map((option) => (
+                                    <option key={`dialog-duration-${option.value}`} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                    </aside>
                 </div>
 
                 <div className="rowInline" style={{ justifyContent: "space-between" }}>

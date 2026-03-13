@@ -15,15 +15,12 @@ import {
     type PriceUnit,
 } from "./pagesShared";
 import {
-    addMinutes,
-    clampDurationMinutes,
     formatAvailability,
     formatBidAmount,
     getAutoStartForDate,
     isSlotAllowed,
     nextWholeQuarterHour,
     normalizeTimeInput,
-    parseDurationQuery,
     roundMoney,
     setTime,
     SlotCalendar,
@@ -117,19 +114,25 @@ export default function SpotDetailsPage() {
         refetchOnWindowFocus: false,
     });
 
-    const [selectedDate, setSelectedDate] = useState(toLocalDateInput(new Date()));
-    const [selectedStartTime, setSelectedStartTime] = useState(() => toTimeInput(nextWholeQuarterHour()));
-    const [durationMinutes, setDurationMinutes] = useState(60);
+    const initialStart = useMemo(() => nextWholeQuarterHour(), []);
+    const initialEnd = useMemo(() => new Date(initialStart.getTime() + 60 * 60000), [initialStart]);
+    const [selectedStartDate, setSelectedStartDate] = useState(() => toLocalDateInput(initialStart));
+    const [selectedEndDate, setSelectedEndDate] = useState(() => toLocalDateInput(initialEnd));
+    const [selectedStartTime, setSelectedStartTime] = useState(() => toTimeInput(initialStart));
+    const [selectedEndTime, setSelectedEndTime] = useState(() => toTimeInput(initialEnd));
+    const [hasSelectedSlot, setHasSelectedSlot] = useState(false);
+    const [calendarDraftStartDate, setCalendarDraftStartDate] = useState<string | null>(null);
+    const [calendarDraftEndDate, setCalendarDraftEndDate] = useState<string | null>(null);
 
     const [slotDialogOpen, setSlotDialogOpen] = useState(false);
     const [slotDialogDraft, setSlotDialogDraft] = useState(() => ({
-        date: toLocalDateInput(new Date()),
-        startTime: toTimeInput(nextWholeQuarterHour()),
-        durationMinutes: 60,
+        startDate: toLocalDateInput(initialStart),
+        endDate: toLocalDateInput(initialEnd),
+        startTime: toTimeInput(initialStart),
+        endTime: toTimeInput(initialEnd),
     }));
 
     const [payMethod, setPayMethod] = useState<PayMethod>("money");
-    const [pointsAmount, setPointsAmount] = useState("");
 
     const [bidPayMethod, setBidPayMethod] = useState<PayMethod>("money");
     const [bidMoneyPerHour, setBidMoneyPerHour] = useState("");
@@ -162,25 +165,31 @@ export default function SpotDetailsPage() {
 
     useEffect(() => {
         const date = searchParams.get("date");
-        const duration = searchParams.get("duration");
 
         if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-            setSelectedDate(date);
-        }
-        if (duration) {
-            const parsed = parseDurationQuery(duration);
-            if (parsed > 0) setDurationMinutes(parsed);
+            setSelectedStartDate(date);
+            setSelectedEndDate(date);
+            setHasSelectedSlot(true);
         }
     }, [searchParams]);
 
     const startAt = useMemo(() => {
-        const day = parseYmd(selectedDate);
+        const day = parseYmd(selectedStartDate);
         if (!day) return getAutoStartForDate(spot, toLocalDateInput(new Date()));
         const normalizedTime = normalizeTimeInput(selectedStartTime);
         return setTime(startOfDay(day), normalizedTime);
-    }, [spot, selectedDate, selectedStartTime]);
-    const endAt = useMemo(() => addMinutes(startAt, durationMinutes), [startAt, durationMinutes]);
+    }, [spot, selectedStartDate, selectedStartTime]);
+    const endAt = useMemo(() => {
+        const day = parseYmd(selectedEndDate);
+        if (!day) return startAt;
+        const normalizedTime = normalizeTimeInput(selectedEndTime);
+        return setTime(startOfDay(day), normalizedTime);
+    }, [selectedEndDate, selectedEndTime, startAt]);
     const startsInFuture = useMemo(() => startAt.getTime() >= Date.now(), [startAt]);
+    const selectedMinutes = useMemo(
+        () => Math.max(0, Math.round((endAt.getTime() - startAt.getTime()) / 60000)),
+        [endAt, startAt]
+    );
 
     const canUsePoints = !!spot?.allow_points && toFiniteNumber(spot.points_cost) > 0;
 
@@ -231,6 +240,7 @@ export default function SpotDetailsPage() {
     const slotFull = spotsLeft <= 0;
 
     const slotStatus = useMemo(() => {
+        if (!hasSelectedSlot) return { ok: false, label: "Choose a slot to continue." };
         if (!slotRangeValid) return { ok: false, label: "Pick a valid slot." };
         if (!startsInFuture) return { ok: false, label: "Start time must be in the future." };
         if (!slotAllowed) return { ok: false, label: "Requested slot is outside listing availability." };
@@ -244,31 +254,25 @@ export default function SpotDetailsPage() {
             ok: true,
             label: capacity > 1 ? `${spotsLeft} spot${spotsLeft === 1 ? "" : "s"} left for this slot.` : "Slot is available.",
         };
-    }, [slotRangeValid, startsInFuture, slotAllowed, slotFull, capacity, spotsLeft]);
+    }, [hasSelectedSlot, slotRangeValid, startsInFuture, slotAllowed, slotFull, capacity, spotsLeft]);
 
     const isOwner = !!user && !!spot && user.id === spot.owner_user_id;
 
     const listingUnit = (spot?.price_unit ?? "hour") as PriceUnit;
     const estimatedTotal = useMemo(() => {
         if (!spot || spot.mode === "free") return 0;
-        const units = calcUnitsForMinutes(durationMinutes, listingUnit);
+        const units = calcUnitsForMinutes(selectedMinutes, listingUnit);
         return roundMoney(listingPrice * units);
-    }, [spot, durationMinutes, listingUnit, listingPrice]);
+    }, [spot, selectedMinutes, listingUnit, listingPrice]);
 
     const pointsMinTotal = useMemo(() => {
         if (!canUsePoints || !spot) return 0;
-        const units = calcUnitsForMinutes(durationMinutes, listingUnit);
+        const units = calcUnitsForMinutes(selectedMinutes, listingUnit);
         return Math.ceil(toFiniteNumber(spot.points_cost) * units);
-    }, [canUsePoints, spot, durationMinutes, listingUnit]);
-
-    useEffect(() => {
-        if (payMethod !== "points" || pointsMinTotal <= 0) return;
-        const value = Number(pointsAmount);
-        if (!Number.isFinite(value) || value < pointsMinTotal) setPointsAmount(String(pointsMinTotal));
-    }, [payMethod, pointsMinTotal, pointsAmount]);
+    }, [canUsePoints, spot, selectedMinutes, listingUnit]);
 
     const auctionMinPerUnit = toFiniteNumber(spot?.auction_start_price_gbp);
-    const bidUnits = useMemo(() => calcUnitsForMinutes(durationMinutes, listingUnit, "auction"), [durationMinutes, listingUnit]);
+    const bidUnits = useMemo(() => calcUnitsForMinutes(selectedMinutes, listingUnit, "auction"), [selectedMinutes, listingUnit]);
     const bidTotalMoney = useMemo(() => {
         const perUnit = Number(bidMoneyPerHour);
         if (!Number.isFinite(perUnit) || perUnit <= 0) return 0;
@@ -287,22 +291,68 @@ export default function SpotDetailsPage() {
     const auctionSoldOut = !!auctionInfo?.sold_out;
     const auctionClosed = !!spot && spot.mode === "auction" && auctionSoldOut;
 
-    function openSlotDialog(date: string) {
-        const autoStart = toTimeInput(getAutoStartForDate(spot, date));
+    function pickCalendarDate(date: string) {
+        if (!calendarDraftStartDate || calendarDraftEndDate) {
+            setCalendarDraftStartDate(date);
+            setCalendarDraftEndDate(null);
+            return;
+        }
+
+        if (date < calendarDraftStartDate) {
+            setCalendarDraftStartDate(date);
+            setCalendarDraftEndDate(null);
+            return;
+        }
+
+        const draftStartDate = calendarDraftStartDate;
+        const autoStart = draftStartDate === selectedStartDate ? selectedStartTime : toTimeInput(getAutoStartForDate(spot, draftStartDate));
+        const autoEnd =
+            date === selectedEndDate
+                ? selectedEndTime
+                : date === draftStartDate
+                    ? toTimeInput(new Date(getAutoStartForDate(spot, draftStartDate).getTime() + 60 * 60000))
+                    : autoStart;
+
         setSlotDialogDraft({
-            date,
-            startTime: selectedDate === date ? selectedStartTime : autoStart,
-            durationMinutes,
+            startDate: draftStartDate,
+            endDate: date,
+            startTime: autoStart,
+            endTime: autoEnd,
         });
+        setCalendarDraftEndDate(date);
         setSlotDialogOpen(true);
     }
 
     function applySlotDialog() {
-        setSelectedDate(slotDialogDraft.date);
+        setSelectedStartDate(slotDialogDraft.startDate);
+        setSelectedEndDate(slotDialogDraft.endDate);
         setSelectedStartTime(normalizeTimeInput(slotDialogDraft.startTime));
-        setDurationMinutes(clampDurationMinutes(slotDialogDraft.durationMinutes));
+        setSelectedEndTime(normalizeTimeInput(slotDialogDraft.endTime));
+        setHasSelectedSlot(true);
+        setCalendarDraftStartDate(null);
+        setCalendarDraftEndDate(null);
         setSlotDialogOpen(false);
     }
+
+    function closeSlotDialog() {
+        setSlotDialogOpen(false);
+        setCalendarDraftStartDate(null);
+        setCalendarDraftEndDate(null);
+    }
+
+    function resetCalendarSelection() {
+        closeSlotDialog();
+        setHasSelectedSlot(false);
+    }
+
+    const calendarStartDate = calendarDraftStartDate ?? (hasSelectedSlot ? selectedStartDate : "");
+    const calendarEndDate =
+        calendarDraftStartDate && !calendarDraftEndDate
+            ? null
+            : hasSelectedSlot
+                ? calendarDraftEndDate ?? selectedEndDate
+                : null;
+    const calendarAnchorDate = calendarDraftStartDate ?? selectedStartDate;
 
     async function createBooking() {
         if (!token) return setActionMsg("Please log in to book this listing.");
@@ -310,12 +360,7 @@ export default function SpotDetailsPage() {
         if (isOwner) return setActionMsg("You cannot book your own listing.");
         if (!slotStatus.ok) return setActionMsg(slotStatus.label);
         if (payMethod === "money" && !canUseMoneyBooking) return setActionMsg("This listing accepts points only.");
-
-        if (payMethod === "points") {
-            const value = Number(pointsAmount);
-            if (!Number.isFinite(value) || value <= 0) return setActionMsg("Enter a valid points amount.");
-            if (pointsMinTotal > 0 && value < pointsMinTotal) return setActionMsg(`Minimum is ${pointsMinTotal} pts.`);
-        }
+        if (payMethod === "points" && pointsMinTotal <= 0) return setActionMsg("Points pricing is not available for this slot.");
 
         setBusy(true);
         setActionMsg(null);
@@ -328,7 +373,7 @@ export default function SpotDetailsPage() {
                 pay_method: payMethod,
             };
 
-            if (payMethod === "points") body.points_amount = Math.ceil(Number(pointsAmount || 0));
+            if (payMethod === "points") body.points_amount = pointsMinTotal;
 
             const r = await apiPost<{ booking: SpotBooking }>("/bookings", body, token);
             const booking = r.booking;
@@ -413,7 +458,12 @@ export default function SpotDetailsPage() {
                     <div className="card spotSimpleMedia">
                         <div className="h3">Map</div>
                         <div className="spotMapWrap" style={{ marginTop: 10 }}>
-                            <SpotsMap spots={[spot]} center={{ lat: spot.lat, lng: spot.lng }} selectedId={spot.id} />
+                            <SpotsMap
+                                spots={[spot]}
+                                center={{ lat: spot.lat, lng: spot.lng }}
+                                selectedId={spot.id}
+                                showPopupDetails={false}
+                            />
                         </div>
                     </div>
 
@@ -463,21 +513,38 @@ export default function SpotDetailsPage() {
 
                     <div className="card spotSimpleAction">
                         <div className="h3">Choose your slot</div>
-                        <p className="tiny muted">Tap a date, then choose start time and duration.</p>
+                        <p className="tiny muted" style={{ margin: "0 0 6px" }}>
+                            Tap a start date, then an end date, then choose the exact times.
+                        </p>
 
                         <SlotCalendar
-                            key={selectedDate.slice(0, 7)}
+                            key={calendarAnchorDate.slice(0, 7)}
                             spot={spot}
-                            selectedDate={selectedDate}
-                            startAt={startAt}
-                            endAt={endAt}
-                            onPickDate={openSlotDialog}
+                            startDate={calendarStartDate}
+                            endDate={calendarEndDate}
+                            onPickDate={pickCalendarDate}
                             disabled={busy || bidBusy}
                         />
 
+                        <div className="rowInline" style={{ justifyContent: "flex-end", marginTop: 8 }}>
+                            <button
+                                type="button"
+                                className="btn"
+                                onClick={resetCalendarSelection}
+                                disabled={busy || bidBusy}
+                                style={{ padding: "6px 12px", fontSize: 12 }}
+                            >
+                                Reset
+                            </button>
+                        </div>
+
                         <div className="slotRangeSummary">
                             <span className="tiny muted">Selected slot</span>
-                            <span className="badge">{formatDateTimeCompact(startAt.toISOString())} {" -> "} {formatDateTimeCompact(endAt.toISOString())}</span>
+                            <span className="badge">
+                                {hasSelectedSlot
+                                    ? `${formatDateTimeCompact(startAt.toISOString())} -> ${formatDateTimeCompact(endAt.toISOString())}`
+                                    : "No slot selected yet"}
+                            </span>
                         </div>
 
                         <div className={`slotStatus ${slotStatus.ok ? "slotStatus--ok" : "slotStatus--bad"}`}>
@@ -578,23 +645,6 @@ export default function SpotDetailsPage() {
                                 disabled={busy}
                             />
 
-                            {payMethod === "points" && canUsePoints && (
-                                <label>
-                                    <span>Points amount</span>
-                                    <input
-                                        className="input"
-                                        type="number"
-                                        min={Math.max(1, pointsMinTotal)}
-                                        step={1}
-                                        value={pointsAmount}
-                                        onChange={(e) => setPointsAmount(e.target.value)}
-                                        placeholder={`Minimum ${pointsMinTotal} pts`}
-                                        disabled={busy}
-                                    />
-                                    <div className="tiny muted">Minimum {pointsMinTotal} pts for this slot.</div>
-                                </label>
-                            )}
-
                             <div className="rowInline" style={{ marginTop: 4 }}>
                                 <button
                                     onClick={createBooking}
@@ -637,13 +687,15 @@ export default function SpotDetailsPage() {
 
             <SlotDialog
                 open={slotDialogOpen}
-                dateLabel={slotDialogDraft.date}
+                spot={spot}
+                startDateLabel={slotDialogDraft.startDate}
+                endDateLabel={slotDialogDraft.endDate}
                 startTime={slotDialogDraft.startTime}
                 setStartTime={(value) => setSlotDialogDraft((prev) => ({ ...prev, startTime: value }))}
-                durationMinutes={slotDialogDraft.durationMinutes}
-                setDurationMinutes={(value) => setSlotDialogDraft((prev) => ({ ...prev, durationMinutes: value }))}
+                endTime={slotDialogDraft.endTime}
+                setEndTime={(value) => setSlotDialogDraft((prev) => ({ ...prev, endTime: value }))}
                 onApply={applySlotDialog}
-                onClose={() => setSlotDialogOpen(false)}
+                onClose={closeSlotDialog}
             />
         </div>
     );

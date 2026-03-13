@@ -1,4 +1,9 @@
 export type PriceUnit = "hour" | "day" | "week";
+export const POINTS_PER_GBP = 10;
+export const SIGNUP_REWARD_POINTS = 25;
+export const PROFILE_COMPLETION_REWARD_POINTS = 10;
+export const LISTING_PUBLISH_REWARD_POINTS = 15;
+export const MAX_LISTING_PUBLISH_REWARDS = 3;
 
 export function toMoney(value: unknown) {
     const numeric = Number(value ?? 0);
@@ -30,8 +35,28 @@ export function calcAuctionUnits(minutes: number, unit: PriceUnit) {
     return calcUnitsForMinutes(minutes, unit, "auction");
 }
 
+export function gbpToPoints(totalGbp: unknown) {
+    return Math.max(0, Math.round(toMoney(totalGbp) * POINTS_PER_GBP));
+}
+
+function minimumPositivePoints(totalGbp: unknown, rate: number) {
+    const cashValue = toMoney(totalGbp);
+    if (cashValue <= 0) return 0;
+    return Math.max(1, gbpToPoints(cashValue * rate));
+}
+
+export function derivedPointsCostFromMoney(totalGbp: unknown) {
+    const cashValue = toMoney(totalGbp);
+    if (cashValue <= 0) return 0;
+    return Math.max(1, gbpToPoints(cashValue));
+}
+
 export function moneyBookingRewardPoints(totalPriceGbp: unknown) {
-    return Math.max(0, Math.floor(toMoney(totalPriceGbp)));
+    return minimumPositivePoints(totalPriceGbp, 0.1);
+}
+
+export function moneyHostingRewardPoints(totalPriceGbp: unknown) {
+    return minimumPositivePoints(totalPriceGbp, 0.05);
 }
 
 export function normalizeEmail(email: string) {

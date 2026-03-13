@@ -10,6 +10,12 @@ type ShowcaseCard = {
     art: "map" | "approval" | "pricing" | "availability" | "support";
 };
 
+type FaqItem = {
+    id: string;
+    question: string;
+    answer: string;
+};
+
 const SHOWCASE_CARDS: ShowcaseCard[] = [
     {
         id: "drivers",
@@ -28,7 +34,7 @@ const SHOWCASE_CARDS: ShowcaseCard[] = [
     {
         id: "pricing",
         title: "Flexible pricing models",
-        description: "Set fixed hourly, daily, or weekly pricing, start auctions from your minimum offer, and optionally allow point payments.",
+        description: "Set fixed hourly, daily, or weekly pricing, then let ParkingBuddies mirror that rate into points using the shared exchange model.",
         toneClass: "aboutShowcaseCard--mint",
         art: "pricing",
     },
@@ -41,10 +47,83 @@ const SHOWCASE_CARDS: ShowcaseCard[] = [
     },
     {
         id: "support",
-        title: "Honest point system model",
-        description: "Owners can book spots by using points earned from listings with enabled point payment.",
+        title: "Rewards you can actually understand",
+        description: "Points come from clear actions like signup, profile completion, first published listings, and successful paid bookings, all tied to one shared rate.",
         toneClass: "aboutShowcaseCard--cream",
         art: "support",
+    },
+];
+
+const FAQ_ITEMS: FaqItem[] = [
+    {
+        id: "faq-search",
+        question: "How do I find a parking space quickly?",
+        answer: "Use the home search to narrow listings by area, date, time, price, or listing type, then compare the best matches on the map or in the list view.",
+    },
+    {
+        id: "faq-slot",
+        question: "How do I choose the exact time I want to park?",
+        answer: "Open a listing, pick your start date and end date on the calendar, then choose the exact start and end times that match your stay.",
+    },
+    {
+        id: "faq-rent-auction",
+        question: "What is the difference between rent and auction listings?",
+        answer: "Rent listings can be booked directly when the slot is available. Auction listings work as offers that the owner reviews and accepts manually.",
+    },
+    {
+        id: "faq-payment-choice",
+        question: "Can I choose between card and points?",
+        answer: "Yes, when a listing allows points you can choose either card or points during booking. If points are not enabled for that listing, card remains the payment option.",
+    },
+    {
+        id: "faq-owner-start",
+        question: "How do I create a listing as an owner?",
+        answer: "Go to Create listing, then add a clear title, location, pricing model, availability window, and image so drivers can understand the space quickly.",
+    },
+    {
+        id: "faq-owner-model",
+        question: "How do owners control bookings and bids?",
+        answer: "Owners decide whether a listing uses direct rent bookings or manual auction approvals, and they can manage incoming activity from the dashboard.",
+    },
+    {
+        id: "faq-overlap",
+        question: "How does the platform prevent double-booking?",
+        answer: "Availability windows, overlap checks, and listing capacity rules work together to stop bookings or approvals that clash with an already occupied slot.",
+    },
+    {
+        id: "faq-points-rate",
+        question: "What is the value of a point?",
+        answer: "ParkingBuddies uses one shared rate of 10 points = GBP 1, so the points system stays easier to understand across the whole platform.",
+    },
+    {
+        id: "faq-earn-points",
+        question: "How do drivers and owners earn points?",
+        answer: "Drivers earn points from signup and successful paid bookings, while owners earn host bonuses when they complete paid stays through the platform.",
+    },
+    {
+        id: "faq-auction-hold",
+        question: "When do money or points actually leave the account in auctions?",
+        answer: "They do not settle immediately. Money stays as authorization only, and points remain in the balance, until the owner accepts the auction bid.",
+    },
+    {
+        id: "faq-signup-reward",
+        question: "How many points do I get for signing up?",
+        answer: "New users receive 25 points when they create an account, giving them a starting balance they can build on through platform activity.",
+    },
+    {
+        id: "faq-profile-bonus",
+        question: "Do I get a reward for completing my profile?",
+        answer: "Yes. The first time you complete and save your profile settings, ParkingBuddies adds a 10 point profile-completion bonus.",
+    },
+    {
+        id: "faq-first-listings",
+        question: "Do owners earn points for publishing listings?",
+        answer: "Yes. Owners receive 15 points for each of their first 3 published listings, which rewards early activity without making the system too open-ended.",
+    },
+    {
+        id: "faq-cashback-bonus",
+        question: "What do cashback and host bonus actually mean?",
+        answer: "On successful paid bookings, drivers earn points back as cashback and owners earn a smaller host bonus, so both sides benefit when a money booking is completed.",
     },
 ];
 
@@ -327,26 +406,138 @@ export default function AboutPage() {
 
             <div className="aboutPremiumDivider" aria-hidden="true" />
 
-            <section className="aboutPremiumInfoGrid aboutReveal" aria-labelledby="about-info-title">
-                <article className="aboutPremiumInfoCard">
-                    <p className="aboutPremiumLabel">How booking works</p>
-                    <h2 id="about-info-title" className="aboutPremiumInfoTitle">Simple flow for drivers</h2>
-                    <ol className="aboutPremiumSteps">
-                        <li>Search by area and compare nearby listings on map or list.</li>
-                        <li>Pick a slot, review availability, and check payment options.</li>
-                        <li>Book instantly or submit an offer in auction mode.</li>
-                    </ol>
-                </article>
+            <section className="aboutPremiumJourney aboutReveal" aria-labelledby="about-journey-title">
+                <div className="aboutJourneyStack">
+                    <article className="aboutJourneyIntroTab">
+                        <p className="aboutPremiumLabel">How the platform works</p>
+                        <h2 id="about-journey-title" className="aboutJourneyIntroTitle">Built for both sides of the parking journey</h2>
+                        <p className="aboutJourneyIntroCopy">
+                            ParkingBuddies keeps the experience simple for drivers without taking control away from owners. Search, timing, booking,
+                            bidding, approvals, and rewards all sit inside one shared flow that feels easier to follow.
+                        </p>
 
-                <article className="aboutPremiumInfoCard">
-                    <p className="aboutPremiumLabel">How owner approvals work</p>
-                    <h2 className="aboutPremiumInfoTitle">Control stays with the owner</h2>
-                    <ul className="aboutPremiumBullets">
-                        <li>Rent listings can be reserved directly when slots are available.</li>
-                        <li>Auction listings accept offers that owners review manually.</li>
-                        <li>Approvals are capped by slot overlap and listing capacity.</li>
-                    </ul>
-                </article>
+                        <div className="aboutJourneyIntroChips">
+                            <span className="aboutJourneyChip">Search smarter</span>
+                            <span className="aboutJourneyChip">Choose exact timing</span>
+                            <span className="aboutJourneyChip">Book or bid</span>
+                            <span className="aboutJourneyChip">Shared points model</span>
+                        </div>
+                    </article>
+
+                    <div className="aboutJourneyRoleGrid">
+                        <article className="aboutJourneyRoleCard aboutJourneyRoleCard--driver">
+                            <span className="aboutJourneyRoleBadge">For drivers</span>
+                            <h3 className="aboutJourneyRoleTitle">Choose your parking space based on what's right for you</h3>
+                            <ul className="aboutJourneyRoleList">
+                                <li>
+                                    <strong>Search faster</strong>
+                                    Filter by area, date, time, price, or listing type to narrow the best options quickly.
+                                </li>
+                                <li>
+                                    <strong>Pick exact timing</strong>
+                                    Choose a start and end date, then set the exact times that match the stay you need.
+                                </li>
+                                <li>
+                                    <strong>Book or bid</strong>
+                                    Reserve instantly on rent listings, or place an offer when the space is listed as an auction.
+                                </li>
+                            </ul>
+                        </article>
+
+                        <article className="aboutJourneyRoleCard aboutJourneyRoleCard--owner">
+                            <span className="aboutJourneyRoleBadge">For owners</span>
+                            <h3 className="aboutJourneyRoleTitle">Stay in control of bookings, bids, and availability</h3>
+                            <ul className="aboutJourneyRoleList">
+                                <li>
+                                    <strong>Choose the model</strong>
+                                    Use rent mode for instant reservations or auction mode when offers should be reviewed first.
+                                </li>
+                                <li>
+                                    <strong>Protect each slot</strong>
+                                    Capacity and overlap checks help prevent double-booking across the same time window.
+                                </li>
+                                <li>
+                                    <strong>Approve with confidence</strong>
+                                    Money bids stay as authorization only, and points stay in the user balance, until acceptance.
+                                </li>
+                            </ul>
+                        </article>
+                    </div>
+
+                    <article className="aboutJourneyPointsCard">
+                        <div className="aboutJourneyPointsHead">
+                            <span className="aboutJourneyRoleBadge">Points system</span>
+                            <h3 className="aboutJourneyRoleTitle">One shared rewards model across the whole platform</h3>
+                            <p className="aboutJourneyPointsCopy">
+                                ParkingBuddies uses a regulated exchange model so point pricing stays easier to understand for both drivers and owners.
+                            </p>
+                        </div>
+
+                        <div className="aboutJourneyPointsGrid">
+                            <div className="aboutJourneyPointsStat">
+                                <span className="aboutJourneyPointsValue">Shared rate</span>
+                                <span className="aboutJourneyPointsLabel">ParkingBuddies keeps point value clear with one simple rate of 10 pts = GBP 1.</span>
+                            </div>
+                            <div className="aboutJourneyPointsStat">
+                                <span className="aboutJourneyPointsValue">Signup reward</span>
+                                <span className="aboutJourneyPointsLabel">New users receive 25 pts when they create an account.</span>
+                            </div>
+                            <div className="aboutJourneyPointsStat">
+                                <span className="aboutJourneyPointsValue">Profile bonus</span>
+                                <span className="aboutJourneyPointsLabel">Users earn 10 pts the first time they save a completed profile.</span>
+                            </div>
+                            <div className="aboutJourneyPointsStat">
+                                <span className="aboutJourneyPointsValue">First 3 listings</span>
+                                <span className="aboutJourneyPointsLabel">Owners receive 15 pts for each of their first 3 published listings.</span>
+                            </div>
+                            <div className="aboutJourneyPointsStat">
+                                <span className="aboutJourneyPointsValue">Cashback on bookings</span>
+                                <span className="aboutJourneyPointsLabel">Drivers earn points back on successful paid bookings.</span>
+                            </div>
+                            <div className="aboutJourneyPointsStat">
+                                <span className="aboutJourneyPointsValue">Host bonus</span>
+                                <span className="aboutJourneyPointsLabel">Owners earn reward points when they complete paid stays.</span>
+                            </div>
+                            <div className="aboutJourneyPointsStat">
+                                <span className="aboutJourneyPointsValue">Fixed point pricing</span>
+                                <span className="aboutJourneyPointsLabel">Point prices stay tied to the shared rate so costs remain easier to understand.</span>
+                            </div>
+                            <div className="aboutJourneyPointsStat">
+                                <span className="aboutJourneyPointsValue">Held until accepted</span>
+                                <span className="aboutJourneyPointsLabel">Auction bids do not settle until the owner accepts the booking offer.</span>
+                            </div>
+                        </div>
+                    </article>
+                </div>
+            </section>
+
+            <section className="aboutPremiumGuides aboutReveal" aria-labelledby="about-guides-title">
+                <div className="aboutPremiumHead">
+                    <p className="aboutPremiumLabel">Using the platform</p>
+                    <h2 id="about-guides-title" className="aboutPremiumHeadTitle">Frequently asked questions</h2>
+                    <p className="aboutPremiumHeadCopy">
+                        The key things drivers and owners usually need to know, explained in one place.
+                    </p>
+                </div>
+
+                <div className="aboutFaqList">
+                    {FAQ_ITEMS.map((item) => (
+                        <details key={item.id} className="aboutFaqItem">
+                            <summary className="aboutFaqSummary">
+                                <span className="aboutFaqGrip" aria-hidden="true">
+                                    <span />
+                                    <span />
+                                    <span />
+                                </span>
+                                <span className="aboutFaqQuestion">{item.question}</span>
+                                <span className="aboutFaqChevron" aria-hidden="true">+</span>
+                            </summary>
+                            <div className="aboutFaqAnswer">
+                                <p>{item.answer}</p>
+                            </div>
+                        </details>
+                    ))}
+                </div>
             </section>
 
             <section id="contact-us" className="aboutPremiumContact aboutReveal">

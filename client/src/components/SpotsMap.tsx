@@ -80,6 +80,7 @@ export default function SpotsMap({
     onHover,
     pickerPosition,
     onMapPick,
+    showPopupDetails = true,
 }: {
     spots: MapSpot[];
     center?: { lat: number; lng: number };
@@ -89,14 +90,15 @@ export default function SpotsMap({
     onHover?: (id: string | null) => void;
     pickerPosition?: { lat: number; lng: number } | null;
     onMapPick?: (lat: number, lng: number) => void;
+    showPopupDetails?: boolean;
 }) {
     const markerRefs = useRef<Record<string, LeafletMarker | null>>({});
     const previousHoveredId = useRef<string | null>(null);
 
     useEffect(() => {
-        if (!selectedId) return;
+        if (!showPopupDetails || !selectedId) return;
         markerRefs.current[selectedId]?.openPopup();
-    }, [selectedId, spots]);
+    }, [selectedId, spots, showPopupDetails]);
 
     useEffect(() => {
         const previous = previousHoveredId.current;
@@ -105,12 +107,12 @@ export default function SpotsMap({
             markerRefs.current[previous]?.closePopup();
         }
 
-        if (hoveredId && hoveredId !== selectedId) {
+        if (showPopupDetails && hoveredId && hoveredId !== selectedId) {
             markerRefs.current[hoveredId]?.openPopup();
         }
 
         previousHoveredId.current = hoveredId ?? null;
-    }, [hoveredId, selectedId]);
+    }, [hoveredId, selectedId, showPopupDetails]);
 
     return (
         <div className="leafletShell">
@@ -152,38 +154,40 @@ export default function SpotsMap({
                                 click: (event) => {
                                     onSelect?.(spot.id);
                                     onHover?.(spot.id);
-                                    event.target.openPopup();
+                                    if (showPopupDetails) event.target.openPopup();
                                 },
                                 mouseover: (event) => {
                                     onHover?.(spot.id);
-                                    event.target.openPopup();
+                                    if (showPopupDetails) event.target.openPopup();
                                 },
                                 mouseout: (event) => {
                                     onHover?.(null);
-                                    if (!isSelected) {
+                                    if (showPopupDetails && !isSelected) {
                                         event.target.closePopup();
                                     }
                                 },
                             }}
                         >
-                            <Popup className="map-popup">
-                                <div className="map-popup__body">
-                                    {spot.image_url && (
-                                        <img
-                                            src={spot.image_url}
-                                            alt={spot.title}
-                                            className="map-popup__image"
-                                            loading="lazy"
-                                        />
-                                    )}
-                                    <div className="map-popup__title">{spot.title}</div>
-                                    <div className="map-popup__address">{spot.address_text}</div>
-                                    <div className="map-popup__meta">
-                                        {moneyLabel(spot.price_gbp, spot.mode)} | {modeLabel(spot.mode)}
+                            {showPopupDetails && (
+                                <Popup className="map-popup">
+                                    <div className="map-popup__body">
+                                        {spot.image_url && (
+                                            <img
+                                                src={spot.image_url}
+                                                alt={spot.title}
+                                                className="map-popup__image"
+                                                loading="lazy"
+                                            />
+                                        )}
+                                        <div className="map-popup__title">{spot.title}</div>
+                                        <div className="map-popup__address">{spot.address_text}</div>
+                                        <div className="map-popup__meta">
+                                            {moneyLabel(spot.price_gbp, spot.mode)} | {modeLabel(spot.mode)}
+                                        </div>
+                                        <Link to={`/spots/${spot.id}`} className="map-popup__link">View details</Link>
                                     </div>
-                                    <Link to={`/spots/${spot.id}`} className="map-popup__link">View details</Link>
-                                </div>
-                            </Popup>
+                                </Popup>
+                            )}
                         </Marker>
                     );
                 })}

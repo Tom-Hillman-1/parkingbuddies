@@ -9,6 +9,7 @@ import {
     isValidPassword,
     normalizeEmail,
     normalizeName,
+    PROFILE_COMPLETION_REWARD_POINTS,
 } from "../lib/shared";
 import { parseWithSchema } from "../lib/validation";
 
@@ -71,8 +72,10 @@ router.patch("/profile", requireAuth, async (req: AuthRequest, res) => {
 
     values.push(req.userId);
 
+    const client = await pool.connect();
     try {
-        const r = await pool.query(
+        await client.query("BEGIN");
+        const r = await client.query(
             `UPDATE users
        SET ${updates.join(", ")}, updated_at = now()
        WHERE id = $${i}
@@ -90,15 +93,44 @@ router.patch("/profile", requireAuth, async (req: AuthRequest, res) => {
         );
 
         if (!r.rowCount) {
+            await client.query("ROLLBACK");
             return res.status(404).json({ ok: false, error: "User not found" });
         }
 
-        return res.json({ ok: true, user: r.rows[0] });
+        const user = r.rows[0];
+        const rewardR = await client.query(
+            `SELECT 1
+             FROM reward_transactions
+             WHERE user_id = $1
+               AND reason = 'profile_completion'
+             LIMIT 1`,
+            [req.userId]
+        );
+        if (!rewardR.rowCount) {
+            await client.query(
+                `UPDATE users
+                 SET points_balance = points_balance + $1, updated_at = now()
+                 WHERE id = $2`,
+                [PROFILE_COMPLETION_REWARD_POINTS, req.userId]
+            );
+            await client.query(
+                `INSERT INTO reward_transactions (user_id, type, amount, reason)
+                 VALUES ($1, 'earn', $2, 'profile_completion')`,
+                [req.userId, PROFILE_COMPLETION_REWARD_POINTS]
+            );
+            user.points_balance = Number(user.points_balance ?? 0) + PROFILE_COMPLETION_REWARD_POINTS;
+        }
+
+        await client.query("COMMIT");
+        return res.json({ ok: true, user });
     } catch (e) {
+        await client.query("ROLLBACK");
         if (String(e).includes("duplicate key value") || String(e).includes("users_email_key")) {
             return res.status(409).json({ ok: false, error: "Email already in use" });
         }
         return res.status(500).json({ ok: false, error: String(e) });
+    } finally {
+        client.release();
     }
 });
 

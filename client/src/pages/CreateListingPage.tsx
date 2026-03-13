@@ -19,6 +19,7 @@ import {
     DEFAULT_AVAILABILITY_START,
     DEFAULT_CENTER,
     DEFAULT_POINTS_COST,
+    derivePointsCostFromGbp,
     DEFAULT_SLOT_END,
     DEFAULT_SLOT_START,
     formatYmdLabel,
@@ -219,6 +220,7 @@ export default function CreateListingPage() {
     const [error, setError] = useState("");
     const [slotSheetError, setSlotSheetError] = useState("");
     const [publishingOverlayOpen, setPublishingOverlayOpen] = useState(false);
+    const [showBasicsStepValidation, setShowBasicsStepValidation] = useState(false);
     const successTimerRef = useRef<number | null>(null);
 
     const imageInputRef = useRef<HTMLInputElement | null>(null);
@@ -566,6 +568,17 @@ export default function CreateListingPage() {
     const priceNum = Number(price || 0);
     const pointsNum = Number(pointsCost || 0);
     const auctionStartNum = Number(auctionStartPrice || 0);
+    const derivedPointsNum =
+        allowPoints && allowMoney
+            ? derivePointsCostFromGbp(mode === "auction" ? auctionStartNum : priceNum)
+            : 0;
+    const effectivePointsNum = allowPoints ? (allowMoney ? derivedPointsNum : pointsNum) : 0;
+
+    useEffect(() => {
+        if (!allowPoints || !allowMoney || derivedPointsNum <= 0) return;
+        const nextValue = String(derivedPointsNum);
+        if (pointsCost !== nextValue) setPointsCost(nextValue);
+    }, [allowMoney, allowPoints, derivedPointsNum, pointsCost]);
 
     const capacityIssue = setupCapacity < 1 ? "Spaces must be at least 1." : "";
     const titleIssue = normalizedTitle.length < 3 ? "Add a listing name with at least 3 characters." : "";
@@ -580,7 +593,7 @@ export default function CreateListingPage() {
                     ? "Rent listings need a valid price above 0."
                     : allowMoney && mode === "auction" && (!Number.isFinite(auctionStartNum) || auctionStartNum < MIN_AUCTION_START_PRICE_GBP)
                             ? "Auction start price must be at least GBP 0.10."
-                            : allowPoints && (!Number.isFinite(pointsNum) || pointsNum < MIN_POINTS_COST)
+                            : allowPoints && !allowMoney && (!Number.isFinite(pointsNum) || pointsNum < MIN_POINTS_COST)
                                 ? "Points must be at least 1."
                                 : "";
 
@@ -625,7 +638,7 @@ export default function CreateListingPage() {
                   price_gbp: mode === "rent" && allowMoney ? priceNum : 0,
                   price_unit: priceUnit,
                   allow_points: mode === "free" ? false : allowPoints,
-                  points_cost: mode === "free" ? 0 : allowPoints ? pointsNum : 0,
+                  points_cost: mode === "free" ? 0 : effectivePointsNum,
                   address_text: normalizedAddress,
                   lat: parsedCoords.lat,
                   lng: parsedCoords.lng,
@@ -678,10 +691,10 @@ export default function CreateListingPage() {
             ? "Free listing"
             : allowMoney
                 ? mode === "rent"
-                    ? `GBP ${Number(price || 0).toFixed(2)} / ${priceUnit}`
-                    : `Bid from GBP ${Number(auctionStartPrice || 0).toFixed(2)} / ${priceUnit}`
+                    ? `GBP ${Number(price || 0).toFixed(2)} / ${priceUnit}${allowPoints && derivedPointsNum > 0 ? ` · ${derivedPointsNum} pts / ${priceUnit}` : ""}`
+                    : `Bid from GBP ${Number(auctionStartPrice || 0).toFixed(2)} / ${priceUnit}${allowPoints && derivedPointsNum > 0 ? ` · ${derivedPointsNum} pts / ${priceUnit}` : ""}`
                 : allowPoints
-                    ? `Points only / ${priceUnit}`
+                    ? `${effectivePointsNum} pts / ${priceUnit}`
                     : "No payment method";
     const availabilitySummary = availabilityWindows.length
         ? `${availabilityWindows.length} slot${availabilityWindows.length === 1 ? "" : "s"} configured`
@@ -698,7 +711,10 @@ export default function CreateListingPage() {
     const draftEndLabel = dateTo ? formatYmdLabel(dateTo) : "selected end date";
 
     function goNext() {
-        if (!currentStepReady) return;
+        if (!currentStepReady) {
+            if (activeStep === 2) setShowBasicsStepValidation(true);
+            return;
+        }
         if (activeStep === 6) {
             setError("");
             setActiveSheet("confirm");
@@ -728,7 +744,7 @@ export default function CreateListingPage() {
                             onChange={(event) => setTitle(event.target.value)}
                             placeholder="Example: Secure driveway near station"
                         />
-                        {titleIssue && <div className="createInlineError">{titleIssue}</div>}
+                        {showBasicsStepValidation && titleIssue && <div className="createInlineError">{titleIssue}</div>}
                     </label>
 
                     <label>
@@ -851,14 +867,26 @@ export default function CreateListingPage() {
                         {allowPoints && mode !== "free" && (
                             <label className="wizardPointsInput">
                                 <span>Points per {priceUnit}</span>
-                                <input
-                                    className="input"
-                                    type="number"
-                                    min="1"
-                                    step="1"
-                                    value={pointsCost}
-                                    onChange={(event) => setPointsCost(event.target.value)}
-                                />
+                                {allowMoney ? (
+                                    <>
+                                        <div className="input" style={{ display: "flex", alignItems: "center" }}>
+                                            {derivedPointsNum > 0 ? `${derivedPointsNum} pts` : "Add a money price first"}
+                                        </div>
+                                        <div className="tiny muted">Auto-matched using 10 pts = GBP 1.</div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <input
+                                            className="input"
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                            value={pointsCost}
+                                            onChange={(event) => setPointsCost(event.target.value)}
+                                        />
+                                        <div className="tiny muted">Set a custom points rate when this listing is points-only.</div>
+                                    </>
+                                )}
                             </label>
                         )}
                     </div>
@@ -1094,7 +1122,7 @@ export default function CreateListingPage() {
                                                 type="button"
                                                 className="btn btn-primary"
                                                 onClick={goNext}
-                                                disabled={!currentStepReady || saving}
+                                                disabled={(activeStep !== 2 && !currentStepReady) || saving}
                                             >
                                                 {activeStep === 6 ? "Publish" : "Next"}
                                             </button>

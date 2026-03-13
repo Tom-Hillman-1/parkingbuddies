@@ -1,6 +1,14 @@
 import { useMemo } from "react";
 import type { ReactNode } from "react";
-import { isTimeHHMM as isTime, parseYmd, timeToMinutes as minutes, toLocalDateInput } from "./pagesShared";
+import {
+    formatDateDisplay,
+    formatMonthShortLabel,
+    formatMonthYearLabel,
+    isTimeHHMM as isTime,
+    parseYmd,
+    timeToMinutes as minutes,
+    toLocalDateInput,
+} from "./pagesShared";
 
 export type Mode = "free" | "rent" | "auction";
 export type PriceUnit = "hour" | "day" | "week";
@@ -54,6 +62,7 @@ export const DEFAULT_CENTER: [number, number] = [51.5074, -0.1278];
 export const LONDON_VIEWBOX = "-0.5103,51.6919,0.3340,51.2868";
 export const MIN_AUCTION_START_PRICE_GBP = 0.1;
 export const MIN_POINTS_COST = 1;
+export const POINTS_PER_GBP = 10;
 export const DEFAULT_AUCTION_START_PRICE = String(MIN_AUCTION_START_PRICE_GBP);
 export const DEFAULT_POINTS_COST = String(MIN_POINTS_COST);
 export const DEFAULT_AVAILABILITY_START = "00:00";
@@ -88,6 +97,12 @@ export const PRICE_UNIT_HELP: Record<PriceUnit, string> = {
     week: "Charges by week. Longer stays are rounded up by full weeks.",
 };
 
+export function derivePointsCostFromGbp(value: unknown) {
+    const price = Number(value ?? 0);
+    if (!Number.isFinite(price) || price <= 0) return 0;
+    return Math.max(1, Math.round(price * POINTS_PER_GBP));
+}
+
 export function parseCoordinates(lat: string, lng: string) {
     const latNum = Number(lat);
     const lngNum = Number(lng);
@@ -117,7 +132,7 @@ export function isYmdInRange(day: string, from: string, to: string) {
 export function formatYmdLabel(ymd: string) {
     const parsed = parseYmd(ymd);
     if (!parsed) return ymd;
-    return parsed.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    return formatDateDisplay(parsed);
 }
 
 export function isYmdInWindow(day: string, window: AvailabilityWindow) {
@@ -405,7 +420,7 @@ export function AvailabilityCalendarSection({
     onShiftMonth: (offset: number) => void;
     onRemoveWindow: (windowId: string) => void;
 }) {
-    const monthLabel = month.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+    const monthLabel = formatMonthYearLabel(month);
     const cells = useMemo(() => buildMonthCells(month), [month]);
     const todayKey = toLocalDateInput(new Date());
 
@@ -453,7 +468,7 @@ export function AvailabilityCalendarSection({
                                 <span className="slotCalNum">{day.getDate()}</span>
                                 {day.getDate() === 1 && (
                                     <span className="slotCalMonth">
-                                        {day.toLocaleDateString(undefined, { month: "short" })}
+                                        {formatMonthShortLabel(day)}
                                     </span>
                                 )}
                             </button>
@@ -469,7 +484,7 @@ export function AvailabilityCalendarSection({
                     {windows.map((window) => (
                         <div key={window.id} className="wizardInlineRow wizardInlineRow--intro">
                             <div className="wizardInlineValue">
-                                {window.from} {" -> "} {window.to}
+                                {formatYmdLabel(window.from)} {" -> "} {formatYmdLabel(window.to)}
                                 <div className="tiny muted">
                                     {window.start}-{window.end}
                                 </div>

@@ -9,11 +9,11 @@ import {
     isValidPassword,
     normalizeEmail,
     normalizeName,
+    SIGNUP_REWARD_POINTS,
 } from "../lib/shared";
 import { parseWithSchema } from "../lib/validation";
 
 const router = Router();
-const SIGNUP_REWARD_POINTS = 1;
 const signupBodySchema = z.object({
     email: z.string(),
     name: z.string(),

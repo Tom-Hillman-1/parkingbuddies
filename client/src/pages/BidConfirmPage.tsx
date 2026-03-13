@@ -45,16 +45,36 @@ function BidCardForm({
         return `bid_${spotId}_${normalizedStart}_${normalizedEnd}_${amount}_${Date.now()}`;
     }
 
+    async function submitDemoAuthorization() {
+        await apiPost(
+            `/auctions/${spotId}/bid`,
+            {
+                amount_gbp: amountGbp,
+                start_time: start,
+                end_time: end,
+                pay_method: "money",
+                demo_authorization: true,
+            },
+            token
+        );
+        onDone();
+    }
+
     async function confirm() {
-        if (!stripe || !elements) return;
         if (!Number.isFinite(amountGbp) || amountGbp <= 0) {
             onError("Enter a valid money amount before authorizing.");
             return;
         }
         setBusy(true);
+        onError("");
         let paymentIntentId: string | null = null;
         let bidSubmitted = false;
         try {
+            if (!stripe || !elements) {
+                await submitDemoAuthorization();
+                bidSubmitted = true;
+                return;
+            }
             const intent = await apiPost<{ client_secret: string; payment_intent_id: string }>(
                 "/payments/auction-intent",
                 {
@@ -67,8 +87,8 @@ function BidCardForm({
             paymentIntentId = intent.payment_intent_id;
             const card = elements.getElement(CardElement);
             if (!card) {
-                onError("Card input not ready");
-                setBusy(false);
+                await submitDemoAuthorization();
+                bidSubmitted = true;
                 return;
             }
             const result = await stripe.confirmCardPayment(intent.client_secret, {
@@ -119,7 +139,7 @@ function BidCardForm({
             </div>
             <button
                 onClick={confirm}
-                disabled={!stripe || busy}
+                disabled={busy}
                 className="btn btn-primary"
                 style={{ marginTop: 12 }}
             >

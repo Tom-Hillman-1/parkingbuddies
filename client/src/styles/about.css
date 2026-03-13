@@ -239,25 +239,262 @@
     display: block;
 }
 
-.aboutPremiumInfoGrid {
+.aboutPremiumJourney {
+    display: grid;
+    gap: 0.95rem;
+}
+
+.aboutJourneyStack {
+    display: grid;
+    gap: 0.95rem;
+}
+
+.aboutJourneyIntroTab {
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    border-radius: 30px;
+    padding: 1rem 1.12rem;
+    background:
+        radial-gradient(circle at 100% 50%, rgba(139, 179, 227, 0.18) 0%, transparent 42%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(243, 248, 255, 0.92) 100%);
+    box-shadow: 0 10px 30px rgba(16, 24, 40, 0.08);
+    display: grid;
+    gap: 0.6rem;
+}
+
+.aboutJourneyIntroTitle {
+    margin: 0;
+    max-width: 16ch;
+    font-family: "Sora", "Manrope", sans-serif;
+    font-size: clamp(1.34rem, 2.3vw, 1.86rem);
+    line-height: 1.18;
+    color: #122035;
+}
+
+.aboutJourneyIntroCopy {
+    margin: 0;
+    max-width: 70ch;
+    color: #425971;
+    line-height: 1.6;
+}
+
+.aboutJourneyIntroChips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.52rem;
+}
+
+.aboutJourneyChip {
+    padding: 0.42rem 0.74rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.84);
+    border: 1px solid rgba(199, 214, 233, 0.9);
+    color: #35506d;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.aboutJourneyRoleGrid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.95rem;
 }
 
-.aboutPremiumInfoCard {
-    padding: 1.02rem 1.04rem 0.96rem;
-    display: grid;
-    gap: 0.66rem;
+.aboutJourneyRoleCard,
+.aboutJourneyPointsCard {
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    border-radius: 26px;
+    box-shadow: 0 10px 30px rgba(16, 24, 40, 0.08);
 }
 
-.aboutPremiumSteps,
-.aboutPremiumBullets {
-    margin: 0;
-    padding-left: 1.08rem;
-    color: #324b66;
+.aboutJourneyRoleCard {
+    padding: 1rem 1rem 0.96rem;
     display: grid;
-    gap: 0.42rem;
+    gap: 0.72rem;
+}
+
+.aboutJourneyRoleCard--driver {
+    background: linear-gradient(145deg, #b8d0e4 0%, #dce9f5 100%);
+}
+
+.aboutJourneyRoleCard--owner {
+    background: linear-gradient(145deg, #bfd6ba 0%, #dcebd9 100%);
+}
+
+.aboutJourneyRoleBadge {
+    width: fit-content;
+    padding: 0.28rem 0.56rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.62);
+    color: rgba(28, 45, 67, 0.78);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.aboutJourneyRoleTitle {
+    margin: 0;
+    max-width: 18ch;
+    font-family: "Sora", "Manrope", sans-serif;
+    font-size: 1.16rem;
+    line-height: 1.28;
+    color: #132338;
+}
+
+.aboutJourneyRoleList {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 0.58rem;
+}
+
+.aboutJourneyRoleList li {
+    padding: 0.76rem 0.82rem;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.68);
+    color: rgba(19, 38, 60, 0.84);
+    line-height: 1.5;
+}
+
+.aboutJourneyRoleList strong {
+    display: block;
+    margin-bottom: 0.18rem;
+    color: #132338;
+}
+
+.aboutJourneyPointsCard {
+    padding: 1rem 1.02rem;
+    background: linear-gradient(145deg, #d7c3e5 0%, #ebdcf4 100%);
+    display: grid;
+    gap: 0.88rem;
+}
+
+.aboutJourneyPointsHead {
+    display: grid;
+    gap: 0.46rem;
+}
+
+.aboutJourneyPointsCopy {
+    margin: 0;
+    max-width: 64ch;
+    color: rgba(51, 42, 72, 0.84);
+    line-height: 1.6;
+}
+
+.aboutJourneyPointsGrid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.72rem;
+}
+
+.aboutJourneyPointsStat {
+    padding: 0.8rem 0.86rem;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    display: grid;
+    gap: 0.28rem;
+}
+
+.aboutJourneyPointsValue {
+    color: #4a2f6a;
+    font-size: 0.93rem;
+    font-weight: 800;
+}
+
+.aboutJourneyPointsLabel {
+    color: rgba(71, 56, 98, 0.84);
+    font-size: 0.85rem;
+    line-height: 1.42;
+}
+
+.aboutPremiumGuides {
+    display: grid;
+    gap: 0.92rem;
+}
+
+.aboutFaqList {
+    display: grid;
+    gap: 0.72rem;
+}
+
+.aboutFaqItem {
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    background:
+        radial-gradient(circle at 100% -10%, rgba(129, 173, 226, 0.14) 0%, transparent 42%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(244, 248, 255, 0.92) 100%);
+    box-shadow: 0 10px 30px rgba(16, 24, 40, 0.08);
+    overflow: hidden;
+}
+
+.aboutFaqSummary {
+    list-style: none;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 0.82rem;
+    align-items: center;
+    padding: 0.96rem 1rem;
+    cursor: pointer;
+}
+
+.aboutFaqSummary::-webkit-details-marker {
+    display: none;
+}
+
+.aboutFaqGrip {
+    display: grid;
+    gap: 0.2rem;
+    align-content: center;
+}
+
+.aboutFaqGrip span {
+    display: block;
+    width: 0.92rem;
+    height: 2px;
+    border-radius: 999px;
+    background: #8da1ba;
+}
+
+.aboutFaqQuestion {
+    color: #122035;
+    font-family: "Sora", "Manrope", sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.aboutFaqChevron {
+    width: 1.9rem;
+    height: 1.9rem;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    background: rgba(255, 255, 255, 0.78);
+    border: 1px solid rgba(203, 216, 232, 0.88);
+    color: #47627f;
+    font-size: 1.1rem;
+    font-weight: 700;
+    transition: transform 180ms ease, background 180ms ease;
+}
+
+.aboutFaqItem[open] .aboutFaqChevron {
+    transform: rotate(45deg);
+    background: rgba(214, 228, 245, 0.94);
+}
+
+.aboutFaqAnswer {
+    padding: 0 1rem 1rem 2.74rem;
+    display: grid;
+    gap: 0.4rem;
+}
+
+ .aboutFaqAnswer p {
+    margin: 0;
+    max-width: 72ch;
+    color: #425971;
+    line-height: 1.62;
 }
 
 .aboutPremiumContact {
@@ -337,7 +574,7 @@
         grid-auto-columns: minmax(270px, min(78vw, 332px));
     }
 
-    .aboutPremiumInfoGrid {
+    .aboutJourneyPointsGrid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 0.8rem;
     }
@@ -377,11 +614,23 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 0.58rem;
     }
+
+    .aboutJourneyRoleGrid,
+    .aboutJourneyPointsGrid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .aboutJourneyIntroTab,
+    .aboutJourneyRoleCard,
+    .aboutJourneyPointsCard,
+    .aboutFaqItem {
+        border-radius: 22px;
+    }
 }
 
 @media (max-width: 540px) {
     .aboutPremiumFormRow,
-    .aboutPremiumInfoGrid {
+    .aboutJourneyRoleGrid {
         grid-template-columns: minmax(0, 1fr);
     }
 }

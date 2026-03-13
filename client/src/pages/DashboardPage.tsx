@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { apiGet, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth, useStripeConnect } from "../lib/auth";
-import { capitalizeLabel, formatDateTimeLocal, toFiniteNumber } from "./pagesShared";
+import { calcUnitsForMinutes, capitalizeLabel, formatDateDisplay, formatDateTimeLocal, toFiniteNumber, type PriceUnit } from "./pagesShared";
 import type { Booking as SharedBooking, ParkingSpot, RewardTransaction, User } from "../types";
 
 type Me = User;
@@ -36,6 +36,7 @@ type AuctionBid = {
     parking_spot_id: string;
     amount_gbp: number | string | null | undefined;
     amount_points?: number | null;
+    price_unit?: PriceUnit;
     pay_method?: "money" | "points";
     status: string;
     created_at: string;
@@ -92,6 +93,20 @@ const shortAddress = (raw: string | null | undefined, maxLen = 52) => {
 };
 
 const sortNewest = <T extends { created_at?: string }>(items: T[]) => [...items].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
+
+const estimateAuctionBidPoints = (bid: AuctionBid) => {
+    if ((bid.pay_method ?? "money") !== "points" || !bid.start_time || !bid.end_time) {
+        return toFiniteNumber(bid.amount_points);
+    }
+    const start = new Date(bid.start_time);
+    const end = new Date(bid.end_time);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+        return toFiniteNumber(bid.amount_points);
+    }
+    const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
+    const units = calcUnitsForMinutes(minutes, bid.price_unit ?? "hour", "auction");
+    return Math.ceil(toFiniteNumber(bid.amount_points) * units);
+};
 
 const isMoneyBookingSettled = (booking: Booking) => {
     if (booking.pay_method !== "money") return true;
@@ -348,7 +363,7 @@ export default function DashboardPage() {
         { label: "Points", value: `${me?.points_balance ?? 0} pts` },
         { label: "Total earned", value: `${POUND}${totalEarned.toFixed(2)}` },
     ];
-    const receiptDate = useMemo(() => new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date()), []);
+    const receiptDate = useMemo(() => formatDateDisplay(new Date()), []);
 
     const resolveBookingSpot = (booking: Booking) => {
         const spot = spotById.get(booking.parking_spot_id);
@@ -593,14 +608,15 @@ export default function DashboardPage() {
                                     <div className="dashboardScrollRow">
                                         {sortedMyAuctionBids.map((bid) => {
                                             const isPoints = (bid.pay_method ?? "money") === "points";
+                                            const totalPoints = estimateAuctionBidPoints(bid);
                                             return (
                                                 <SlotCard
                                                     key={bid.id}
                                                     tone="rose"
                                                     title={bid.spot_title ?? "Auction listing"}
                                                     address="Awaiting owner decision"
-                                                    amount={isPoints ? `-${bid.amount_points ?? 0} pts` : `-${POUND}${toFiniteNumber(bid.amount_gbp).toFixed(2)}`}
-                                                    badges={renderBadgeRow([{ label: capitalizeLabel(bid.status), className: "badge badge--warm" }, { label: "Owner review" }])}
+                                                    amount={isPoints ? `${totalPoints} pts pending` : `${POUND}${toFiniteNumber(bid.amount_gbp).toFixed(2)} auth`}
+                                                    badges={renderBadgeRow([{ label: capitalizeLabel(bid.status), className: "badge badge--warm" }, { label: "Owner review" }, { label: isPoints ? "Not deducted yet" : "Not charged yet" }])}
                                                     time={slotTime(bid.start_time, bid.end_time)}
                                                     actions={<><Link to={`/bids/${bid.id}`} className="btn btn-primary">View local receipt</Link><Link to={`/spots/${bid.parking_spot_id}`} className="btn">View listing</Link></>}
                                                 />
@@ -747,14 +763,15 @@ export default function DashboardPage() {
                                     <div className="dashboardScrollRow">
                                         {pendingOwnerBids.map((bid) => {
                                             const isPoints = (bid.pay_method ?? "money") === "points";
+                                            const totalPoints = estimateAuctionBidPoints(bid);
                                             return (
                                                 <SlotCard
                                                     key={bid.id}
                                                     tone="rose"
                                                     title={bid.spot_title ?? "Auction listing"}
                                                     address={bid.bidder_name ?? bid.bidder_email ?? "Demo Driver"}
-                                                    amount={isPoints ? `+${bid.amount_points ?? 0} pts` : `+${POUND}${toFiniteNumber(bid.amount_gbp).toFixed(2)}`}
-                                                    badges={renderBadgeRow([{ label: "Action required", className: "badge badge--rose" }, { label: isPoints ? "Points" : "Money" }])}
+                                                    amount={isPoints ? `${totalPoints} pts pending` : `${POUND}${toFiniteNumber(bid.amount_gbp).toFixed(2)} auth`}
+                                                    badges={renderBadgeRow([{ label: "Action required", className: "badge badge--rose" }, { label: isPoints ? "Points" : "Money" }, { label: "Charge on acceptance" }])}
                                                     time={slotTime(bid.start_time, bid.end_time)}
                                                     actions={<><Link to={`/bids/${bid.id}`} className="btn">View local receipt</Link><button className="btn btn-primary" onClick={() => acceptBid(bid.parking_spot_id, bid.id)} disabled={busyId === bid.id}>Accept</button><button className="btn" onClick={() => rejectBid(bid.parking_spot_id, bid.id)} disabled={busyId === bid.id}>Reject</button></>}
                                                 />

@@ -72,7 +72,7 @@ export default function SignupPage() {
         <div className="container authPage">
             <div className="pageHeader authPageHeader">
                 <div className="heroKicker">GET STARTED</div>
-                <div className="heroTitle">Create your ParkingBuddies account</div>
+                <div className="heroTitle">Sign up to ParkingBuddies</div>
                 <div className="heroSub muted">
                     Set up your profile, list spaces, and start booking in minutes.
                 </div>

@@ -1,5 +1,23 @@
 export type PriceUnit = "hour" | "day" | "week";
 export const SUPPORT_EMAIL = "parkingbuddiesproject@gmail.com";
+const DISPLAY_LOCALE = "en-GB";
+const DATE_FORMATTER = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+});
+const TIME_FORMATTER = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+});
+const MONTH_YEAR_FORMATTER = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+    month: "long",
+    year: "numeric",
+});
+const MONTH_SHORT_FORMATTER = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+    month: "short",
+});
 
 export function toFiniteNumber(value: unknown, fallback = 0) {
     const numeric = Number(value ?? fallback);
@@ -63,18 +81,40 @@ export function formatDateTimeCompact(value?: string | null, fallback = "-") {
     if (!value) return fallback;
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
-    const dd = String(date.getDate()).padStart(2, "0");
-    const mm = String(date.getMonth() + 1).padStart(2, "0");
-    const yyyy = date.getFullYear();
-    const hh = String(date.getHours()).padStart(2, "0");
-    const min = String(date.getMinutes()).padStart(2, "0");
-    return `${dd}:${mm}:${yyyy} ${hh}:${min}`;
+    return `${DATE_FORMATTER.format(date)} ${TIME_FORMATTER.format(date)}`;
+}
+
+export function formatDateDisplay(value?: Date | string | null, fallback = "-") {
+    if (!value) return fallback;
+    const date =
+        value instanceof Date
+            ? value
+            : /^\d{4}-\d{2}-\d{2}$/.test(value)
+                ? parseYmd(value)
+                : new Date(value);
+    if (!date || Number.isNaN(date.getTime())) return typeof value === "string" ? value : fallback;
+    return DATE_FORMATTER.format(date);
+}
+
+export function formatTimeDisplay(value?: Date | string | null, fallback = "-") {
+    if (!value) return fallback;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return typeof value === "string" ? value : fallback;
+    return TIME_FORMATTER.format(date);
+}
+
+export function formatMonthYearLabel(value: Date) {
+    return MONTH_YEAR_FORMATTER.format(value);
+}
+
+export function formatMonthShortLabel(value: Date) {
+    return MONTH_SHORT_FORMATTER.format(value);
 }
 
 export function formatDateTimeLocal(value?: string | null, fallback = "Time on file") {
     if (!value) return fallback;
     try {
-        return new Date(value).toLocaleString();
+        return formatDateTimeCompact(value, fallback);
     } catch {
         return fallback;
     }

@@ -1,4 +1,4 @@
-import { parseYmd } from "./pagesShared";
+import { formatDateDisplay, formatTimeDisplay, parseYmd } from "./pagesShared";
 import {
     addMinutes,
     formatDurationLabel,
@@ -8,6 +8,7 @@ import {
 
 export type HomeSearchState = {
     query: string;
+    minPrice: string;
     maxPrice: string;
     date: string;
     startTime: string;
@@ -26,5 +27,10 @@ export function buildSearchWindow(search: HomeSearchState) {
 
 export function formatSearchWindowSummary(search: HomeSearchState) {
     if (!search.date) return "Any time";
-    return `${search.date} | ${normalizeTimeInput(search.startTime)} | ${formatDurationLabel(search.durationMinutes)}`;
+    const day = parseYmd(search.date);
+    const start = setTime(day ?? new Date(), normalizeTimeInput(search.startTime));
+    const dayLabel = day ? formatDateDisplay(day) : search.date;
+    const timeLabel = formatTimeDisplay(start);
+
+    return `${dayLabel} \u00b7 ${timeLabel} \u00b7 ${formatDurationLabel(search.durationMinutes)}`;
 }
