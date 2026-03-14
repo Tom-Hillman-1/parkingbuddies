@@ -6,10 +6,16 @@ import { Elements, CardElement, useElements, useStripe } from "@stripe/react-str
 import { apiGet, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ReceiptCard, ReceiptRow } from "../components/ReceiptCard";
-import { calcUnitsForMinutes, formatDateTimeCompact, type PriceUnit } from "./pagesShared";
+import {
+    calcAuctionMoneyTotal,
+    calcAuctionPointsTotal,
+    calcAuctionUnitsForRange,
+    formatDateTimeCompact,
+    formatGbp,
+    type PriceUnit,
+} from "./pagesShared";
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string);
-const POUND = String.fromCharCode(163);
 type SpotSummary = { id: string; title: string; address_text: string; price_unit?: PriceUnit };
 
 function useQueryValue(key: string, fallback = "") {
@@ -177,25 +183,13 @@ export default function BidConfirmPage() {
     const spot = spotQuery.data ?? null;
     const unit = (spot?.price_unit ?? "hour") as PriceUnit;
 
-    const minutes = useMemo(() => {
-        const s = new Date(start);
-        const e = new Date(end);
-        if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return 0;
-        return Math.round((e.getTime() - s.getTime()) / 60000);
-    }, [start, end]);
-    const units = useMemo(() => calcUnitsForMinutes(minutes, unit, "auction"), [minutes, unit]);
+    const units = useMemo(() => calcAuctionUnitsForRange(start, end, unit), [end, start, unit]);
 
     const totalMoney = useMemo(() => {
-        const n = Number(moneyPerUnit);
-        if (!Number.isFinite(n) || n <= 0) return 0;
-        if (!Number.isFinite(units) || units <= 0) return 0;
-        return Math.round(n * units * 100) / 100;
+        return calcAuctionMoneyTotal(moneyPerUnit, units);
     }, [moneyPerUnit, units]);
     const totalPoints = useMemo(() => {
-        const n = Number(pointsPerUnit);
-        if (!Number.isFinite(n) || n <= 0) return 0;
-        if (!Number.isFinite(units) || units <= 0) return 0;
-        return Math.ceil(n * units);
+        return calcAuctionPointsTotal(pointsPerUnit, units);
     }, [pointsPerUnit, units]);
 
     if (!token) return <Navigate to="/login" replace />;
@@ -231,9 +225,9 @@ export default function BidConfirmPage() {
         }
     }
 
-    const totalLabel = pay === "points" ? `${totalPoints} pts` : `${POUND}${totalMoney.toFixed(2)}`;
+    const totalLabel = pay === "points" ? `${totalPoints} pts` : formatGbp(totalMoney);
     const perUnitLabel =
-        pay === "points" ? `${Number(pointsPerUnit || 0)} pts` : `${POUND}${Number(moneyPerUnit || 0).toFixed(2)}`;
+        pay === "points" ? `${Number(pointsPerUnit || 0)} pts` : formatGbp(moneyPerUnit);
 
     return (
         <div className="container">

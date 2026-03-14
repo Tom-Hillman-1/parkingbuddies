@@ -1,0 +1,663 @@
+.appDialogOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: grid;
+    place-items: center;
+    padding: 1.15rem;
+    background:
+        radial-gradient(circle at 12% 12%, rgba(90, 152, 230, 0.16) 0%, transparent 32%),
+        radial-gradient(circle at 88% 10%, rgba(174, 191, 230, 0.22) 0%, transparent 34%),
+        rgba(8, 14, 24, 0.18);
+    backdrop-filter: blur(14px) saturate(1.05);
+    -webkit-backdrop-filter: blur(14px) saturate(1.05);
+}
+
+.appDialogModal {
+    width: min(560px, 100%);
+    max-height: calc(100vh - 2rem);
+}
+
+.appDialogModal--compact {
+    width: min(460px, 100%);
+}
+
+.appDialogModal--wide {
+    width: min(760px, 100%);
+}
+
+.appDialogSurface {
+    max-height: calc(100vh - 2rem);
+    overflow: auto;
+    border: 1px solid rgba(255, 255, 255, 0.84);
+    border-radius: 28px;
+    background:
+        radial-gradient(circle at 100% -18%, rgba(148, 185, 233, 0.2) 0%, transparent 44%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(245, 249, 255, 0.96) 100%);
+    box-shadow:
+        0 28px 70px rgba(12, 18, 28, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.86);
+    padding: 1.1rem;
+    display: grid;
+    gap: 1rem;
+    animation: appDialogIn 180ms ease both;
+}
+
+.appDialogHead {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    justify-content: space-between;
+    gap: 0.8rem;
+    padding-bottom: 0.9rem;
+    border-bottom: 1px solid rgba(213, 225, 242, 0.78);
+}
+
+.appDialogMeta {
+    display: grid;
+    gap: 0.22rem;
+}
+
+.appDialogTitle {
+    margin: 0;
+    color: #14233a;
+    font-family: "Sora", "Manrope", sans-serif;
+    font-size: 1.05rem;
+    font-weight: 700;
+    line-height: 1.28;
+}
+
+.appDisclosureHeading {
+    margin: 0;
+}
+
+.appDialogCloseBtn {
+    width: 2.5rem;
+    height: 2.5rem;
+    display: inline-grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid #d7e2f2;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.86);
+    color: #50657f;
+    cursor: pointer;
+    transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.appDialogCloseBtn svg {
+    width: 1rem;
+    height: 1rem;
+}
+
+.appDialogCloseBtn:hover,
+.appDialogCloseBtn:focus-visible {
+    transform: translateY(-1px);
+    border-color: #9ebde7;
+    background: #ffffff;
+    color: #204a85;
+    outline: none;
+}
+
+.uiTooltipTrigger {
+    width: 1.4rem;
+    height: 1.4rem;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 999px;
+    border: 1px solid #cbdced;
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.96) 0%, rgba(237, 244, 255, 0.94) 100%);
+    color: #3b5b81;
+    font-size: 0.72rem;
+    font-weight: 800;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 8px 18px rgba(24, 45, 79, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.uiTooltipTrigger:hover,
+.uiTooltipTrigger:focus-visible,
+.uiTooltipTrigger[data-hovered],
+.uiTooltipTrigger[data-focus-visible],
+.uiTooltipTrigger[data-open] {
+    border-color: #9ebde7;
+    background: #fff;
+    transform: translateY(-1px);
+    color: #1f4c88;
+    box-shadow: 0 12px 24px rgba(24, 72, 132, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.94);
+    outline: none;
+}
+
+.uiTooltipMark {
+    display: inline-grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    font-size: 0.82rem;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.uiTooltipContent {
+    z-index: 120;
+    width: min(250px, calc(100vw - 2.2rem));
+    border: 1px solid #d8e3f3;
+    border-radius: 14px;
+    background: linear-gradient(170deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 249, 255, 0.96) 100%);
+    box-shadow: 0 18px 38px rgba(16, 24, 40, 0.16);
+    color: #40556f;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    padding: 0.58rem 0.68rem;
+}
+
+.uiTooltipArrow {
+    display: block;
+}
+
+.uiTooltipArrow svg {
+    display: block;
+    fill: #ffffff;
+    stroke: #d8e3f3;
+    stroke-width: 1px;
+}
+
+.appField {
+    display: grid;
+    gap: 0.45rem;
+}
+
+.appFieldLabel {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #3f4b5f;
+}
+
+.appFieldDescription {
+    color: #5f7187;
+    font-size: 0.8rem;
+    line-height: 1.5;
+}
+
+.appInput[data-focus],
+.appInput[data-focus-visible],
+.appInput:focus {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 4px rgba(25, 118, 255, 0.14);
+    outline: none;
+}
+
+.appSwitch {
+    width: fit-content;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.58rem;
+    cursor: pointer;
+}
+
+.appSwitchTrack {
+    width: 46px;
+    height: 28px;
+    flex: 0 0 46px;
+    border-radius: 999px;
+    border: 1px solid #cad7ea;
+    background: #edf2fb;
+    position: relative;
+    transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.appSwitchTrack::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(16, 24, 40, 0.16);
+    transition: transform 160ms ease;
+}
+
+.appSwitch[data-selected] .appSwitchTrack {
+    border-color: #3d95ec;
+    background: linear-gradient(135deg, #23a9ff 0%, #1873fe 100%);
+}
+
+.appSwitch[data-selected] .appSwitchTrack::after {
+    transform: translateX(18px);
+    box-shadow: 0 2px 10px rgba(12, 74, 153, 0.28);
+}
+
+.appSwitchLabel {
+    color: #2a3f59;
+    font-size: 0.88rem;
+    font-weight: 700;
+}
+
+.appSwitch.is-disabled,
+.appSwitch[data-disabled] {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+.appCalendar {
+    width: 100%;
+}
+
+.appCalendar .rdp-root {
+    --rdp-accent-color: #1a6cff;
+    --rdp-accent-background-color: rgba(37, 108, 255, 0.12);
+    --rdp-day_button-border: 1px solid transparent;
+    --rdp-day_button-border-radius: 999px;
+    --rdp-selected-border: 1px solid #7ca9eb;
+    --rdp-months-gap: 0;
+    --rdp-nav-height: 3rem;
+    --rdp-nav_button-width: 2.55rem;
+    --rdp-nav_button-height: 2.55rem;
+    --app-calendar-day-size: 2.75rem;
+    width: 100%;
+    color: #3d526c;
+}
+
+.appCalendar .rdp-months {
+    width: 100%;
+    justify-content: center;
+}
+
+.appCalendar .rdp-month {
+    width: 100%;
+    max-width: none;
+}
+
+.appCalendar .rdp-month_grid {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0.2rem 0.28rem;
+    table-layout: fixed;
+}
+
+.appCalendar .rdp-month_caption {
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 0.62rem;
+    color: #1d3655;
+    font-family: "Sora", "Manrope", sans-serif;
+    font-size: 1.02rem;
+    font-weight: 700;
+}
+
+.appCalendar .rdp-button_previous,
+.appCalendar .rdp-button_next {
+    border: 1px solid #d6e2f2;
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(241, 247, 255, 0.96) 100%);
+    color: #315a93;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
+    transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.appCalendar .rdp-button_previous:hover,
+.appCalendar .rdp-button_previous:focus-visible,
+.appCalendar .rdp-button_next:hover,
+.appCalendar .rdp-button_next:focus-visible {
+    transform: translateY(-1px);
+    border-color: #9dbce8;
+    background: #ffffff;
+    outline: none;
+}
+
+.appCalendar .rdp-chevron {
+    fill: currentColor;
+}
+
+.appCalendarChevron {
+    width: 1.18rem;
+    height: 1.18rem;
+}
+
+.appCalendar .rdp-weekday {
+    color: #7a8ea8;
+    font-size: 0.69rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: center;
+    padding-bottom: 0.12rem;
+}
+
+.appCalendar .rdp-week {
+    border-collapse: separate;
+}
+
+.appCalendar .rdp-day {
+    position: relative;
+    width: auto;
+    height: auto;
+    padding: 0;
+    background: transparent;
+}
+
+.appCalendar .rdp-day.rdp-range_middle,
+.appCalendar .appCalendarDay--draftMiddle,
+.appCalendar .appCalendarDay--savedMiddle,
+.appCalendar .appCalendarDay--availableMiddle {
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: calc(100% + 0.4rem) 1rem;
+}
+
+.appCalendar .rdp-day.rdp-range_middle,
+.appCalendar .appCalendarDay--draftMiddle {
+    background-image: linear-gradient(90deg, rgba(196, 221, 255, 0.12) 0%, rgba(196, 221, 255, 0.84) 14%, rgba(196, 221, 255, 0.84) 86%, rgba(196, 221, 255, 0.12) 100%);
+}
+
+.appCalendar .appCalendarDay--savedMiddle,
+.appCalendar .appCalendarDay--availableMiddle {
+    background-image: linear-gradient(90deg, rgba(213, 245, 225, 0.12) 0%, rgba(213, 245, 225, 0.88) 14%, rgba(213, 245, 225, 0.88) 86%, rgba(213, 245, 225, 0.12) 100%);
+}
+
+.appCalendar .rdp-day.rdp-range_start,
+.appCalendar .appCalendarDay--draftStart,
+.appCalendar .appCalendarDay--savedStart,
+.appCalendar .appCalendarDay--availableStart,
+.appCalendar .rdp-day.rdp-range_end,
+.appCalendar .appCalendarDay--draftEnd,
+.appCalendar .appCalendarDay--savedEnd,
+.appCalendar .appCalendarDay--availableEnd {
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: calc(100% + 0.4rem) 1rem;
+}
+
+.appCalendar .rdp-day.rdp-range_start,
+.appCalendar .appCalendarDay--draftStart {
+    background-image: linear-gradient(90deg, transparent 0%, transparent 49%, rgba(196, 221, 255, 0.88) 49%, rgba(196, 221, 255, 0.88) 100%);
+}
+
+.appCalendar .rdp-day.rdp-range_end,
+.appCalendar .appCalendarDay--draftEnd {
+    background-image: linear-gradient(90deg, rgba(196, 221, 255, 0.88) 0%, rgba(196, 221, 255, 0.88) 51%, transparent 51%, transparent 100%);
+}
+
+.appCalendar .appCalendarDay--savedStart,
+.appCalendar .appCalendarDay--availableStart {
+    background-image: linear-gradient(90deg, transparent 0%, transparent 49%, rgba(213, 245, 225, 0.9) 49%, rgba(213, 245, 225, 0.9) 100%);
+}
+
+.appCalendar .appCalendarDay--savedEnd,
+.appCalendar .appCalendarDay--availableEnd {
+    background-image: linear-gradient(90deg, rgba(213, 245, 225, 0.9) 0%, rgba(213, 245, 225, 0.9) 51%, transparent 51%, transparent 100%);
+}
+
+.appCalendar .rdp-range_start,
+.appCalendar .rdp-range_middle,
+.appCalendar .rdp-range_end {
+    background: transparent;
+}
+
+.appCalendar .rdp-day_button {
+    position: relative;
+    z-index: 1;
+    width: var(--app-calendar-day-size);
+    height: var(--app-calendar-day-size);
+    min-width: var(--app-calendar-day-size);
+    min-height: var(--app-calendar-day-size);
+    margin-inline: auto;
+    padding: 0;
+    color: #284766;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 248, 255, 0.96) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+    font-size: 0.94rem;
+    font-weight: 800;
+    transition: border-color 150ms ease, background 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.appCalendar .rdp-day_button:hover:not(:disabled),
+.appCalendar .rdp-day_button:focus-visible:not(:disabled) {
+    transform: translateY(-1px);
+    border-color: #b7cdee;
+    background: #ffffff;
+    outline: none;
+}
+
+.appCalendar .rdp-day.rdp-selected .rdp-day_button,
+.appCalendar .rdp-day.rdp-range_start .rdp-day_button,
+.appCalendar .rdp-day.rdp-range_end .rdp-day_button {
+    border-color: #7ca9eb;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #d9e9ff 0%, #c4ddff 100%);
+    color: #144785;
+    box-shadow: 0 0 0 2px rgba(80, 143, 232, 0.18);
+}
+
+.appCalendar .rdp-day.rdp-range_middle .rdp-day_button {
+    border-radius: 999px;
+    background: linear-gradient(180deg, #edf5ff 0%, #dceaff 100%);
+    color: #225a97;
+}
+
+.appCalendar .rdp-day.rdp-today:not(.rdp-selected):not(.rdp-range_start):not(.rdp-range_end) .rdp-day_button {
+    border-color: #d8e4f4;
+    background: #f2f8ff;
+    color: #1a6cff;
+}
+
+.appCalendar .rdp-day.rdp-disabled {
+    opacity: 1;
+}
+
+.appCalendar .rdp-day.rdp-disabled .rdp-day_button {
+    background: linear-gradient(180deg, #f1f4f8 0%, #e7ecf2 100%);
+    border-color: #dde4ed;
+    color: #8a98ab;
+    box-shadow: none;
+    cursor: not-allowed;
+}
+
+.appCalendar .rdp-day.rdp-outside .rdp-day_button {
+    opacity: 0.42;
+}
+
+.appCalendar .appCalendarDay--availableSingle:not(.rdp-selected):not(.rdp-range_start):not(.rdp-range_end):not(.rdp-range_middle) .rdp-day_button,
+.appCalendar .appCalendarDay--availableStart:not(.rdp-selected):not(.rdp-range_start):not(.rdp-range_end):not(.rdp-range_middle) .rdp-day_button,
+.appCalendar .appCalendarDay--availableEnd:not(.rdp-selected):not(.rdp-range_start):not(.rdp-range_end):not(.rdp-range_middle) .rdp-day_button {
+    border-color: #a8d8bc;
+    background: linear-gradient(180deg, #ecfbf3 0%, #ddf5e7 100%);
+    color: #146244;
+}
+
+.appCalendar .appCalendarDay--availableMiddle:not(.rdp-selected):not(.rdp-range_start):not(.rdp-range_end):not(.rdp-range_middle) .rdp-day_button {
+    border-color: #bfe3cc;
+    background: linear-gradient(180deg, #f2fcf6 0%, #e8f8ef 100%);
+    color: #237654;
+}
+
+.appCalendar .appCalendarDay--savedSingle:not(.rdp-selected):not(.rdp-range_start):not(.rdp-range_end):not(.rdp-range_middle) .rdp-day_button,
+.appCalendar .appCalendarDay--savedStart:not(.rdp-selected):not(.rdp-range_start):not(.rdp-range_end):not(.rdp-range_middle) .rdp-day_button,
+.appCalendar .appCalendarDay--savedEnd:not(.rdp-selected):not(.rdp-range_start):not(.rdp-range_end):not(.rdp-range_middle) .rdp-day_button {
+    border-color: #9fd5b8;
+    background: linear-gradient(180deg, #e7f9ef 0%, #d5f0e1 100%);
+    color: #166d49;
+}
+
+.appCalendar .appCalendarDay--savedMiddle:not(.rdp-selected):not(.rdp-range_start):not(.rdp-range_end):not(.rdp-range_middle) .rdp-day_button {
+    border-color: #b9dfc9;
+    background: linear-gradient(180deg, #effbf4 0%, #e2f5ea 100%);
+    color: #247251;
+}
+
+.appCalendar .appCalendarDay--draftSingle .rdp-day_button,
+.appCalendar .appCalendarDay--draftStart .rdp-day_button,
+.appCalendar .appCalendarDay--draftEnd .rdp-day_button,
+.appCalendar .appCalendarDay--selectedSingle .rdp-day_button {
+    border-color: #7ca9eb;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #d9e9ff 0%, #c4ddff 100%);
+    color: #144785;
+    box-shadow: 0 0 0 2px rgba(80, 143, 232, 0.18);
+}
+
+.appCalendar .appCalendarDay--draftMiddle .rdp-day_button {
+    border-color: #b6d1f4;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #edf5ff 0%, #dceaff 100%);
+    color: #225a97;
+}
+
+.appCalendar--home .rdp-root {
+    --rdp-nav_button-width: 2.55rem;
+    --rdp-nav_button-height: 2.55rem;
+}
+
+.appCalendar--home .rdp-month_grid {
+    border-spacing: 0.4rem 0.42rem;
+}
+
+.appCalendar--home .rdp-day_button {
+    width: 2.55rem;
+    height: 2.55rem;
+    min-width: 2.55rem;
+    min-height: 2.55rem;
+    font-size: 0.92rem;
+}
+
+.appCalendar--home .rdp-month {
+    max-width: 28rem;
+    margin-inline: auto;
+}
+
+.appCalendar--slots .rdp-root {
+    --rdp-nav-height: 3rem;
+}
+
+.appCalendar--slots .rdp-month_grid {
+    border-spacing: 0.24rem 0.7rem;
+}
+
+.appCalendar--slots .rdp-day {
+    height: 4.3rem;
+    vertical-align: top;
+}
+
+.appCalendar--slots .rdp-day_button {
+    width: 3rem;
+    height: 3rem;
+    min-width: 3rem;
+    min-height: 3rem;
+    font-size: 0.98rem;
+}
+
+.appCalendar--slots .rdp-day_button::after {
+    content: attr(data-slot-time);
+    position: absolute;
+    top: calc(100% + 0.18rem);
+    left: 50%;
+    width: 4.5rem;
+    transform: translateX(-50%);
+    color: #6d7f96;
+    font-size: 0.58rem;
+    font-weight: 700;
+    line-height: 1.15;
+    text-align: center;
+    white-space: normal;
+}
+
+.appCalendar--slots .rdp-day_button[data-slot-time=""]::after {
+    content: "";
+}
+
+.appCalendar--slots .rdp-selected .rdp-day_button::after,
+.appCalendar--slots .rdp-range_start .rdp-day_button::after,
+.appCalendar--slots .rdp-range_middle .rdp-day_button::after,
+.appCalendar--slots .rdp-range_end .rdp-day_button::after,
+.appCalendar--slots .appCalendarDay--selectedSingle .rdp-day_button::after {
+    color: #335a8e;
+}
+
+.appCalendar--availability .rdp-root {
+    --rdp-nav_button-width: 2.35rem;
+    --rdp-nav_button-height: 2.35rem;
+}
+
+.appCalendar--availability .rdp-month_grid {
+    border-spacing: 0.18rem 0.24rem;
+}
+
+.appCalendar--availability .rdp-day_button {
+    width: 2.75rem;
+    height: 2.75rem;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    font-size: 0.9rem;
+}
+
+@media (max-width: 720px) {
+    .appDialogOverlay {
+        padding: 0.8rem;
+        align-items: end;
+    }
+
+    .appDialogModal,
+    .appDialogModal--compact,
+    .appDialogModal--wide {
+        width: min(100%, 720px);
+    }
+
+    .appDialogSurface {
+        border-radius: 24px;
+        padding: 0.95rem;
+        gap: 0.9rem;
+    }
+
+    .appDialogHead {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 0.65rem;
+        padding-bottom: 0.78rem;
+    }
+
+    .appCalendar--home .rdp-root,
+    .appCalendar--availability .rdp-root {
+        --rdp-nav_button-width: 2.15rem;
+        --rdp-nav_button-height: 2.15rem;
+    }
+
+    .appCalendar--slots .rdp-root {
+        --rdp-nav_button-width: 2.15rem;
+        --rdp-nav_button-height: 2.15rem;
+    }
+
+    .appCalendar .rdp-month_grid {
+        border-spacing: 0.14rem 0.18rem;
+    }
+
+    .appCalendar--home .rdp-day_button,
+    .appCalendar--availability .rdp-day_button {
+        width: 2.35rem;
+        height: 2.35rem;
+        min-width: 2.35rem;
+        min-height: 2.35rem;
+        font-size: 0.84rem;
+    }
+
+    .appCalendar--slots .rdp-day_button {
+        width: 2.55rem;
+        height: 2.55rem;
+        min-width: 2.55rem;
+        min-height: 2.55rem;
+        font-size: 0.88rem;
+    }
+}
+
+@keyframes appDialogIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px) scale(0.99);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}

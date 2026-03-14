@@ -1,7 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import {
+    CalendarIcon,
+    ChevronDownIcon,
+    Crosshair2Icon,
+    DashboardIcon,
+    MagnifyingGlassIcon,
+    MixerHorizontalIcon,
+    QuestionMarkCircledIcon,
+    ValueIcon,
+} from "@radix-ui/react-icons";
 import Lottie from "lottie-react";
 import { Link } from "react-router-dom";
 import SpotsMap from "../components/SpotsMap";
+import { AppDisclosure } from "../components/ui/AppDisclosure";
+import { AppMultiToggleGroup, AppRadioCards } from "../components/ui/AppChoiceControls";
+import { InfoTooltip } from "../components/ui/InfoTooltip";
 import { apiGet } from "../lib/api";
 import type { ParkingSpot } from "../types";
 import { capitalizeLabel, toFiniteNumber } from "./pagesShared";
@@ -20,9 +34,9 @@ import {
 
 type SortMode = "distance" | "price_low" | "price_high" | "newest";
 type ModeFilter = Record<ParkingSpot["mode"], boolean>;
-type FilterSection = "when" | "price" | "type" | "sort";
 
 const LONDON = { lat: 51.5074, lng: -0.1278 };
+const LOCATION_SEARCH_LABEL = "Using your location";
 const HOME_HERO_BACKGROUND_URL = new URL("../assets/loading_hero.json", import.meta.url).href;
 const HOME_HERO_CITY_URL = new URL("../assets/city.json", import.meta.url).href;
 const DEFAULT_MODE_FILTER: ModeFilter = { free: true, rent: true, auction: true };
@@ -33,13 +47,6 @@ const HOME_DURATION_OPTIONS = [
     { value: 240, label: "4 hours" },
     { value: 1440, label: "All day" },
 ];
-const PRICE_PRESETS = [
-    { key: "free", label: "Free only", min: "0", max: "0" },
-    { key: "under2", label: "Under GBP 2", min: "", max: "2" },
-    { key: "under5", label: "Under GBP 5", min: "", max: "5" },
-    { key: "under10", label: "Under GBP 10", min: "", max: "10" },
-    { key: "none", label: "No limit", min: "", max: "" },
-] as const;
 const SORT_OPTIONS: Array<{ value: SortMode; label: string }> = [
     { value: "distance", label: "Closest first" },
     { value: "price_low", label: "Price: low to high" },
@@ -81,63 +88,50 @@ function formatSortSummary(sort: SortMode) {
     return SORT_OPTIONS.find((option) => option.value === sort)?.label ?? "Closest first";
 }
 
-function currentPricePreset(search: HomeSearchState) {
-    return PRICE_PRESETS.find((preset) => preset.min === search.minPrice.trim() && preset.max === search.maxPrice.trim())?.key ?? null;
+function normalizeSearchQuery(query: string, userLoc: { lat: number; lng: number } | null) {
+    const trimmed = query.trim();
+    if (userLoc && trimmed.toLowerCase() === LOCATION_SEARCH_LABEL.toLowerCase()) {
+        return "";
+    }
+    return trimmed;
 }
 
-function FilterGlyph({ kind }: { kind: "search" | "location" | FilterSection }) {
-    if (kind === "search") {
-        return (
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-                <circle cx="9" cy="9" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                <path d="M13.2 13.2L17 17" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
-            </svg>
-        );
-    }
-
-    if (kind === "location") {
-        return (
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-                <circle cx="10" cy="10" r="5" fill="none" stroke="currentColor" strokeWidth="1.7" />
-                <circle cx="10" cy="10" r="1.6" fill="currentColor" />
-                <path d="M10 2.4v2.1M10 15.5v2.1M2.4 10h2.1M15.5 10h2.1" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
-            </svg>
-        );
-    }
-
-    if (kind === "when") {
-        return (
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-                <rect x="3.2" y="4.2" width="13.6" height="12.4" rx="2.4" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M6.1 2.8v2.5M13.9 2.8v2.5M3.2 7.2h13.6" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
-            </svg>
-        );
-    }
-
-    if (kind === "price") {
-        return (
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-                <circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M9.4 6.3h2.3a1.8 1.8 0 0 1 0 3.6H8.8a1.8 1.8 0 0 0 0 3.6H12M10 5.1v9.8" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
-            </svg>
-        );
-    }
-
-    if (kind === "type") {
-        return (
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-                <rect x="3.2" y="3.2" width="5.4" height="5.4" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-                <rect x="11.4" y="3.2" width="5.4" height="5.4" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-                <rect x="3.2" y="11.4" width="5.4" height="5.4" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-                <rect x="11.4" y="11.4" width="5.4" height="5.4" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-            </svg>
-        );
-    }
-
+function HomeFilterSection({
+    icon,
+    label,
+    value,
+    isSet,
+    children,
+    defaultOpen = false,
+}: {
+    icon: ReactNode;
+    label: string;
+    value: string;
+    isSet: boolean;
+    children: ReactNode;
+    defaultOpen?: boolean;
+}) {
     return (
-        <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M3.5 5h13M6.5 10h7M8.8 15h2.4" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
-        </svg>
+        <AppDisclosure
+            defaultExpanded={defaultOpen}
+            className="homeFilterSection"
+            triggerClassName="homeFilterSectionHead"
+            panelClassName="homeFilterSectionBody"
+            trigger={(open) => (
+                <>
+                    <span className="homeFilterSectionLead">
+                        <span className="homeFilterIconTile">{icon}</span>
+                        <span className="homeFilterSectionCopy">
+                            <span className={`homeFilterSectionLabel${isSet ? " is-set" : ""}`}>{label}</span>
+                            <span className={`homeFilterSectionValue${isSet ? " is-set" : ""}`}>{value}</span>
+                        </span>
+                    </span>
+                    <ChevronDownIcon className={`homeFilterChevron${open ? " is-open" : ""}`} aria-hidden="true" />
+                </>
+            )}
+        >
+            <div className="homeFilterSectionInner">{children}</div>
+        </AppDisclosure>
     );
 }
 
@@ -197,7 +191,6 @@ export default function HomePage() {
     const [locStatus, setLocStatus] = useState<string | null>(null);
     const [searchDialogOpen, setSearchDialogOpen] = useState(false);
     const [searchFeedback, setSearchFeedback] = useState<string | null>(null);
-    const [openSection, setOpenSection] = useState<FilterSection | null>(null);
 
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -260,7 +253,7 @@ export default function HomePage() {
     }, []);
 
     const filtered = useMemo(() => {
-        const q = activeSearch.query.trim().toLowerCase();
+        const q = normalizeSearchQuery(activeSearch.query, userLoc).toLowerCase();
         const minPrice = activeSearch.minPrice.trim() ? toFiniteNumber(activeSearch.minPrice, 0) : 0;
         const maxPrice = activeSearch.maxPrice.trim() ? toFiniteNumber(activeSearch.maxPrice, Number.POSITIVE_INFINITY) : Number.POSITIVE_INFINITY;
         const searchWindow = buildSearchWindow(activeSearch);
@@ -276,7 +269,7 @@ export default function HomePage() {
             if (searchWindow && !isSpotSlotAllowed(spot, searchWindow.start, searchWindow.end)) return false;
             return true;
         });
-    }, [spots, activeSearch, activeModeFilter]);
+    }, [spots, activeSearch, activeModeFilter, userLoc]);
 
     const anchor = useMemo(() => {
         if (userLoc) return userLoc;
@@ -331,13 +324,6 @@ export default function HomePage() {
         : locStatus === "Location is not supported on this browser." ? "Not supported"
         : "Enable location";
 
-    function toggleMode(mode: ParkingSpot["mode"]) {
-        setDraftModeFilter((current) => ({ ...current, [mode]: !current[mode] }));
-    }
-
-    function toggleSection(section: FilterSection) {
-        setOpenSection((current) => (current === section ? null : section));
-    }
 
     function resetFilters() {
         const initialSearch = createInitialSearch();
@@ -348,14 +334,13 @@ export default function HomePage() {
         setDraftModeFilter(DEFAULT_MODE_FILTER);
         setActiveModeFilter(DEFAULT_MODE_FILTER);
         setSearchFeedback(null);
-        setOpenSection(null);
     }
 
     function submitSearch(event?: React.FormEvent) {
         event?.preventDefault();
         const next = {
             ...draftSearch,
-            query: draftSearch.query.trim(),
+            query: normalizeSearchQuery(draftSearch.query, userLoc),
             minPrice: draftSearch.minPrice.trim(),
             maxPrice: draftSearch.maxPrice.trim(),
             startTime: normalizeTimeInput(draftSearch.startTime),
@@ -395,7 +380,7 @@ export default function HomePage() {
         navigator.geolocation.getCurrentPosition(
             (position) => {
                 setUserLoc({ lat: position.coords.latitude, lng: position.coords.longitude });
-                setDraftSearch((current) => ({ ...current, query: "Using your location" }));
+                setDraftSearch((current) => ({ ...current, query: LOCATION_SEARCH_LABEL }));
                 setLocStatus("Location enabled.");
             },
             () => {
@@ -427,7 +412,7 @@ export default function HomePage() {
     const priceSummary = formatPriceSummary(draftSearch);
     const typeSummary = formatTypeSummary(draftModeFilter);
     const sortSummary = formatSortSummary(draftSort);
-    const selectedPricePreset = currentPricePreset(draftSearch);
+    const selectedModes = (["rent", "free", "auction"] as const).filter((mode) => draftModeFilter[mode]);
 
     return (
         <div className="home">
@@ -469,7 +454,7 @@ export default function HomePage() {
                         <div className="homeFilterTopRow">
                             <label className="homeFilterSearchShell" aria-label="Search by location">
                                 <span className="homeFilterSearchIcon">
-                                    <FilterGlyph kind="search" />
+                                    <MagnifyingGlassIcon />
                                 </span>
                                 <input
                                     className="homeFilterSearchInput"
@@ -487,196 +472,109 @@ export default function HomePage() {
                                     disabled={isLocPending}
                                     aria-label={locationButtonLabel}
                                 >
-                                    <FilterGlyph kind="location" />
-                                    <span className="homeFilterLocateBadge">?</span>
+                                    <Crosshair2Icon />
                                 </button>
-                                <div className="homeFilterTooltip" role="status">{locationTooltip}</div>
+                                <InfoTooltip
+                                    label={locationButtonLabel}
+                                    text={locationTooltip}
+                                    triggerClassName={`homeFilterLocateBadge${isLocEnabled ? " is-enabled" : ""}`}
+                                    contentClassName="homeFilterTooltipBubble"
+                                    icon={<QuestionMarkCircledIcon />}
+                                />
                             </div>
                         </div>
 
-                        <div className="homeFilterSection">
+                        <HomeFilterSection icon={<CalendarIcon />} label="When" value={whenSummary} isSet={!!draftSearch.date}>
                             <button
                                 type="button"
-                                className={`homeFilterSectionHead${openSection === "when" ? " is-open" : ""}`}
-                                onClick={() => toggleSection("when")}
-                                aria-expanded={openSection === "when"}
+                                className="homeFilterPickerButton"
+                                onClick={() => setSearchDialogOpen(true)}
                             >
-                                <span className="homeFilterSectionLead">
-                                    <span className="homeFilterIconTile">
-                                        <FilterGlyph kind="when" />
-                                    </span>
-                                    <span className="homeFilterSectionCopy">
-                                        <span className={`homeFilterSectionLabel${draftSearch.date ? " is-set" : ""}`}>When</span>
-                                        <span className={`homeFilterSectionValue${draftSearch.date ? " is-set" : ""}`}>{whenSummary}</span>
-                                    </span>
-                                </span>
-                                <span className={`homeFilterChevron${openSection === "when" ? " is-open" : ""}`}>{"▾"}</span>
+                                <span className="homeFilterFieldEyebrow">Date and time</span>
+                              
                             </button>
-                            <div className={`homeFilterSectionBody${openSection === "when" ? " is-open" : ""}`}>
-                                <div className="homeFilterSectionInner">
-                                    <button
-                                        type="button"
-                                        className="homeFilterPickerButton"
-                                        onClick={() => setSearchDialogOpen(true)}
-                                    >
-                                        <span className="homeFilterFieldEyebrow">Date and time</span>
-                                        <strong>{draftSearch.date || "Choose date and time"}</strong>
-                                    </button>
-                                </div>
+                        </HomeFilterSection>
+
+                        <HomeFilterSection
+                            icon={<ValueIcon />}
+                            label="Price"
+                            value={priceSummary}
+                            isSet={priceSummary !== "Any price"}
+                        >
+                            <div className="homeFilterFieldGrid">
+                                <label className="homeFilterField">
+                                    <span className="homeFilterFieldEyebrow">Min / hr</span>
+                                    <input
+                                        className="homeFilterInput"
+                                        type="number"
+                                        min="0"
+                                        step="0.5"
+                                        value={draftSearch.minPrice}
+                                        onChange={(event) =>
+                                            setDraftSearch((current) => ({ ...current, minPrice: event.target.value }))
+                                        }
+                                        placeholder="0"
+                                    />
+                                </label>
+
+                                <label className="homeFilterField">
+                                    <span className="homeFilterFieldEyebrow">Max / hr</span>
+                                    <input
+                                        className="homeFilterInput"
+                                        type="number"
+                                        min="0"
+                                        step="0.5"
+                                        value={draftSearch.maxPrice}
+                                        onChange={(event) =>
+                                            setDraftSearch((current) => ({ ...current, maxPrice: event.target.value }))
+                                        }
+                                        placeholder="No limit"
+                                    />
+                                </label>
                             </div>
-                        </div>
+                        </HomeFilterSection>
 
-                        <div className="homeFilterSection">
-                            <button
-                                type="button"
-                                className={`homeFilterSectionHead${openSection === "price" ? " is-open" : ""}`}
-                                onClick={() => toggleSection("price")}
-                                aria-expanded={openSection === "price"}
-                            >
-                                <span className="homeFilterSectionLead">
-                                    <span className="homeFilterIconTile">
-                                        <FilterGlyph kind="price" />
-                                    </span>
-                                    <span className="homeFilterSectionCopy">
-                                        <span className={`homeFilterSectionLabel${priceSummary !== "Any price" ? " is-set" : ""}`}>Price</span>
-                                        <span className={`homeFilterSectionValue${priceSummary !== "Any price" ? " is-set" : ""}`}>{priceSummary}</span>
-                                    </span>
-                                </span>
-                                <span className={`homeFilterChevron${openSection === "price" ? " is-open" : ""}`}>{"▾"}</span>
-                            </button>
-                            <div className={`homeFilterSectionBody${openSection === "price" ? " is-open" : ""}`}>
-                                <div className="homeFilterSectionInner">
-                                    <div className="homeFilterPillRow" role="group" aria-label="Price presets">
-                                        {PRICE_PRESETS.map((preset) => (
-                                            <button
-                                                key={preset.key}
-                                                type="button"
-                                                className={`homeFilterPill${selectedPricePreset === preset.key ? " is-active" : ""}`}
-                                                onClick={() =>
-                                                    setDraftSearch((current) => ({
-                                                        ...current,
-                                                        minPrice: preset.min,
-                                                        maxPrice: preset.max,
-                                                    }))
-                                                }
-                                            >
-                                                {preset.label}
-                                            </button>
-                                        ))}
-                                    </div>
+                        <HomeFilterSection icon={<DashboardIcon />} label="Type" value={typeSummary} isSet={typeSummary !== "All types"}>
+                            <AppMultiToggleGroup
+                                ariaLabel="Filter by listing type"
+                                className="homeFilterToggleRow"
+                                itemClassName="homeFilterToggle"
+                                values={selectedModes}
+                                onChange={(values) =>
+                                    setDraftModeFilter({
+                                        rent: values.includes("rent"),
+                                        free: values.includes("free"),
+                                        auction: values.includes("auction"),
+                                    })
+                                }
+                                options={(["rent", "free", "auction"] as const).map((mode) => ({
+                                    id: mode,
+                                    content: capitalizeLabel(mode),
+                                }))}
+                            />
+                        </HomeFilterSection>
 
-                                    <div className="homeFilterFieldGrid">
-                                        <label className="homeFilterField">
-                                            <span className="homeFilterFieldEyebrow">Min / hr</span>
-                                            <input
-                                                className="homeFilterInput"
-                                                type="number"
-                                                min="0"
-                                                step="0.5"
-                                                value={draftSearch.minPrice}
-                                                onChange={(event) =>
-                                                    setDraftSearch((current) => ({ ...current, minPrice: event.target.value }))
-                                                }
-                                                placeholder="0"
-                                            />
-                                        </label>
-
-                                        <label className="homeFilterField">
-                                            <span className="homeFilterFieldEyebrow">Max / hr</span>
-                                            <input
-                                                className="homeFilterInput"
-                                                type="number"
-                                                min="0"
-                                                step="0.5"
-                                                value={draftSearch.maxPrice}
-                                                onChange={(event) =>
-                                                    setDraftSearch((current) => ({ ...current, maxPrice: event.target.value }))
-                                                }
-                                                placeholder="No limit"
-                                            />
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="homeFilterSection">
-                            <button
-                                type="button"
-                                className={`homeFilterSectionHead${openSection === "type" ? " is-open" : ""}`}
-                                onClick={() => toggleSection("type")}
-                                aria-expanded={openSection === "type"}
-                            >
-                                <span className="homeFilterSectionLead">
-                                    <span className="homeFilterIconTile">
-                                        <FilterGlyph kind="type" />
-                                    </span>
-                                    <span className="homeFilterSectionCopy">
-                                        <span className="homeFilterSectionLabel is-set">Type</span>
-                                        <span className="homeFilterSectionValue is-set">{typeSummary}</span>
-                                    </span>
-                                </span>
-                                <span className={`homeFilterChevron${openSection === "type" ? " is-open" : ""}`}>{"▾"}</span>
-                            </button>
-                            <div className={`homeFilterSectionBody${openSection === "type" ? " is-open" : ""}`}>
-                                <div className="homeFilterSectionInner">
-                                    <div className="homeFilterToggleRow" role="group" aria-label="Filter by listing type">
-                                        {(["rent", "free", "auction"] as const).map((mode) => (
-                                            <button
-                                                key={mode}
-                                                type="button"
-                                                className={`homeFilterToggle${draftModeFilter[mode] ? " is-active" : ""}`}
-                                                onClick={() => toggleMode(mode)}
-                                            >
-                                                {capitalizeLabel(mode)}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="homeFilterSection">
-                            <button
-                                type="button"
-                                className={`homeFilterSectionHead${openSection === "sort" ? " is-open" : ""}`}
-                                onClick={() => toggleSection("sort")}
-                                aria-expanded={openSection === "sort"}
-                            >
-                                <span className="homeFilterSectionLead">
-                                    <span className="homeFilterIconTile">
-                                        <FilterGlyph kind="sort" />
-                                    </span>
-                                    <span className="homeFilterSectionCopy">
-                                        <span className="homeFilterSectionLabel is-set">Sort</span>
-                                        <span className="homeFilterSectionValue is-set">{sortSummary}</span>
-                                    </span>
-                                </span>
-                                <span className={`homeFilterChevron${openSection === "sort" ? " is-open" : ""}`}>{"▾"}</span>
-                            </button>
-                            <div className={`homeFilterSectionBody${openSection === "sort" ? " is-open" : ""}`}>
-                                <div className="homeFilterSectionInner">
-                                    <div className="homeFilterSortList" role="radiogroup" aria-label="Sort listings">
-                                        {SORT_OPTIONS.map((option) => (
-                                            <button
-                                                key={option.value}
-                                                type="button"
-                                                className={`homeFilterSortOption${draftSort === option.value ? " is-active" : ""}`}
-                                                onClick={() => setDraftSort(option.value)}
-                                                role="radio"
-                                                aria-checked={draftSort === option.value}
-                                            >
-                                                <span>{option.label}</span>
-                                                <span className="homeFilterRadio" aria-hidden="true">
-                                                    <span className="homeFilterRadioDot" />
-                                                </span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
+                        <HomeFilterSection icon={<MixerHorizontalIcon />} label="Sort" value={sortSummary} isSet>
+                            <AppRadioCards
+                                ariaLabel="Sort listings"
+                                className="homeFilterSortList"
+                                itemClassName="homeFilterSortOption"
+                                value={draftSort}
+                                onChange={setDraftSort}
+                                orientation="vertical"
+                                options={SORT_OPTIONS.map((option) => ({
+                                    id: option.value,
+                                    content: (
+                                        <>
+                                            <span>{option.label}</span>
+                                            <span className="homeFilterRadio" aria-hidden="true">
+                                                <span className="homeFilterRadioDot" />
+                                            </span>
+                                        </>
+                                    ),
+                                }))}
+                            />
+                        </HomeFilterSection>
                         {searchFeedback && <div className="homeFilterNotice">{searchFeedback}</div>}
 
                         <div className="homeFilterFooter">

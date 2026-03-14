@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import "./index.css";
 import "leaflet/dist/leaflet.css";
+import "react-day-picker/style.css";
 import App from "./App";
 import { AuthProvider } from "./lib/auth";
 const HomePage = lazy(() => import("./pages/HomePage"));

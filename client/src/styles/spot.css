@@ -94,164 +94,85 @@
 
 .slotCal {
     display: grid;
-    gap: 0.45rem;
+    gap: 0.7rem;
 }
 
-.slotCalHead {
-    display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 0.35rem;
-    color: #617088;
-    font-size: 0.76rem;
-    font-weight: 700;
-    text-align: center;
-}
-
-.slotCalGrid {
-    display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 0.38rem;
-}
-
-.slotCalBlank {
-    min-height: 64px;
-}
-
-.slotCalDay {
-    min-height: 64px;
-    border: 1px solid rgba(255, 255, 255, 0.74);
-    border-radius: 14px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(241, 247, 255, 0.9) 100%);
-    position: relative;
-    overflow: hidden;
-    display: grid;
-    align-content: space-between;
-    justify-items: center;
-    gap: 0.18rem;
-    padding: 0.38rem 0.3rem;
-    transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
-}
-
-.slotCalDay:disabled {
-    opacity: 0.65;
-    cursor: not-allowed;
-}
-
-.slotCalDay--available {
-    border-color: #8fcdad;
-    background: linear-gradient(180deg, #e5f8ee 0%, #c9ebd9 100%);
-}
-
-.slotCalDay--available .slotCalNum {
-    color: #0f5f45;
-}
-
-.slotCalDay--available .slotCalMonth {
-    color: #2f775f;
-}
-
-.slotCalDay--off {
-    border-color: #d7dee8;
-    background: linear-gradient(180deg, #f0f3f7 0%, #e8edf3 100%);
-}
-
-.slotCalDay--off .slotCalNum,
-.slotCalDay--off .slotCalMonth {
-    color: #76869c;
-}
-
-.slotCalDay--selected {
-    border-color: #7ca9eb;
-    background: linear-gradient(180deg, #d9e9ff 0%, #c4ddff 100%);
-    box-shadow: 0 0 0 2px rgba(80, 143, 232, 0.22);
-}
-
-.slotCalDay--range {
-    border-color: #7ca9eb;
-    background: linear-gradient(180deg, #d9e9ff 0%, #c4ddff 100%);
-}
-
-.slotCalDay--selected .slotCalNum,
-.slotCalDay--selected .slotCalMonth,
-.slotCalDay--range .slotCalNum,
-.slotCalDay--range .slotCalMonth {
-    color: #144785;
-}
-
-.slotCalNum {
-    position: relative;
-    z-index: 2;
-    font-weight: 800;
-    line-height: 1;
-}
-
-.slotCalHint {
-    position: relative;
-    z-index: 2;
-    max-width: 100%;
-    font-size: 0.55rem;
-    font-weight: 700;
-    line-height: 1.15;
-    color: #2c755e;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.slotCalDay--off .slotCalHint {
-    color: #8b98ab;
-}
-
-.slotCalDay--selected .slotCalHint,
-.slotCalDay--range .slotCalHint {
-    color: #225a97;
-}
-
-.slotCalMonth {
-    position: relative;
-    z-index: 2;
-    font-size: 0.68rem;
-    color: #6a7a91;
+.slotCal.is-disabled {
+    opacity: 0.68;
+    pointer-events: none;
 }
 
 .slotRangeSummary {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.slotRangeSummaryHead {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    justify-content: space-between;
+    gap: 0.65rem;
     flex-wrap: wrap;
 }
 
-.slotRangeSummary .badge {
+.slotRangeSummaryHead .badge {
     white-space: nowrap;
 }
 
-.slotDialogBackdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 45;
+.slotRangeGrid {
     display: grid;
-    place-items: center;
-    padding: 1rem;
-    background: rgba(11, 22, 42, 0.34);
-    backdrop-filter: blur(4px);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
 }
 
-.slotDialog {
-    width: min(460px, 100%);
+.slotRangeCard {
     display: grid;
-    gap: 0.68rem;
-    border-radius: 22px;
-    background: var(--surface-grad);
+    gap: 0.16rem;
+    padding: 0.82rem 0.9rem;
+    border: 1px solid #d6e2f2;
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(240, 246, 255, 0.95) 100%);
+}
+
+.slotRangeCardLabel {
+    color: #6a7e98;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.slotRangeCard strong {
+    color: #18385f;
+    font-size: 1rem;
+    line-height: 1.2;
+}
+
+.slotRangeCard span:last-child {
+    color: #566c89;
+    font-size: 0.84rem;
+}
+
+.slotRangeFoot,
+.slotRangeEmpty {
+    color: #5a6f8b;
+    font-size: 0.84rem;
+    line-height: 1.5;
+}
+
+.slotRangeFoot {
+    padding-left: 0.1rem;
 }
 
 .slotDialogPreview {
-    border-radius: 14px;
-    border: 1px solid #d6e2f4;
-    background: linear-gradient(135deg, #f9fbff 0%, #edf5ff 100%);
-    color: #284872;
+    border-radius: 16px;
+    border: 1px solid #d8e3f2;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(239, 246, 255, 0.96) 100%);
+    color: #2b4a72;
     font-size: 0.84rem;
     font-weight: 700;
-    padding: 0.56rem 0.68rem;
+    line-height: 1.5;
+    padding: 0.72rem 0.8rem;
 }
 
 .spotInfoValue {
@@ -347,5 +268,11 @@
 .ui-reveal.is-visible {
     opacity: 1;
     transform: none;
+}
+
+@media (max-width: 720px) {
+    .slotRangeGrid {
+        grid-template-columns: 1fr;
+    }
 }
 

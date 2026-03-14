@@ -2,13 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import SpotsMap from "../components/SpotsMap";
+import { AppRadioCards } from "../components/ui/AppChoiceControls";
 import { apiGet, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { Booking as SharedBooking, ParkingSpot as SharedParkingSpot } from "../types";
 import {
+    calcAuctionMoneyTotal,
+    calcAuctionPointsTotal,
     calcUnitsForMinutes,
     capitalizeLabel,
+    formatDateDisplay,
     formatDateTimeCompact,
+    formatGbp,
+    formatTimeDisplay,
     parseYmd,
     toFiniteNumber,
     toLocalDateInput,
@@ -40,49 +46,6 @@ type ParkingSpot = Omit<SharedParkingSpot, "price_gbp" | "availability_json"> & 
 type SpotBooking = Pick<SharedBooking, "id" | "start_time" | "end_time" | "status" | "pay_method" | "total_price_gbp">;
 type AuctionBid = { id: string; amount_gbp?: number; amount_points?: number; pay_method?: PayMethod; status: string; start_time?: string; end_time?: string; bidder_name?: string; bidder_email?: string };
 type AuctionInfo = { pending_bids?: AuctionBid[]; sold_out?: boolean };
-
-function PayMethodToggle({
-    value,
-    onChange,
-    canUseMoney = true,
-    canUsePoints,
-    moneyLabel = "Money",
-    pointsLabel = "Points",
-    disabled = false,
-}: {
-    value: PayMethod;
-    onChange: (next: PayMethod) => void;
-    canUseMoney?: boolean;
-    canUsePoints: boolean;
-    moneyLabel?: string;
-    pointsLabel?: string;
-    disabled?: boolean;
-}) {
-    return (
-        <div className="payToggle">
-            {canUseMoney && (
-                <button
-                    type="button"
-                    className={`payToggleBtn ${value === "money" ? "active" : ""}`}
-                    onClick={() => onChange("money")}
-                    disabled={disabled}
-                >
-                    {moneyLabel}
-                </button>
-            )}
-            {canUsePoints && (
-                <button
-                    type="button"
-                    className={`payToggleBtn ${value === "points" ? "active" : ""}`}
-                    onClick={() => onChange("points")}
-                    disabled={disabled}
-                >
-                    {pointsLabel}
-                </button>
-            )}
-        </div>
-    );
-}
 
 export default function SpotDetailsPage() {
     const { id } = useParams<{ id: string }>();
@@ -274,15 +237,11 @@ export default function SpotDetailsPage() {
     const auctionMinPerUnit = toFiniteNumber(spot?.auction_start_price_gbp);
     const bidUnits = useMemo(() => calcUnitsForMinutes(selectedMinutes, listingUnit, "auction"), [selectedMinutes, listingUnit]);
     const bidTotalMoney = useMemo(() => {
-        const perUnit = Number(bidMoneyPerHour);
-        if (!Number.isFinite(perUnit) || perUnit <= 0) return 0;
-        return roundMoney(perUnit * bidUnits);
+        return calcAuctionMoneyTotal(bidMoneyPerHour, bidUnits);
     }, [bidMoneyPerHour, bidUnits]);
 
     const bidTotalPoints = useMemo(() => {
-        const perUnit = Number(bidPointsPerHour);
-        if (!Number.isFinite(perUnit) || perUnit <= 0) return 0;
-        return Math.ceil(perUnit * bidUnits);
+        return calcAuctionPointsTotal(bidPointsPerHour, bidUnits);
     }, [bidPointsPerHour, bidUnits]);
 
     const userPoints = toFiniteNumber(user?.points_balance);
@@ -446,8 +405,8 @@ export default function SpotDetailsPage() {
         spot.mode === "free"
             ? "Free"
             : spot.mode === "auction"
-                ? `Bid from GBP ${auctionMinPerUnit.toFixed(2)} / ${listingUnit}`
-                : `GBP ${listingPrice.toFixed(2)} / ${listingUnit}`;
+                ? `Bid from ${formatGbp(auctionMinPerUnit)} / ${listingUnit}`
+                : `${formatGbp(listingPrice)} / ${listingUnit}`;
 
     const pendingBids = auctionInfo?.pending_bids ?? [];
 
@@ -484,7 +443,6 @@ export default function SpotDetailsPage() {
 
                         {isOwner && (
                             <div className="spotOwnerTools">
-                                <div className="spotOwnerFlag">Owner view: this is your own listing.</div>
                                 <div className="rowInline spotOwnerActions">
                                     <Link to={`/create-listing?edit=${spot.id}`} className="btn btn-primary">
                                         Edit listing
@@ -539,12 +497,34 @@ export default function SpotDetailsPage() {
                         </div>
 
                         <div className="slotRangeSummary">
-                            <span className="tiny muted">Selected slot</span>
-                            <span className="badge">
-                                {hasSelectedSlot
-                                    ? `${formatDateTimeCompact(startAt.toISOString())} -> ${formatDateTimeCompact(endAt.toISOString())}`
-                                    : "No slot selected yet"}
-                            </span>
+                            <div className="slotRangeSummaryHead">
+                                <span className="tiny muted">Selected slot</span>
+                                <span className="badge">{hasSelectedSlot ? "Ready to book" : "No slot selected yet"}</span>
+                            </div>
+
+                            {hasSelectedSlot ? (
+                                <>
+                                    <div className="slotRangeGrid">
+                                        <div className="slotRangeCard">
+                                            <span className="slotRangeCardLabel">Start</span>
+                                            <strong>{formatTimeDisplay(startAt)}</strong>
+                                            <span>{formatDateDisplay(startAt)}</span>
+                                        </div>
+
+                                        <div className="slotRangeCard">
+                                            <span className="slotRangeCardLabel">End</span>
+                                            <strong>{formatTimeDisplay(endAt)}</strong>
+                                            <span>{formatDateDisplay(endAt)}</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="slotRangeFoot">
+                                        {formatDateTimeCompact(startAt.toISOString())} {" -> "} {formatDateTimeCompact(endAt.toISOString())}
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="slotRangeEmpty">Choose your dates, then set the exact start and end times.</div>
+                            )}
                         </div>
 
                         <div className={`slotStatus ${slotStatus.ok ? "slotStatus--ok" : "slotStatus--bad"}`}>
@@ -564,12 +544,19 @@ export default function SpotDetailsPage() {
                             )}
                             {isOwner && <div className="spotAlert">You are the owner of this listing.</div>}
 
-                            <PayMethodToggle
+                            <AppRadioCards
+                                ariaLabel="Bid payment method"
+                                className="payToggle"
+                                itemClassName="payToggleBtn"
+                                activeClassName="active"
+                                orientation="horizontal"
                                 value={bidPayMethod}
                                 onChange={setBidPayMethod}
-                                canUseMoney={canUseMoneyBids}
-                                canUsePoints={canUsePoints}
-                                disabled={auctionClosed || bidBusy}
+                                isDisabled={auctionClosed || bidBusy}
+                                options={[
+                                    ...(canUseMoneyBids ? [{ id: "money" as const, content: "Money" }] : []),
+                                    ...(canUsePoints ? [{ id: "points" as const, content: "Points" }] : []),
+                                ]}
                             />
 
                             {bidPayMethod === "money" ? (
@@ -585,7 +572,7 @@ export default function SpotDetailsPage() {
                                         placeholder="e.g. 8"
                                         disabled={auctionClosed || bidBusy}
                                     />
-                                    <div className="tiny muted">Estimated total: {bidTotalMoney > 0 ? `GBP ${bidTotalMoney.toFixed(2)}` : "-"}</div>
+                                    <div className="tiny muted">Estimated total: {bidTotalMoney > 0 ? formatGbp(bidTotalMoney) : "-"}</div>
                                 </label>
                             ) : (
                                 <label>
@@ -633,16 +620,22 @@ export default function SpotDetailsPage() {
 
                             <div className="spotSimpleInlineMeta">
                                 <span className="tiny muted">Estimated total</span>
-                                <span className="badge">{spot.mode === "free" ? "Free" : `GBP ${estimatedTotal.toFixed(2)}`}</span>
+                                <span className="badge">{spot.mode === "free" ? "Free" : formatGbp(estimatedTotal)}</span>
                             </div>
 
-                            <PayMethodToggle
+                            <AppRadioCards
+                                ariaLabel="Booking payment method"
+                                className="payToggle"
+                                itemClassName="payToggleBtn"
+                                activeClassName="active"
+                                orientation="horizontal"
                                 value={payMethod}
                                 onChange={setPayMethod}
-                                canUseMoney={canUseMoneyBooking}
-                                canUsePoints={canUsePoints}
-                                moneyLabel="Card"
-                                disabled={busy}
+                                isDisabled={busy}
+                                options={[
+                                    ...(canUseMoneyBooking ? [{ id: "money" as const, content: "Card" }] : []),
+                                    ...(canUsePoints ? [{ id: "points" as const, content: "Points" }] : []),
+                                ]}
                             />
 
                             <div className="rowInline" style={{ marginTop: 4 }}>

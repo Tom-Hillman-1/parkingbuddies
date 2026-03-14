@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import Lottie from "lottie-react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import SpotsMap from "../components/SpotsMap";
+import { AppRadioCards, AppSwitchField } from "../components/ui/AppChoiceControls";
+import { AppButton, AppField, AppInput, AppTextarea } from "../components/ui/AppForm";
 import { apiGet, apiPatch, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import successAnimation from "../assets/Success.json";
@@ -34,7 +36,6 @@ import {
     normalizeWindow,
     parseCoordinates,
     PRICE_UNIT_CHOICES,
-    SelectionTile,
     SheetActions,
     SPACE_CHOICES,
     STEP_COUNT,
@@ -55,30 +56,6 @@ import type {
     WizardSheetName,
     WizardStep,
 } from "./createListingSupport";
-
-function PricingUnitOptionCard({
-    id,
-    label,
-    selected,
-    onSelect,
-}: {
-    id: PriceUnit;
-    label: string;
-    selected: boolean;
-    onSelect: (next: PriceUnit) => void;
-}) {
-    return (
-        <button
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            className={`wizardOptionCard${selected ? " is-active" : ""}`}
-            onClick={() => onSelect(id)}
-        >
-            <span className="wizardOptionTitle">{label}</span>
-        </button>
-    );
-}
 
 type RawAvailabilityForEdit = {
     type?: unknown;
@@ -167,7 +144,6 @@ function buildEditSnapshot(listing: ParkingSpot, ownerContact: OwnerContactForEd
         imageUrl: asString(listing.image_url),
     };
 }
-
 export default function CreateListingPage() {
     const { token, user } = useAuth();
     const [searchParams] = useSearchParams();
@@ -194,20 +170,18 @@ export default function CreateListingPage() {
     const [allowMoney, setAllowMoney] = useState(false);
     const [allowPoints, setAllowPoints] = useState(false);
     const [pointsCost, setPointsCost] = useState(DEFAULT_POINTS_COST);
+    const [pointsCostTouched, setPointsCostTouched] = useState(false);
 
     const [dateFrom, setDateFrom] = useState("");
     const [dateTo, setDateTo] = useState("");
     const [availabilityWindows, setAvailabilityWindows] = useState<AvailabilityWindow[]>([]);
-    const [calendarMonth, setCalendarMonth] = useState(() => {
-        const now = new Date();
-        return new Date(now.getFullYear(), now.getMonth(), 1);
-    });
     const [draftSlotStart, setDraftSlotStart] = useState(DEFAULT_SLOT_START);
     const [draftSlotEnd, setDraftSlotEnd] = useState(DEFAULT_SLOT_END);
 
     const [addressText, setAddressText] = useState("");
     const [addressSearchBusy, setAddressSearchBusy] = useState(false);
     const [addressSearchMessage, setAddressSearchMessage] = useState("");
+    const [addressSuggestions, setAddressSuggestions] = useState<GeocodeSuggestion[]>([]);
     const [lat, setLat] = useState(String(DEFAULT_CENTER[0]));
     const [lng, setLng] = useState(String(DEFAULT_CENTER[1]));
 
@@ -277,6 +251,13 @@ export default function CreateListingPage() {
         setAllowMoney(hasMoney);
         setAllowPoints(snapshot.allowPoints);
         setPointsCost(snapshot.pointsCost);
+        if (snapshot.allowPoints) {
+            const moneyValue = snapshot.mode === "auction" ? Number(snapshot.auctionStartPrice) : Number(snapshot.price);
+            const recommendedPoints = hasMoney ? derivePointsCostFromGbp(moneyValue) : 0;
+            setPointsCostTouched(!recommendedPoints || snapshot.pointsCost !== String(recommendedPoints));
+        } else {
+            setPointsCostTouched(false);
+        }
         setDateFrom("");
         setDateTo("");
         setAvailabilityWindows(snapshot.availabilityWindows);
@@ -284,11 +265,6 @@ export default function CreateListingPage() {
         setLat(snapshot.lat);
         setLng(snapshot.lng);
         setImageUrl(snapshot.imageUrl);
-        const seedDate = snapshot.availabilityWindows[0]?.from;
-        const fromDate = seedDate ? new Date(`${seedDate}T00:00:00`) : null;
-        if (fromDate && !Number.isNaN(fromDate.getTime())) {
-            setCalendarMonth(new Date(fromDate.getFullYear(), fromDate.getMonth(), 1));
-        }
     }
 
     useEffect(() => {
@@ -319,6 +295,7 @@ export default function CreateListingPage() {
             setAllowMoney(false);
             setAllowPoints(false);
             setPrice("0");
+            setPointsCostTouched(false);
             return;
         }
         if (mode === "auction") {
@@ -353,20 +330,35 @@ export default function CreateListingPage() {
         if (nextAddress) setAddressText(nextAddress);
     }
 
+    function chooseAddressSuggestion(suggestion: GeocodeSuggestion) {
+        const nextLat = Number(suggestion.lat);
+        const nextLng = Number(suggestion.lon);
+        if (!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) {
+            setAddressSearchMessage("Could not use that location. Please try another result.");
+            return;
+        }
+
+        applyPickedLocation(nextLat, nextLng, suggestion.display_name);
+        setAddressSuggestions([]);
+        setAddressSearchMessage("Location selected. You can still fine-tune the pin on the map.");
+    }
+
     async function onAddressSearchClick() {
         const query = addressText.trim();
         if (query.length < 3) {
+            setAddressSuggestions([]);
             setAddressSearchMessage("Enter at least 3 characters to search.");
             return;
         }
 
         setAddressSearchBusy(true);
         setAddressSearchMessage("");
+        setAddressSuggestions([]);
 
         try {
             const params = new URLSearchParams({
                 format: "jsonv2",
-                limit: "6",
+                limit: "3",
                 addressdetails: "1",
                 countrycodes: "gb",
                 viewbox: LONDON_VIEWBOX,
@@ -376,24 +368,19 @@ export default function CreateListingPage() {
                 `/parking-spots/geocode/search?${params.toString()}`,
                 token || undefined
             );
-            const matches = Array.isArray(lookup.suggestions) ? lookup.suggestions : [];
-            const first = matches[0];
+            const matches = (Array.isArray(lookup.suggestions) ? lookup.suggestions : [])
+                .filter((suggestion) => Number.isFinite(Number(suggestion.lat)) && Number.isFinite(Number(suggestion.lon)))
+                .slice(0, 3);
 
-            if (!first) {
+            if (!matches.length) {
                 setAddressSearchMessage("No close matches found. Try adding a postcode or city.");
                 return;
             }
 
-            const nextLat = Number(first.lat);
-            const nextLng = Number(first.lon);
-            if (!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) {
-                setAddressSearchMessage("Could not parse location coordinates.");
-                return;
-            }
-
-            applyPickedLocation(nextLat, nextLng, first.display_name);
-            setAddressSearchMessage(`${matches.length} match${matches.length === 1 ? "" : "es"} found. Showing the closest result.`);
+            setAddressSuggestions(matches);
+            setAddressSearchMessage(`Choose the best match below, then adjust the pin on the map if needed.`);
         } catch (error: unknown) {
+            setAddressSuggestions([]);
             setAddressSearchMessage(readErrorMessage(error, "Address search is unavailable right now."));
         } finally {
             setAddressSearchBusy(false);
@@ -402,6 +389,7 @@ export default function CreateListingPage() {
 
     function onMapPick(nextLat: number, nextLng: number) {
         applyPickedLocation(nextLat, nextLng);
+        setAddressSuggestions([]);
         setAddressSearchMessage("Pin updated from map.");
     }
 
@@ -454,10 +442,6 @@ export default function CreateListingPage() {
         }
         setDateTo(ymd);
         openCustomSheet(dateFrom, ymd);
-    }
-
-    function shiftCalendarMonth(offset: number) {
-        setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
     }
 
     function removeAvailabilityWindow(windowId: string) {
@@ -568,17 +552,19 @@ export default function CreateListingPage() {
     const priceNum = Number(price || 0);
     const pointsNum = Number(pointsCost || 0);
     const auctionStartNum = Number(auctionStartPrice || 0);
-    const derivedPointsNum =
+    const recommendedPointsNum =
         allowPoints && allowMoney
             ? derivePointsCostFromGbp(mode === "auction" ? auctionStartNum : priceNum)
             : 0;
-    const effectivePointsNum = allowPoints ? (allowMoney ? derivedPointsNum : pointsNum) : 0;
+    const effectivePointsNum = allowPoints ? pointsNum : 0;
+    const derivedPointsNum = pointsCostTouched && effectivePointsNum > 0 ? effectivePointsNum : recommendedPointsNum;
 
     useEffect(() => {
-        if (!allowPoints || !allowMoney || derivedPointsNum <= 0) return;
-        const nextValue = String(derivedPointsNum);
+        if (!allowPoints || !allowMoney || recommendedPointsNum <= 0) return;
+        if (pointsCostTouched && Number(pointsCost) >= MIN_POINTS_COST) return;
+        const nextValue = String(recommendedPointsNum);
         if (pointsCost !== nextValue) setPointsCost(nextValue);
-    }, [allowMoney, allowPoints, derivedPointsNum, pointsCost]);
+    }, [allowMoney, allowPoints, pointsCost, pointsCostTouched, recommendedPointsNum]);
 
     const capacityIssue = setupCapacity < 1 ? "Spaces must be at least 1." : "";
     const titleIssue = normalizedTitle.length < 3 ? "Add a listing name with at least 3 characters." : "";
@@ -593,7 +579,7 @@ export default function CreateListingPage() {
                     ? "Rent listings need a valid price above 0."
                     : allowMoney && mode === "auction" && (!Number.isFinite(auctionStartNum) || auctionStartNum < MIN_AUCTION_START_PRICE_GBP)
                             ? "Auction start price must be at least GBP 0.10."
-                            : allowPoints && !allowMoney && (!Number.isFinite(pointsNum) || pointsNum < MIN_POINTS_COST)
+                            : allowPoints && (!Number.isFinite(pointsNum) || pointsNum < MIN_POINTS_COST)
                                 ? "Points must be at least 1."
                                 : "";
 
@@ -691,8 +677,8 @@ export default function CreateListingPage() {
             ? "Free listing"
             : allowMoney
                 ? mode === "rent"
-                    ? `GBP ${Number(price || 0).toFixed(2)} / ${priceUnit}${allowPoints && derivedPointsNum > 0 ? ` · ${derivedPointsNum} pts / ${priceUnit}` : ""}`
-                    : `Bid from GBP ${Number(auctionStartPrice || 0).toFixed(2)} / ${priceUnit}${allowPoints && derivedPointsNum > 0 ? ` · ${derivedPointsNum} pts / ${priceUnit}` : ""}`
+                    ? `GBP ${Number(price || 0).toFixed(2)} / ${priceUnit}${allowPoints && derivedPointsNum > 0 ? ` | ${derivedPointsNum} pts / ${priceUnit}` : ""}`
+                    : `Bid from GBP ${Number(auctionStartPrice || 0).toFixed(2)} / ${priceUnit}${allowPoints && derivedPointsNum > 0 ? ` | ${derivedPointsNum} pts / ${priceUnit}` : ""}`
                 : allowPoints
                     ? `${effectivePointsNum} pts / ${priceUnit}`
                     : "No payment method";
@@ -736,21 +722,17 @@ export default function CreateListingPage() {
             case 2:
             return (
                 <div className="stack">
-                    <label>
-                        <span>Title*</span>
-                        <input
-                            className="input"
+                    <AppField label="Title*">
+                        <AppInput
                             value={title}
                             onChange={(event) => setTitle(event.target.value)}
                             placeholder="Example: Secure driveway near station"
                         />
                         {showBasicsStepValidation && titleIssue && <div className="createInlineError">{titleIssue}</div>}
-                    </label>
+                    </AppField>
 
-                    <label>
-                        <span>Description</span>
-                        <textarea
-                            className="input"
+                    <AppField label="Description">
+                        <AppTextarea
                             rows={5}
                             value={description}
                             onChange={(event) => setDescription(event.target.value)}
@@ -759,67 +741,53 @@ export default function CreateListingPage() {
                         {descriptionIssue && description.length > 0 && (
                             <div className="createInlineError">Use at least 5 characters.</div>
                         )}
-                    </label>
+                    </AppField>
 
                     <div className="wizardLabelRow wizardLabelRow--small">
                         <span className="wizardPricingHead">Parking type</span>
                     </div>
-                    <div className="wizardOptionGrid" role="radiogroup" aria-label="Parking type">
-                        <button
-                            type="button"
-                            role="radio"
-                            aria-checked={parkingType === "private"}
-                            className={`wizardOptionCard${parkingType === "private" ? " is-active" : ""}`}
-                            onClick={() => setParkingType("private")}
-                        >
-                            <span className="wizardOptionTitle">Private</span>
-                        </button>
-                        <button
-                            type="button"
-                            role="radio"
-                            aria-checked={parkingType === "public"}
-                            className={`wizardOptionCard${parkingType === "public" ? " is-active" : ""}`}
-                            onClick={() => setParkingType("public")}
-                        >
-                            <span className="wizardOptionTitle">Public / shared</span>
-                        </button>
-                    </div>
+                    <AppRadioCards
+                        ariaLabel="Parking type"
+                        className="wizardOptionGrid"
+                        itemClassName="wizardOptionCard"
+                        orientation="horizontal"
+                        value={parkingType}
+                        onChange={(next) => setParkingType(next)}
+                        options={[
+                            { id: "private", content: <span className="wizardOptionTitle">Private</span> },
+                            { id: "public", content: <span className="wizardOptionTitle">Public / shared</span> },
+                        ]}
+                    />
 
                     <div className="createFieldHint">
                         The contact details below will only be shared with drivers after booking is complete.
                     </div>
 
-                    <label>
-                        <span>Email</span>
-                        <input
-                            className="input"
+                    <AppField label="Email">
+                        <AppInput
                             type="email"
                             value={ownerContactEmail}
                             onChange={(event) => setOwnerContactEmail(event.target.value)}
                             placeholder="owner@email.com"
                         />
-                    </label>
+                    </AppField>
 
-                    <label>
-                        <span>Phone</span>
-                        <input
-                            className="input"
+                    <AppField label="Phone">
+                        <AppInput
                             value={ownerContactPhone}
                             onChange={(event) => setOwnerContactPhone(event.target.value)}
                             placeholder="07123 456789"
                         />
-                    </label>
+                    </AppField>
 
-                    <label>
-                        <span>Additional instructions and information</span>
-                        <textarea
-                            className="input"
+                    <AppField label="Additional instructions and information">
+                        <AppTextarea
                             rows={3}
                             value={ownerContactInfo}
                             onChange={(event) => setOwnerContactInfo(event.target.value)}
                             placeholder="Gate code, where to park, or arrival notes."
                         />
-                    </label>
+                    </AppField>
                 </div>
             );
             case 3:
@@ -838,90 +806,89 @@ export default function CreateListingPage() {
                             <div className="wizardLabelRow wizardLabelRow--small">
                                 <span className="wizardPricingHead">Charging method</span>
                             </div>
-                            <div className="wizardOptionGrid" role="radiogroup" aria-label="Price unit">
-                                {PRICE_UNIT_CHOICES.map((unit) => (
-                                    <PricingUnitOptionCard
-                                        key={unit.id}
-                                        id={unit.id}
-                                        label={unit.label}
-                                        selected={priceUnit === unit.id}
-                                        onSelect={setPriceUnit}
-                                    />
-                                ))}
-                            </div>
+                            <AppRadioCards
+                                ariaLabel="Price unit"
+                                className="wizardOptionGrid"
+                                itemClassName="wizardOptionCard"
+                                orientation="horizontal"
+                                value={priceUnit}
+                                onChange={setPriceUnit}
+                                options={PRICE_UNIT_CHOICES.map((unit) => ({
+                                    id: unit.id,
+                                    content: <span className="wizardOptionTitle">{unit.label}</span>,
+                                }))}
+                            />
                         </div>
                     )}
 
                     <div className="wizardPointsRow wizardPointsRow--points">
-                        <label className={`createSwitch${mode === "free" ? " is-disabled" : ""}`}>
-                            <input
-                                type="checkbox"
-                                checked={allowPoints}
-                                onChange={(event) => setAllowPoints(event.target.checked)}
-                                disabled={mode === "free"}
-                            />
-                            <span className="createSwitchTrack" aria-hidden="true" />
-                            <span className="createSwitchLabel">Allow points payment</span>
-                        </label>
+                        <AppSwitchField
+                            label="Allow points payment"
+                            isSelected={allowPoints}
+                            onChange={(next) => {
+                                setAllowPoints(next);
+                                if (!next) {
+                                    setPointsCostTouched(false);
+                                    return;
+                                }
+                                if (!allowMoney || recommendedPointsNum <= 0 || pointsCostTouched) return;
+                                setPointsCost(String(recommendedPointsNum));
+                            }}
+                            isDisabled={mode === "free"}
+                        />
 
                         {allowPoints && mode !== "free" && (
-                            <label className="wizardPointsInput">
-                                <span>Points per {priceUnit}</span>
-                                {allowMoney ? (
-                                    <>
-                                        <div className="input" style={{ display: "flex", alignItems: "center" }}>
-                                            {derivedPointsNum > 0 ? `${derivedPointsNum} pts` : "Add a money price first"}
-                                        </div>
-                                        <div className="tiny muted">Auto-matched using 10 pts = GBP 1.</div>
-                                    </>
-                                ) : (
-                                    <>
-                                        <input
-                                            className="input"
-                                            type="number"
-                                            min="1"
-                                            step="1"
-                                            value={pointsCost}
-                                            onChange={(event) => setPointsCost(event.target.value)}
-                                        />
-                                        <div className="tiny muted">Set a custom points rate when this listing is points-only.</div>
-                                    </>
-                                )}
-                            </label>
+                            <AppField
+                                className="wizardPointsInput"
+                                label={`Points per ${priceUnit}`}
+                                description={
+                                    allowMoney
+                                        ? recommendedPointsNum > 0
+                                            ? `The recommended price is ${recommendedPointsNum} points. You can change this if you want.`
+                                            : "Add a money price first to see the recommended points rate."
+                                        : "Set a custom points rate for this listing."
+                                }
+                            >
+                                <AppInput
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    value={pointsCost}
+                                    onChange={(event) => {
+                                        setPointsCost(event.target.value);
+                                        setPointsCostTouched(true);
+                                    }}
+                                />
+                            </AppField>
                         )}
                     </div>
 
                     {mode !== "free" && (
                         <div className="wizardPointsRow wizardPointsRow--money">
-                            <label className="createSwitch">
-                                <input
-                                    type="checkbox"
-                                    checked={allowMoney}
-                                    onChange={(event) => setAllowMoney(event.target.checked)}
-                                />
-                                <span className="createSwitchTrack" aria-hidden="true" />
-                                <span className="createSwitchLabel">Allow money payment</span>
-                            </label>
+                            <AppSwitchField
+                                label="Allow money payment"
+                                isSelected={allowMoney}
+                                onChange={setAllowMoney}
+                            />
                             {allowMoney && (
-                                <label className="wizardPointsInput wizardPointsInput--money">
-                                    <span>{mode === "auction" ? `Starting bid per ${priceUnit} (\u00A3)` : `Price per ${priceUnit} (\u00A3)`}</span>
-                                    <div className="wizardMoneyInput">
-                                        <input
-                                            className="input wizardMoneyInputField"
-                                            type="number"
-                                            min={mode === "auction" ? "0.1" : "0"}
-                                            step={mode === "auction" ? "0.1" : "0.5"}
-                                            value={mode === "auction" ? auctionStartPrice : price}
-                                            onChange={(event) => {
-                                                if (mode === "auction") {
-                                                    setAuctionStartPrice(event.target.value);
-                                                    return;
-                                                }
-                                                setPrice(event.target.value);
-                                            }}
-                                        />
-                                    </div>
-                                </label>
+                                <AppField
+                                    className="wizardPointsInput"
+                                    label={mode === "auction" ? `Starting bid per ${priceUnit} (\u00A3)` : `Price per ${priceUnit} (\u00A3)`}
+                                >
+                                    <AppInput
+                                        type="number"
+                                        min={mode === "auction" ? "0.1" : "0"}
+                                        step={mode === "auction" ? "0.1" : "0.5"}
+                                        value={mode === "auction" ? auctionStartPrice : price}
+                                        onChange={(event) => {
+                                            if (mode === "auction") {
+                                                setAuctionStartPrice(event.target.value);
+                                                return;
+                                            }
+                                            setPrice(event.target.value);
+                                        }}
+                                    />
+                                </AppField>
                             )}
                         </div>
                     )}
@@ -934,13 +901,11 @@ export default function CreateListingPage() {
             case 4:
             return (
                 <AvailabilityCalendarSection
-                    month={calendarMonth}
                     dateFrom={dateFrom}
                     dateTo={dateTo}
                     windows={availabilityWindows}
                     issue={availabilityIssue}
                     onSelectDate={selectAvailabilityDate}
-                    onShiftMonth={shiftCalendarMonth}
                     onRemoveWindow={removeAvailabilityWindow}
                 />
             );
@@ -948,14 +913,18 @@ export default function CreateListingPage() {
             return (
                 <>
                     <div className="addressLookupWrap">
-                        <label>
-                            <span>Address</span>
+                        <AppField
+                            label="Address"
+                            description="Search to set a pin, then click map to adjust precisely."
+                        >
                             <div className="addressInputRow">
-                                <input
-                                    className="input"
+                                <AppInput
                                     value={addressText}
                                     onChange={(event) => {
                                         setAddressText(event.target.value);
+                                        setLat("");
+                                        setLng("");
+                                        setAddressSuggestions([]);
                                         setAddressSearchMessage("");
                                     }}
                                     onKeyDown={(event) => {
@@ -966,19 +935,38 @@ export default function CreateListingPage() {
                                     placeholder="Start typing an address (for example 295 Upper Street)"
                                     autoComplete="off"
                                 />
-                                <button
+                                <AppButton
                                     type="button"
-                                    className="btn btn-primary addressSearchBtn"
+                                    variant="primary"
+                                    className="addressSearchBtn"
                                     disabled={addressSearchBusy}
                                     onClick={() => void onAddressSearchClick()}
                                 >
                                     {addressSearchBusy ? "Searching..." : "Search"}
-                                </button>
+                                </AppButton>
                             </div>
-                            <div className="createFieldHint">Search to set a pin, then click map to adjust precisely.</div>
-                        </label>
+                        </AppField>
 
                         {addressSearchMessage && <div className="addressLookupStatus">{addressSearchMessage}</div>}
+
+                        {addressSuggestions.length > 0 && (
+                            <div className="addressSuggestionList" role="list" aria-label="Address suggestions">
+                                {addressSuggestions.map((suggestion, index) => (
+                                    <button
+                                        key={`${suggestion.lat}-${suggestion.lon}-${index}`}
+                                        type="button"
+                                        className="addressSuggestionItem"
+                                        onClick={() => chooseAddressSuggestion(suggestion)}
+                                    >
+                                        <span className="addressSuggestionRank">{index + 1}</span>
+                                        <span className="addressSuggestionCopy">
+                                            <strong>{index === 0 ? "Closest match" : `Option ${index + 1}`}</strong>
+                                            <span>{suggestion.display_name}</span>
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
                     </div>
 
                     <div className="mapWrap mapWrap--pin wizardMap">
@@ -1007,13 +995,13 @@ export default function CreateListingPage() {
                     />
 
                     <div className="wizardImageActions">
-                        <button type="button" className="btn btn-primary" onClick={openImagePicker}>
+                        <AppButton type="button" variant="primary" onClick={openImagePicker}>
                             {imageUrl.trim() ? "Change image" : "Choose image"}
-                        </button>
+                        </AppButton>
                         {imageUrl.trim() && (
-                            <button type="button" className="btn" onClick={clearImage}>
+                            <AppButton type="button" onClick={clearImage}>
                                 Remove image
-                            </button>
+                            </AppButton>
                         )}
                     </div>
 
@@ -1059,34 +1047,50 @@ export default function CreateListingPage() {
                                     Pick your model first, then complete the setup in guided steps. Creating for {user?.name ?? "you"}.
                                 </p>
 
-                                <div className="wizardTileGrid">
-                                    {MODEL_CHOICES.map((choice) => (
-                                        <SelectionTile
-                                            key={choice.mode}
-                                            title={choice.title}
-                                            copy={choice.copy}
-                                            help={choice.help}
-                                            tone={choice.tone}
-                                            active={mode === choice.mode}
-                                            onClick={() => setMode(choice.mode)}
-                                            spacesLabel={`${setupCapacity || 1} ${setupCapacity === 1 ? "space" : "spaces"}`}
-                                            onEditSpaces={openSpacesSheet}
-                                        />
-                                    ))}
+                                <AppRadioCards
+                                    ariaLabel="Listing model"
+                                    className="wizardTileGrid"
+                                    itemClassName="wizardTile"
+                                    orientation="horizontal"
+                                    value={mode}
+                                    onChange={setMode}
+                                    options={MODEL_CHOICES.map((choice) => ({
+                                        id: choice.mode,
+                                        className: `wizardTile--${choice.tone}`,
+                                        content: (
+                                            <>
+                                                <div className="wizardTileHead">
+                                                    <Tooltip label={`${choice.title} mode help`} text={choice.help} />
+                                                </div>
+                                                <span className="wizardTileTitle">{choice.title}</span>
+                                                <span className="wizardTileCopy">{choice.copy}</span>
+                                            </>
+                                        ),
+                                    }))}
+                                />
+
+                                <div className="wizardInlineRow wizardInlineRow--intro">
+                                    <AppButton type="button" className="wizardTileSpotsBtn" onClick={openSpacesSheet}>
+                                        Edit spaces
+                                    </AppButton>
+                                    <div className="wizardInlineValue">
+                                        {setupCapacity || 1} {(setupCapacity || 1) === 1 ? "space" : "spaces"}
+                                    </div>
+
                                 </div>
 
                                 <div className="wizardActions wizardActions--intro">
                                     <Link className="btn" to={isEdit && editId ? `/spots/${editId}` : "/dashboard"}>
                                         Cancel
                                     </Link>
-                                    <button
+                                    <AppButton
                                         type="button"
-                                        className="btn btn-primary"
+                                        variant="primary"
                                         onClick={goNext}
                                         disabled={!stepReady[1] || saving}
                                     >
                                         Next
-                                    </button>
+                                    </AppButton>
                                 </div>
                                 {error && <div className="createInlineError">{error}</div>}
                             </div>
@@ -1114,18 +1118,18 @@ export default function CreateListingPage() {
                                     <div className="wizardCardBody">{renderStepBody(flowStep)}</div>
                                     <footer className="wizardCardFoot">
                                         <div className="wizardActions">
-                                            <button type="button" className="btn" onClick={goBack} disabled={activeStep <= 1 || saving}>
+                                            <AppButton type="button" onClick={goBack} disabled={activeStep <= 1 || saving}>
                                                 Back
-                                            </button>
+                                            </AppButton>
                                             <div className="wizardActionHint">{actionHint}</div>
-                                            <button
+                                            <AppButton
                                                 type="button"
-                                                className="btn btn-primary"
+                                                variant="primary"
                                                 onClick={goNext}
                                                 disabled={(activeStep !== 2 && !currentStepReady) || saving}
                                             >
                                                 {activeStep === 6 ? "Publish" : "Next"}
-                                            </button>
+                                            </AppButton>
                                         </div>
                                     </footer>
                                 </div>
@@ -1141,31 +1145,29 @@ export default function CreateListingPage() {
                 subtitle="Select how many spaces drivers can book at once."
                 onClose={closeSheet}
             >
-                <div className="createSheetSpaceGrid">
-                    {SPACE_CHOICES.map((choice) => (
-                        <button
-                            key={choice.id}
-                            type="button"
-                            className={`createSheetSpaceBtn${pendingSpacesChoice === choice.id ? " is-active" : ""}`}
-                            onClick={() => setPendingSpacesChoice(choice.id)}
-                        >
-                            {choice.label}
-                        </button>
-                    ))}
-                </div>
+                <AppRadioCards
+                    ariaLabel="Choose spaces"
+                    className="createSheetSpaceGrid"
+                    itemClassName="createSheetSpaceBtn"
+                    orientation="horizontal"
+                    value={pendingSpacesChoice}
+                    onChange={(next) => setPendingSpacesChoice(next)}
+                    options={SPACE_CHOICES.map((choice) => ({
+                        id: choice.id,
+                        content: choice.label,
+                    }))}
+                />
 
                 {pendingSpacesChoice === "3plus" && (
-                    <label>
-                        <span>Custom spaces (3+)</span>
-                        <input
-                            className="input"
+                    <AppField label="Custom spaces (3+)">
+                        <AppInput
                             type="number"
                             min={3}
                             step={1}
                             value={pendingSpacesCustom}
                             onChange={(event) => setPendingSpacesCustom(event.target.value)}
                         />
-                    </label>
+                    </AppField>
                 )}
 
                 <SheetActions
@@ -1191,28 +1193,22 @@ export default function CreateListingPage() {
                     </div>
 
                     <div className="slotSheetFields">
-                        <label className="slotSheetField">
-                            <span>Start time</span>
-                            <input
-                                className="input"
+                        <AppField className="slotSheetField" label="Start time" description={<div className="slotSheetFieldNote">{draftStartLabel}</div>}>
+                            <AppInput
                                 type="time"
                                 step={900}
                                 value={draftSlotStart}
                                 onChange={(event) => setDraftSlotStart(event.target.value)}
                             />
-                            <div className="slotSheetFieldNote">{draftStartLabel}</div>
-                        </label>
-                        <label className="slotSheetField">
-                            <span>End time</span>
-                            <input
-                                className="input"
+                        </AppField>
+                        <AppField className="slotSheetField" label="End time" description={<div className="slotSheetFieldNote">{draftEndLabel}</div>}>
+                            <AppInput
                                 type="time"
                                 step={900}
                                 value={draftSlotEnd}
                                 onChange={(event) => setDraftSlotEnd(event.target.value)}
                             />
-                            <div className="slotSheetFieldNote">{draftEndLabel}</div>
-                        </label>
+                        </AppField>
                     </div>
                     {slotSheetError && <div className="createInlineError">{slotSheetError}</div>}
                 </div>

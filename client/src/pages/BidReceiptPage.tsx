@@ -3,7 +3,13 @@ import { Link, useParams } from "react-router-dom";
 import { apiGet } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ReceiptCard, ReceiptRow } from "../components/ReceiptCard";
-import { calcUnitsForMinutes, formatDateTimeCompact, type PriceUnit } from "./pagesShared";
+import {
+    calcAuctionPointsTotal,
+    calcAuctionUnitsForRange,
+    formatDateTimeCompact,
+    formatGbp,
+    type PriceUnit,
+} from "./pagesShared";
 
 type BidReceipt = {
     id: string;
@@ -21,8 +27,6 @@ type BidReceipt = {
     spot_title?: string;
     spot_address?: string;
 };
-
-const POUND = String.fromCharCode(163);
 
 export default function BidReceiptPage() {
     const { bidId } = useParams();
@@ -86,13 +90,8 @@ export default function BidReceiptPage() {
     }, [bid]);
 
     const totalPoints = useMemo(() => {
-        if (!bid?.start_time || !bid?.end_time) return 0;
-        const start = new Date(bid.start_time);
-        const end = new Date(bid.end_time);
-        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
-        const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
-        const units = calcUnitsForMinutes(minutes, bid.price_unit ?? "hour", "auction");
-        return Math.ceil(Number(bid.amount_points ?? 0) * units);
+        const units = calcAuctionUnitsForRange(bid?.start_time, bid?.end_time, bid?.price_unit ?? "hour");
+        return calcAuctionPointsTotal(bid?.amount_points, units);
     }, [bid?.start_time, bid?.end_time, bid?.amount_points, bid?.price_unit]);
 
     const windowText =
@@ -130,7 +129,7 @@ export default function BidReceiptPage() {
                                 <ReceiptRow label="Total (estimated)" value={`${totalPoints} pts`} />
                             </>
                         ) : (
-                            <ReceiptRow label="Bid amount" value={`${POUND}${Number(bid.amount_gbp ?? 0).toFixed(2)}`} />
+                            <ReceiptRow label="Bid amount" value={formatGbp(bid.amount_gbp)} />
                         )}
                         <ReceiptRow label="Placed" value={formatDateTimeCompact(bid.created_at)} />
                     </ReceiptCard>

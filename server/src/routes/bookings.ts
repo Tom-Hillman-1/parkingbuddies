@@ -4,7 +4,7 @@ import type { PoolClient } from "pg";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import { calcBookingUnits, type PriceUnit, toMoney } from "../lib/shared";
-import { countOverlappingBookings, isSlotAllowed } from "../lib/availability";
+import { findSlotAvailabilityIssue } from "../lib/availability";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
 
@@ -112,13 +112,15 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         const end = requestedEnd;
         const startIso = start.toISOString();
         const endIso = end.toISOString();
-        if (!isSlotAllowed(spot, start, end)) {
-            return rollbackWithError(client, res, 400, "Requested slot is outside listing availability");
-        }
-        const overlapCount = await countOverlappingBookings(client, parking_spot_id, startIso, endIso);
-        const capacity = Math.max(1, Number(spot.capacity_total ?? 1));
-        if (overlapCount >= capacity) {
-            return rollbackWithError(client, res, 400, "No spaces available for that time slot");
+        const slotIssue = await findSlotAvailabilityIssue({
+            db: client,
+            parkingSpotId: parking_spot_id,
+            spot,
+            start,
+            end,
+        });
+        if (slotIssue) {
+            return rollbackWithError(client, res, 400, slotIssue);
         }
 
         const units = calcBookingUnits(start, end, unit);

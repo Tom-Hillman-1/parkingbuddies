@@ -4,7 +4,6 @@ import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import { availabilityDateRange, isWindowSlot, remainingMinutes } from "../lib/availability";
 import {
-    derivedPointsCostFromMoney,
     LISTING_PUBLISH_REWARD_POINTS,
     MAX_LISTING_PUBLISH_REWARDS,
 } from "../lib/shared";
@@ -223,8 +222,7 @@ function normalizeListingInput(
     if (allow_points && mode !== "rent" && mode !== "auction") {
         return { ok: false, error: "Points can only be enabled for rent or auction listings" };
     }
-    const moneyPriceForValidation = mode === "auction" ? safeMoney(body?.auction_start_price_gbp) : safeMoney(body?.price_gbp);
-    if (allow_points && points_cost < MIN_POINTS_COST && moneyPriceForValidation <= 0) {
+    if (allow_points && points_cost < MIN_POINTS_COST) {
         return { ok: false, error: "points_cost must be >= 1 when allow_points is true" };
     }
 
@@ -286,16 +284,12 @@ function resolveListingPricing(
         }
 
         auction_start_price_gbp = hasMoneyPricing ? ap : null;
-        pointsCost = allowPoints && auction_start_price_gbp ? derivedPointsCostFromMoney(auction_start_price_gbp) : pointsCost;
         priceNum = 0;
     }
 
     if (mode === "free") priceNum = 0;
     if (mode === "rent" && priceNum <= 0 && !allowPoints) {
         return { ok: false, error: "rent mode requires price_gbp > 0" };
-    }
-    if (mode === "rent" && allowPoints && priceNum > 0) {
-        pointsCost = derivedPointsCostFromMoney(priceNum);
     }
     if (allowPoints && pointsCost < MIN_POINTS_COST) {
         return { ok: false, error: "points_cost must be >= 1 when allow_points is true" };

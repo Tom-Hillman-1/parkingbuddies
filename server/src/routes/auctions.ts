@@ -4,7 +4,7 @@ import { requireAuth, AuthRequest } from "../middleware/auth";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
 import { stripe } from "../stripe";
-import { countOverlappingBookings, isSlotAllowed, remainingMinutes } from "../lib/availability";
+import { findSlotAvailabilityIssue, remainingMinutes } from "../lib/availability";
 import { calcAuctionUnits, type PriceUnit, toMoney } from "../lib/shared";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
@@ -406,14 +406,16 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
             return rollbackWith(400, "Selected slot exceeds the allowed booking window.", payMethod === "money");
         }
 
-        if (!isSlotAllowed(spot, start, end)) {
-            return rollbackWith(400, "Requested slot is outside listing availability", payMethod === "money");
-        }
-
-        const capacity = Math.max(1, Number(spot.capacity_total ?? 1));
-        const overlapCount = await countOverlappingBookings(client, spotId, start.toISOString(), end.toISOString());
-        if (overlapCount >= capacity) {
-            return rollbackWith(400, "Selected slot is no longer available", payMethod === "money");
+        const slotIssue = await findSlotAvailabilityIssue({
+            db: client,
+            parkingSpotId: spotId,
+            spot,
+            start,
+            end,
+            fullMessage: "Selected slot is no longer available",
+        });
+        if (slotIssue) {
+            return rollbackWith(400, slotIssue, payMethod === "money");
         }
 
         if (payMethod === "money") {
@@ -565,16 +567,18 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
 
         const start = new Date(bidInfo.start_time);
         const end = new Date(bidInfo.end_time);
-        if (!isSlotAllowed(spot, start, end)) {
+        const slotIssue = await findSlotAvailabilityIssue({
+            db: client,
+            parkingSpotId: spotId,
+            spot,
+            start,
+            end,
+            outsideMessage: "Bid slot is outside listing availability",
+            fullMessage: "Slot already full for this time range",
+        });
+        if (slotIssue) {
             await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Bid slot is outside listing availability" });
-        }
-
-        const capacity = Math.max(1, Number(spot.capacity_total ?? 1));
-        const overlapCount = await countOverlappingBookings(client, spotId, start.toISOString(), end.toISOString());
-        if (overlapCount >= capacity) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({ ok: false, error: "Slot already full for this time range" });
+            return res.status(400).json({ ok: false, error: slotIssue });
         }
 
         if ((bidInfo.pay_method ?? "money") === "money") {

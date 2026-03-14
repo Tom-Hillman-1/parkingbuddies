@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { ChevronDownIcon, DragHandleDots2Icon } from "@radix-ui/react-icons";
 import { Link } from "react-router-dom";
+import { AppDisclosure } from "../components/ui/AppDisclosure";
+import { AppButton, AppField, AppInput, AppSelect, AppTextarea } from "../components/ui/AppForm";
 import { SUPPORT_EMAIL } from "./pagesShared";
 
 type ShowcaseCard = {
@@ -34,7 +37,7 @@ const SHOWCASE_CARDS: ShowcaseCard[] = [
     {
         id: "pricing",
         title: "Flexible pricing models",
-        description: "Set fixed hourly, daily, or weekly pricing, then let ParkingBuddies mirror that rate into points using the shared exchange model.",
+        description: "Set fixed hourly, daily, or weekly pricing, then enable points with a recommended rate based on the money price or adjust it yourself.",
         toneClass: "aboutShowcaseCard--mint",
         art: "pricing",
     },
@@ -48,7 +51,7 @@ const SHOWCASE_CARDS: ShowcaseCard[] = [
     {
         id: "support",
         title: "Rewards you can actually understand",
-        description: "Points come from clear actions like signup, profile completion, first published listings, and successful paid bookings, all tied to one shared rate.",
+        description: "Points come from clear actions like signup, profile completion, first published listings, and successful paid bookings, with a simple recommended money-to-points baseline.",
         toneClass: "aboutShowcaseCard--cream",
         art: "support",
     },
@@ -93,7 +96,7 @@ const FAQ_ITEMS: FaqItem[] = [
     {
         id: "faq-points-rate",
         question: "What is the value of a point?",
-        answer: "ParkingBuddies uses one shared rate of 10 points = GBP 1, so the points system stays easier to understand across the whole platform.",
+        answer: "ParkingBuddies recommends 10 points = GBP 1 as the baseline for pricing, but owners can still set a slightly higher or lower custom points rate on a listing.",
     },
     {
         id: "faq-earn-points",
@@ -238,6 +241,27 @@ function ShowcaseIllustration({ kind }: { kind: ShowcaseCard["art"] }) {
             <circle cx="96" cy="60" r="8" fill="rgba(122,98,43,0.44)" />
             <circle cx="164" cy="60" r="8" fill="rgba(122,98,43,0.44)" />
         </svg>
+    );
+}
+
+function AboutFaqItem({ item }: { item: FaqItem }) {
+    return (
+        <AppDisclosure
+            className="aboutFaqItem"
+            triggerClassName="aboutFaqSummary"
+            panelClassName="aboutFaqAnswer"
+            trigger={(open) => (
+                <>
+                    <span className="aboutFaqGrip" aria-hidden="true">
+                        <DragHandleDots2Icon />
+                    </span>
+                    <span className="aboutFaqQuestion">{item.question}</span>
+                    <ChevronDownIcon className={`aboutFaqChevron${open ? " is-open" : ""}`} aria-hidden="true" />
+                </>
+            )}
+        >
+            <p>{item.answer}</p>
+        </AppDisclosure>
     );
 }
 
@@ -469,14 +493,14 @@ export default function AboutPage() {
                             <span className="aboutJourneyRoleBadge">Points system</span>
                             <h3 className="aboutJourneyRoleTitle">One shared rewards model across the whole platform</h3>
                             <p className="aboutJourneyPointsCopy">
-                                ParkingBuddies uses a regulated exchange model so point pricing stays easier to understand for both drivers and owners.
+                                ParkingBuddies uses a recommended exchange baseline so point pricing stays easier to understand while still letting owners fine-tune the points cost on a listing.
                             </p>
                         </div>
 
                         <div className="aboutJourneyPointsGrid">
                             <div className="aboutJourneyPointsStat">
-                                <span className="aboutJourneyPointsValue">Shared rate</span>
-                                <span className="aboutJourneyPointsLabel">ParkingBuddies keeps point value clear with one simple rate of 10 pts = GBP 1.</span>
+                                <span className="aboutJourneyPointsValue">Recommended rate</span>
+                                <span className="aboutJourneyPointsLabel">ParkingBuddies suggests 10 pts = GBP 1 as a clear starting point for listing prices.</span>
                             </div>
                             <div className="aboutJourneyPointsStat">
                                 <span className="aboutJourneyPointsValue">Signup reward</span>
@@ -499,8 +523,8 @@ export default function AboutPage() {
                                 <span className="aboutJourneyPointsLabel">Owners earn reward points when they complete paid stays.</span>
                             </div>
                             <div className="aboutJourneyPointsStat">
-                                <span className="aboutJourneyPointsValue">Fixed point pricing</span>
-                                <span className="aboutJourneyPointsLabel">Point prices stay tied to the shared rate so costs remain easier to understand.</span>
+                                <span className="aboutJourneyPointsValue">Custom point pricing</span>
+                                <span className="aboutJourneyPointsLabel">Owners can keep the recommended value or adjust the points cost to be slightly higher or lower.</span>
                             </div>
                             <div className="aboutJourneyPointsStat">
                                 <span className="aboutJourneyPointsValue">Held until accepted</span>
@@ -522,20 +546,7 @@ export default function AboutPage() {
 
                 <div className="aboutFaqList">
                     {FAQ_ITEMS.map((item) => (
-                        <details key={item.id} className="aboutFaqItem">
-                            <summary className="aboutFaqSummary">
-                                <span className="aboutFaqGrip" aria-hidden="true">
-                                    <span />
-                                    <span />
-                                    <span />
-                                </span>
-                                <span className="aboutFaqQuestion">{item.question}</span>
-                                <span className="aboutFaqChevron" aria-hidden="true">+</span>
-                            </summary>
-                            <div className="aboutFaqAnswer">
-                                <p>{item.answer}</p>
-                            </div>
-                        </details>
+                        <AboutFaqItem key={item.id} item={item} />
                     ))}
                 </div>
             </section>
@@ -552,57 +563,51 @@ export default function AboutPage() {
 
                 <form className="aboutPremiumForm" onSubmit={submitHelp} noValidate>
                     <div className="aboutPremiumFormRow">
-                        <label className="field">
-                            <span>Full name</span>
-                            <input
-                                className="input"
+                        <AppField label="Full name">
+                            <AppInput
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
                                 placeholder="Your name"
                                 required
                             />
-                        </label>
+                        </AppField>
 
-                        <label className="field">
-                            <span>Email</span>
-                            <input
-                                className="input"
+                        <AppField label="Email">
+                            <AppInput
                                 type="email"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 placeholder="you@example.com"
                                 required
                             />
-                        </label>
+                        </AppField>
                     </div>
 
-                    <label className="field">
-                        <span>Topic</span>
-                        <select className="input" value={topic} onChange={(e) => setTopic(e.target.value)}>
+                    <AppField label="Topic">
+                        <AppSelect value={topic} onChange={(e) => setTopic(e.target.value)}>
                             <option>General question</option>
                             <option>Booking support</option>
                             <option>Listing support</option>
                             <option>Account issue</option>
                             <option>Payments and rewards</option>
-                        </select>
-                    </label>
+                        </AppSelect>
+                    </AppField>
 
-                    <label className="field">
-                        <span>Message</span>
-                        <textarea
-                            className="input aboutPremiumTextarea"
+                    <AppField label="Message">
+                        <AppTextarea
+                            className="aboutPremiumTextarea"
                             value={message}
                             onChange={(e) => setMessage(e.target.value)}
                             placeholder="Tell us what you need help with"
                             rows={6}
                             required
                         />
-                    </label>
+                    </AppField>
 
                     <div className="aboutPremiumFormActions">
-                        <button type="submit" className="aboutPremiumBtn aboutPremiumBtn--primary" disabled={sending}>
+                        <AppButton type="submit" className="aboutPremiumBtn aboutPremiumBtn--primary" disabled={sending}>
                             {sending ? "Sending..." : "Send message"}
-                        </button>
+                        </AppButton>
                         <a className="aboutPremiumBtn aboutPremiumBtn--secondary" href={`mailto:${SUPPORT_EMAIL}`}>
                             Email directly
                         </a>

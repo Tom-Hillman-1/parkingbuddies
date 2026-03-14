@@ -213,3 +213,35 @@ export async function countOverlappingBookings(
     );
     return Number(overlapR.rows[0]?.count ?? 0);
 }
+
+type SlotAvailabilityIssueOptions = {
+    db: Queryable;
+    parkingSpotId: unknown;
+    spot: any;
+    start: Date;
+    end: Date;
+    outsideMessage?: string;
+    fullMessage?: string;
+};
+
+export async function findSlotAvailabilityIssue({
+    db,
+    parkingSpotId,
+    spot,
+    start,
+    end,
+    outsideMessage = "Requested slot is outside listing availability",
+    fullMessage = "No spaces available for that time slot",
+}: SlotAvailabilityIssueOptions) {
+    if (!isSlotAllowed(spot, start, end)) {
+        return outsideMessage;
+    }
+
+    const overlapCount = await countOverlappingBookings(db, parkingSpotId, start.toISOString(), end.toISOString());
+    const capacity = Math.max(1, Number(spot?.capacity_total ?? 1));
+    if (overlapCount >= capacity) {
+        return fullMessage;
+    }
+
+    return null;
+}

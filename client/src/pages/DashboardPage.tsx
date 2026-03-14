@@ -1,10 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Tab, TabList, TabPanel, Tabs } from "react-aria-components";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { AppButton } from "../components/ui/AppForm";
+import { AppDisclosure } from "../components/ui/AppDisclosure";
 import { apiGet, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth, useStripeConnect } from "../lib/auth";
-import { calcUnitsForMinutes, capitalizeLabel, formatDateDisplay, formatDateTimeLocal, toFiniteNumber, type PriceUnit } from "./pagesShared";
+import {
+    calcAuctionPointsTotal,
+    calcAuctionUnitsForRange,
+    capitalizeLabel,
+    formatDateDisplay,
+    formatDateTimeLocal,
+    formatGbp,
+    toFiniteNumber,
+    type PriceUnit,
+} from "./pagesShared";
 import type { Booking as SharedBooking, ParkingSpot, RewardTransaction, User } from "../types";
 
 type Me = User;
@@ -57,29 +69,23 @@ type DashboardData = {
     myAuctionBids: AuctionBid[];
 };
 
-const POUND = String.fromCharCode(163);
 const NAV_SECTIONS: Array<{ key: DashboardSection; title: string; tone: "driver" | "owner" | "payments" }> = [
     { key: "manageBookings", title: "Manage bookings", tone: "driver" },
     { key: "manageListings", title: "Manage listings", tone: "owner" },
     { key: "transactions", title: "Transactions", tone: "payments" },
 ];
-const DEFAULT_OPEN_BY_TAB: Record<DashboardSection, SectionCardKey> = {
-    manageBookings: "driverBookings",
-    manageListings: "ownerListings",
-    transactions: "txRewards",
+const SEARCH_PARAM_TO_SECTION: Record<string, DashboardSection> = {
+    myBookings: "manageBookings",
+    myAuctionBids: "manageBookings",
+    driverUpcoming: "manageBookings",
+    myListings: "manageListings",
+    ownerConfirmed: "manageListings",
+    ownerPending: "manageListings",
+    ownerUpcoming: "manageListings",
+    rewards: "transactions",
+    payments: "transactions",
+    payouts: "transactions",
 };
-
-type SectionCardKey =
-    | "driverBookings"
-    | "driverPendingBids"
-    | "driverUpcoming"
-    | "ownerListings"
-    | "ownerConfirmed"
-    | "ownerPending"
-    | "ownerUpcoming"
-    | "txRewards"
-    | "txPayments"
-    | "txStripe";
 
 const shortAddress = (raw: string | null | undefined, maxLen = 52) => {
     const address = String(raw ?? "").trim();
@@ -98,14 +104,8 @@ const estimateAuctionBidPoints = (bid: AuctionBid) => {
     if ((bid.pay_method ?? "money") !== "points" || !bid.start_time || !bid.end_time) {
         return toFiniteNumber(bid.amount_points);
     }
-    const start = new Date(bid.start_time);
-    const end = new Date(bid.end_time);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
-        return toFiniteNumber(bid.amount_points);
-    }
-    const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
-    const units = calcUnitsForMinutes(minutes, bid.price_unit ?? "hour", "auction");
-    return Math.ceil(toFiniteNumber(bid.amount_points) * units);
+    const units = calcAuctionUnitsForRange(bid.start_time, bid.end_time, bid.price_unit ?? "hour");
+    return calcAuctionPointsTotal(bid.amount_points, units);
 };
 
 const isMoneyBookingSettled = (booking: Booking) => {
@@ -126,15 +126,13 @@ const bookingStatusView = (booking: Booking) => {
     return { label: capitalizeLabel(value || "unknown"), className: "badge" };
 };
 
-function SectionCard({
+function DashboardDisclosureCard({
     title,
     subtitle,
     tone,
     count,
     countClassName = "badge",
-    isOpen,
     isLast,
-    onToggle,
     children,
 }: {
     title: string;
@@ -142,28 +140,35 @@ function SectionCard({
     tone: SectionTone;
     count: ReactNode;
     countClassName?: string;
-    isOpen: boolean;
     isLast?: boolean;
-    onToggle: () => void;
     children: ReactNode;
 }) {
     return (
-        <section className={`dashboardAccordionItem dashboardAccordionItem--${tone}${isLast ? " is-last" : ""}`}>
-            <button type="button" className="dashboardAccordionHeader" onClick={onToggle}>
-                <div className="dashboardAccordionLeft">
-                    <span className={`dashboardAccordionDot dashboardAccordionDot--${tone}`} />
-                    <div>
-                        <div className="dashboardAccordionTitle">{title}</div>
-                        <div className="tiny muted">{subtitle}</div>
+        <AppDisclosure
+            defaultExpanded
+            className={`dashboardDisclosure dashboardDisclosure--${tone}${isLast ? " is-last" : ""}`}
+            triggerClassName="dashboardDisclosureTrigger"
+            panelClassName="dashboardDisclosurePanel"
+            trigger={(isExpanded) => (
+                <div className="dashboardDisclosureHeader">
+                    <div className="dashboardDisclosureLeft">
+                        <span className={`dashboardDisclosureDot dashboardDisclosureDot--${tone}`} />
+                        <div>
+                            <div className="dashboardDisclosureTitle">{title}</div>
+                            <div className="tiny muted">{subtitle}</div>
+                        </div>
+                    </div>
+                    <div className="dashboardDisclosureRight">
+                        <span className={countClassName}>{count}</span>
+                        <span className={`dashboardDisclosureChevron${isExpanded ? " is-open" : ""}`} aria-hidden="true">
+                            {">"}
+                        </span>
                     </div>
                 </div>
-                <div className="dashboardAccordionRight">
-                    <span className={countClassName}>{count}</span>
-                    <span className={`dashboardAccordionChevron${isOpen ? " is-open" : ""}`} aria-hidden="true">{">"}</span>
-                </div>
-            </button>
-            {isOpen ? <div className="dashboardAccordionBody">{children}</div> : null}
-        </section>
+            )}
+        >
+            {children}
+        </AppDisclosure>
     );
 }
 
@@ -230,8 +235,7 @@ export default function DashboardPage() {
     const [busyId, setBusyId] = useState<string | null>(null);
     const [receiptLoadingId, setReceiptLoadingId] = useState<string | null>(null);
     const [paymentReceiptErrors, setPaymentReceiptErrors] = useState<Record<string, string | null>>({});
-    const [activeSection, setActiveSection] = useState<DashboardSection>("manageBookings");
-    const [openSectionKey, setOpenSectionKey] = useState<SectionCardKey | null>(null);
+    const [selectedTab, setSelectedTab] = useState<DashboardSection>("manageBookings");
 
     const payoutsRef = useRef<HTMLDivElement | null>(null);
 
@@ -282,36 +286,13 @@ export default function DashboardPage() {
     const loading = dashboardQuery.isLoading;
     const loadErr = dashboardQuery.error ? readErrorMessage(dashboardQuery.error, "Failed to load dashboard") : null;
 
-    const openTab = (section: DashboardSection) => {
-        setActiveSection(section);
-        setOpenSectionKey(DEFAULT_OPEN_BY_TAB[section]);
-    };
-
-    const toggleSection = (key: SectionCardKey) => {
-        setOpenSectionKey((prev) => (prev === key ? null : key));
-    };
-
     useEffect(() => {
         const tab = searchParams.get("tab");
         if (!tab) return;
-        const tabToSection: Record<string, DashboardSection> = {
-            myBookings: "manageBookings",
-            myAuctionBids: "manageBookings",
-            driverUpcoming: "manageBookings",
-            myListings: "manageListings",
-            ownerConfirmed: "manageListings",
-            ownerPending: "manageListings",
-            ownerUpcoming: "manageListings",
-            rewards: "transactions",
-            payments: "transactions",
-            payouts: "transactions",
-        };
-        const section = tabToSection[tab];
+        const section = SEARCH_PARAM_TO_SECTION[tab];
         if (!section) return;
-        setActiveSection(section);
-        setOpenSectionKey(DEFAULT_OPEN_BY_TAB[section]);
+        setSelectedTab(section);
         if (tab === "payouts") {
-            setOpenSectionKey("txStripe");
             window.setTimeout(() => payoutsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
         }
     }, [searchParams]);
@@ -361,7 +342,7 @@ export default function DashboardPage() {
         { label: "Pending bids", value: String(pendingOwnerBids.length + myAuctionBids.length) },
         { label: "My listings", value: String(myListings.length) },
         { label: "Points", value: `${me?.points_balance ?? 0} pts` },
-        { label: "Total earned", value: `${POUND}${totalEarned.toFixed(2)}` },
+        { label: "Total earned", value: formatGbp(totalEarned) },
     ];
     const receiptDate = useMemo(() => formatDateDisplay(new Date()), []);
 
@@ -445,8 +426,7 @@ export default function DashboardPage() {
 
     const handleTopStripeDashboard = async () => {
         if (!connect?.account_id || !connect.onboarding_complete || connect.demo_bypass) {
-            setActiveSection("transactions");
-            setOpenSectionKey("txStripe");
+            setSelectedTab("transactions");
             window.setTimeout(() => payoutsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
             return;
         }
@@ -478,9 +458,9 @@ export default function DashboardPage() {
                         <div className="heroTitle">Your dashboard</div>
                         <div className="heroSub muted">Bookings, listings, payouts, and points in one place.</div>
                         <div className="dashboardHeroActions">
-                            <button className="btn btn-primary" onClick={handleTopStripeDashboard} disabled={connectBusy}>
+                            <AppButton variant="primary" onPress={handleTopStripeDashboard} disabled={connectBusy}>
                                 {connectBusy ? "Opening..." : "Open Stripe dashboard"}
-                            </button>
+                            </AppButton>
                         </div>
                     </div>
                 </div>
@@ -508,26 +488,34 @@ export default function DashboardPage() {
             {(err ?? loadErr) && <div className="card formSection" style={{ color: "crimson" }}>{err ?? loadErr}</div>}
             {msg && <div className="card formSection">{msg}</div>}
 
-            <div className="dashboardRail dashboardRail--inline" aria-label="Dashboard sections">
-                {NAV_SECTIONS.map((section) => (
-                    <button key={section.key} type="button" className={`dashboardNavBtn dashboardNavBtn--${section.tone}${activeSection === section.key ? " is-active" : ""}`} onClick={() => openTab(section.key)}>
-                        <div className="dashboardNavText"><span className="dashboardNavTitle">{section.title}</span></div>
-                    </button>
-                ))}
-            </div>
+            <Tabs
+                aria-label="Dashboard sections"
+                className="dashboardPanel"
+                selectedKey={selectedTab}
+                onSelectionChange={(key) => setSelectedTab(key as DashboardSection)}
+            >
+                <TabList className="appTabList dashboardTabList">
+                    {NAV_SECTIONS.map((section) => (
+                        <Tab
+                            key={section.key}
+                            id={section.key}
+                            className={({ isSelected }) =>
+                                `appTab dashboardTab dashboardTab--${section.tone}${isSelected ? " is-active" : ""}`.trim()
+                            }
+                        >
+                            {section.title}
+                        </Tab>
+                    ))}
+                </TabList>
 
-            <div className="dashboardPanel" aria-busy={loading}>
-                {activeSection === "manageBookings" && (
-                    <div className="dashGrid dashGrid--withinGroup">
-                        <div className="card formSection dashboardAccordionCard">
-                            <SectionCard
+                <TabPanel id="manageBookings" className="dashboardTabPanel" aria-busy={loading}>
+                    <div className="dashboardDisclosureStack">
+                        <DashboardDisclosureCard
                                 tone="driver"
                                 title="My Bookings"
                                 subtitle="Your bookings as a driver."
                                 count={bookings.length}
                                 countClassName="badge badge--cool"
-                                isOpen={openSectionKey === "driverBookings"}
-                                onToggle={() => toggleSection("driverBookings")}
                             >
                                 {sortedMyBookings.length === 0 ? (
                                     <div className="muted">No bookings yet.</div>
@@ -536,7 +524,7 @@ export default function DashboardPage() {
                                         {sortedMyBookings.map((booking) => {
                                             const status = bookingStatusView(booking);
                                             const { spot, title, address } = resolveBookingSpot(booking);
-                                            const amount = booking.pay_method === "money" ? `-${POUND}${toFiniteNumber(booking.total_price_gbp).toFixed(2)}` : `-${booking.total_points ?? 0} pts`;
+                                                const amount = booking.pay_method === "money" ? `-${formatGbp(booking.total_price_gbp)}` : `-${booking.total_points ?? 0} pts`;
                                             return (
                                                 <SlotCard
                                                     key={booking.id}
@@ -591,16 +579,14 @@ export default function DashboardPage() {
                                         })}
                                     </div>
                                 )}
-                            </SectionCard>
+                            </DashboardDisclosureCard>
 
-                            <SectionCard
+                            <DashboardDisclosureCard
                                 tone="driver"
                                 title="My Pending Bids"
                                 subtitle="Pending bids waiting for owner approval."
                                 count={myAuctionBids.length}
                                 countClassName="badge badge--warm"
-                                isOpen={openSectionKey === "driverPendingBids"}
-                                onToggle={() => toggleSection("driverPendingBids")}
                             >
                                 {sortedMyAuctionBids.length === 0 ? (
                                     <div className="muted">No pending bids.</div>
@@ -615,7 +601,7 @@ export default function DashboardPage() {
                                                     tone="rose"
                                                     title={bid.spot_title ?? "Auction listing"}
                                                     address="Awaiting owner decision"
-                                                    amount={isPoints ? `${totalPoints} pts pending` : `${POUND}${toFiniteNumber(bid.amount_gbp).toFixed(2)} auth`}
+                                                    amount={isPoints ? `${totalPoints} pts pending` : `${formatGbp(bid.amount_gbp)} auth`}
                                                     badges={renderBadgeRow([{ label: capitalizeLabel(bid.status), className: "badge badge--warm" }, { label: "Owner review" }, { label: isPoints ? "Not deducted yet" : "Not charged yet" }])}
                                                     time={slotTime(bid.start_time, bid.end_time)}
                                                     actions={<><Link to={`/bids/${bid.id}`} className="btn btn-primary">View local receipt</Link><Link to={`/spots/${bid.parking_spot_id}`} className="btn">View listing</Link></>}
@@ -624,17 +610,15 @@ export default function DashboardPage() {
                                         })}
                                     </div>
                                 )}
-                            </SectionCard>
+                            </DashboardDisclosureCard>
 
-                            <SectionCard
+                            <DashboardDisclosureCard
                                 tone="driver"
                                 title="Upcoming Schedule"
                                 subtitle="Upcoming slots you booked from owners."
                                 count={driverUpcoming.length}
                                 countClassName="badge badge--green"
-                                isOpen={openSectionKey === "driverUpcoming"}
                                 isLast
-                                onToggle={() => toggleSection("driverUpcoming")}
                             >
                                 {driverUpcoming.length === 0 ? (
                                     <div className="muted">No upcoming driver bookings.</div>
@@ -649,7 +633,7 @@ export default function DashboardPage() {
                                                     imageUrl={spot?.image_url}
                                                     title={title}
                                                     address={address}
-                                                    amount={booking.pay_method === "points" ? `-${booking.total_points ?? 0} pts` : `-${POUND}${toFiniteNumber(booking.total_price_gbp).toFixed(2)}`}
+                                                    amount={booking.pay_method === "points" ? `-${booking.total_points ?? 0} pts` : `-${formatGbp(booking.total_price_gbp)}`}
                                                     badges={renderBadgeRow([{ label: "Upcoming", className: "badge badge--cool" }])}
                                                     time={slotTime(booking.start_time, booking.end_time)}
                                                     actions={<Link to={`/spots/${booking.parking_spot_id}`} className="btn">View listing</Link>}
@@ -658,22 +642,18 @@ export default function DashboardPage() {
                                         })}
                                     </div>
                                 )}
-                            </SectionCard>
-                        </div>
+                        </DashboardDisclosureCard>
                     </div>
-                )}
+                </TabPanel>
 
-                {activeSection === "manageListings" && (
-                    <div className="dashGrid dashGrid--withinGroup">
-                        <div className="card formSection dashboardAccordionCard">
-                            <SectionCard
+                <TabPanel id="manageListings" className="dashboardTabPanel" aria-busy={loading}>
+                    <div className="dashboardDisclosureStack">
+                        <DashboardDisclosureCard
                                 tone="owner"
                                 title="My Listings"
                                 subtitle="Parking spaces you've published."
                                 count={myListings.length}
                                 countClassName="badge badge--cool"
-                                isOpen={openSectionKey === "ownerListings"}
-                                onToggle={() => toggleSection("ownerListings")}
                             >
                             {sortedMyListings.length === 0 ? (
                                 <div className="muted">No listings yet. <Link to="/create-listing">Create one</Link>.</div>
@@ -682,7 +662,7 @@ export default function DashboardPage() {
                                     {sortedMyListings.map((spot) => {
                                         const price = toFiniteNumber(spot.price_gbp);
                                         const auctionStart = Number(spot.auction_start_price_gbp ?? 0);
-                                        const priceLabel = spot.mode === "auction" ? `Min bid ${POUND}${auctionStart.toFixed(2)}` : price > 0 ? `${POUND}${price.toFixed(2)}` : "Free";
+                                        const priceLabel = spot.mode === "auction" ? `Min bid ${formatGbp(auctionStart)}` : price > 0 ? formatGbp(price) : "Free";
                                         return (
                                             <article key={spot.id} className="dashboardListingMiniCard">
                                                 <div className={`dashboardListingMiniHeader dashboardListingMiniHeader--${spot.mode}`}>
@@ -703,16 +683,14 @@ export default function DashboardPage() {
                                         })}
                                     </div>
                                 )}
-                            </SectionCard>
+                            </DashboardDisclosureCard>
 
-                            <SectionCard
+                            <DashboardDisclosureCard
                                 tone="owner"
                                 title="Booked Slots"
                                 subtitle="Confirmed bookings from drivers."
                                 count={confirmedOwnerBookings.length}
                                 countClassName="badge badge--green"
-                                isOpen={openSectionKey === "ownerConfirmed"}
-                                onToggle={() => toggleSection("ownerConfirmed")}
                             >
                                 {confirmedOwnerBookings.length === 0 ? (
                                     <div className="muted">No confirmed bookings yet.</div>
@@ -728,7 +706,7 @@ export default function DashboardPage() {
                                                         <div className="dashboardStripTop">
                                                             <div className="dashboardStripTitle">{title}</div>
                                                             <div className={`dashboardStripAmount ${isPoints ? "" : "dashboardChipAmount--in"}`}>
-                                                                {isPoints ? `+${booking.total_points ?? 0} pts` : `+${POUND}${toFiniteNumber(booking.total_price_gbp).toFixed(2)}`}
+                                                                {isPoints ? `+${booking.total_points ?? 0} pts` : `+${formatGbp(booking.total_price_gbp)}`}
                                                             </div>
                                                         </div>
                                                         <div className="tiny muted dashboardStripMeta">{address}</div>
@@ -746,16 +724,14 @@ export default function DashboardPage() {
                                         })}
                                     </div>
                                 )}
-                            </SectionCard>
+                            </DashboardDisclosureCard>
 
-                            <SectionCard
+                            <DashboardDisclosureCard
                                 tone="owner"
                                 title="Pending Bids"
                                 subtitle="Approve or reject offers on your listings."
                                 count={pendingOwnerBids.length}
                                 countClassName="badge badge--warm"
-                                isOpen={openSectionKey === "ownerPending"}
-                                onToggle={() => toggleSection("ownerPending")}
                             >
                                 {pendingOwnerBids.length === 0 ? (
                                     <div className="muted">No bids yet.</div>
@@ -770,7 +746,7 @@ export default function DashboardPage() {
                                                     tone="rose"
                                                     title={bid.spot_title ?? "Auction listing"}
                                                     address={bid.bidder_name ?? bid.bidder_email ?? "Demo Driver"}
-                                                    amount={isPoints ? `${totalPoints} pts pending` : `${POUND}${toFiniteNumber(bid.amount_gbp).toFixed(2)} auth`}
+                                                    amount={isPoints ? `${totalPoints} pts pending` : `${formatGbp(bid.amount_gbp)} auth`}
                                                     badges={renderBadgeRow([{ label: "Action required", className: "badge badge--rose" }, { label: isPoints ? "Points" : "Money" }, { label: "Charge on acceptance" }])}
                                                     time={slotTime(bid.start_time, bid.end_time)}
                                                     actions={<><Link to={`/bids/${bid.id}`} className="btn">View local receipt</Link><button className="btn btn-primary" onClick={() => acceptBid(bid.parking_spot_id, bid.id)} disabled={busyId === bid.id}>Accept</button><button className="btn" onClick={() => rejectBid(bid.parking_spot_id, bid.id)} disabled={busyId === bid.id}>Reject</button></>}
@@ -779,17 +755,15 @@ export default function DashboardPage() {
                                         })}
                                     </div>
                                 )}
-                            </SectionCard>
+                            </DashboardDisclosureCard>
 
-                            <SectionCard
+                            <DashboardDisclosureCard
                                 tone="owner"
                                 title="Owner Upcoming"
                                 subtitle="Upcoming confirmed bookings on your listings."
                                 count={ownerUpcoming.length}
                                 countClassName="badge badge--green"
-                                isOpen={openSectionKey === "ownerUpcoming"}
                                 isLast
-                                onToggle={() => toggleSection("ownerUpcoming")}
                             >
                                 {ownerUpcoming.length === 0 ? (
                                     <div className="muted">No upcoming owner bookings.</div>
@@ -805,7 +779,7 @@ export default function DashboardPage() {
                                                     imageUrl={spot?.image_url}
                                                     title={title}
                                                     address={address}
-                                                    amount={isPoints ? `+${booking.total_points ?? 0} pts` : `+${POUND}${toFiniteNumber(booking.total_price_gbp).toFixed(2)}`}
+                                                    amount={isPoints ? `+${booking.total_points ?? 0} pts` : `+${formatGbp(booking.total_price_gbp)}`}
                                                     badges={renderBadgeRow([{ label: "Upcoming", className: "badge badge--green" }])}
                                                     time={slotTime(booking.start_time, booking.end_time)}
                                                     actions={<Link to={`/spots/${booking.parking_spot_id}`} className="btn">View listing</Link>}
@@ -814,22 +788,18 @@ export default function DashboardPage() {
                                         })}
                                     </div>
                                 )}
-                            </SectionCard>
-                        </div>
+                        </DashboardDisclosureCard>
                     </div>
-                )}
+                </TabPanel>
 
-                {activeSection === "transactions" && (
-                    <div className="dashGrid dashGrid--withinGroup">
-                        <div className="card formSection dashboardAccordionCard">
-                            <SectionCard
+                <TabPanel id="transactions" className="dashboardTabPanel" aria-busy={loading}>
+                    <div className="dashboardDisclosureStack">
+                        <DashboardDisclosureCard
                                 tone="rewards"
                                 title="Rewards History"
                                 subtitle="Points earned and spent across the platform."
                                 count={sortedRewards.length}
                                 countClassName="badge badge--cool"
-                                isOpen={openSectionKey === "txRewards"}
-                                onToggle={() => toggleSection("txRewards")}
                             >
                             {sortedRewards.length === 0 ? (
                                 <div className="muted">No reward activity yet.</div>
@@ -856,16 +826,14 @@ export default function DashboardPage() {
                                     })}
                                 </div>
                                 )}
-                            </SectionCard>
+                            </DashboardDisclosureCard>
 
-                            <SectionCard
+                            <DashboardDisclosureCard
                                 tone="payments"
                                 title="Transaction History"
                                 subtitle="Incoming and outgoing payment records."
                                 count={payments.length}
                                 countClassName="badge badge--green"
-                                isOpen={openSectionKey === "txPayments"}
-                                onToggle={() => toggleSection("txPayments")}
                             >
                             {payments.length === 0 ? (
                                 <div className="muted">No payments yet.</div>
@@ -873,7 +841,7 @@ export default function DashboardPage() {
                                 <div className="dashboardRailRow dashboardRailRow--transactions">
                                     {payments.map((payment) => {
                                         const isOutgoing = payment.direction === "outgoing";
-                                        const amountText = `${isOutgoing ? "-" : "+"}${POUND}${toFiniteNumber(payment.amount_gbp).toFixed(2)}`;
+                                    const amountText = `${isOutgoing ? "-" : "+"}${formatGbp(payment.amount_gbp)}`;
                                         const statusText = capitalizeLabel(payment.status);
                                         const providerText = capitalizeLabel(payment.provider);
                                         return (
@@ -919,17 +887,15 @@ export default function DashboardPage() {
                                     })}
                                 </div>
                                 )}
-                            </SectionCard>
+                            </DashboardDisclosureCard>
 
-                            <SectionCard
+                            <DashboardDisclosureCard
                                 tone="payments"
                                 title="Stripe Account"
                                 subtitle={connect?.demo_bypass ? "Demo payouts are simulated. No Stripe onboarding required." : "Connect Stripe to withdraw your earnings."}
                                 count={connectLabel}
                                 countClassName={connectBadgeClass}
-                                isOpen={openSectionKey === "txStripe"}
                                 isLast
-                                onToggle={() => toggleSection("txStripe")}
                             >
                                 <div ref={payoutsRef} className="stack">
                                     <div className="settingRow">
@@ -959,13 +925,11 @@ export default function DashboardPage() {
                                         <button className="btn" onClick={handleRefreshConnectStatus} disabled={connectBusy}>Refresh status</button>
                                     </div>
                                 </div>
-                            </SectionCard>
-                        </div>
+                        </DashboardDisclosureCard>
                     </div>
-                )}
-            </div>
+                </TabPanel>
+            </Tabs>
         </div>
     );
 }
-
 

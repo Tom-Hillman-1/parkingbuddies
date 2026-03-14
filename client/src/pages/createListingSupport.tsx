@@ -1,9 +1,11 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { AppCalendar } from "../components/ui/AppCalendar";
+import { AppDialog } from "../components/ui/AppDialog";
+import { AppButton } from "../components/ui/AppForm";
+import { InfoTooltip } from "../components/ui/InfoTooltip";
 import {
     formatDateDisplay,
-    formatMonthShortLabel,
-    formatMonthYearLabel,
     isTimeHHMM as isTime,
     parseYmd,
     timeToMinutes as minutes,
@@ -57,7 +59,6 @@ export type DraftSnapshot = {
 };
 
 export const STEP_COUNT = 6;
-export const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export const DEFAULT_CENTER: [number, number] = [51.5074, -0.1278];
 export const LONDON_VIEWBOX = "-0.5103,51.6919,0.3340,51.2868";
 export const MIN_AUCTION_START_PRICE_GBP = 0.1;
@@ -109,24 +110,6 @@ export function parseCoordinates(lat: string, lng: string) {
     if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) return null;
     if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) return null;
     return { lat: latNum, lng: lngNum };
-}
-
-export function buildMonthCells(monthStart: Date) {
-    const start = new Date(monthStart.getFullYear(), monthStart.getMonth(), 1);
-    const totalDays = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
-    const cells: Array<Date | null> = [];
-    for (let i = 0; i < start.getDay(); i += 1) cells.push(null);
-    for (let i = 0; i < totalDays; i += 1) {
-        const day = new Date(start);
-        day.setDate(start.getDate() + i);
-        cells.push(day);
-    }
-    return cells;
-}
-
-export function isYmdInRange(day: string, from: string, to: string) {
-    if (!from || !to) return false;
-    return day >= from && day <= to;
 }
 
 export function formatYmdLabel(ymd: string) {
@@ -252,83 +235,7 @@ export function normalizeWindow(raw: unknown): AvailabilityWindow | null {
 }
 
 export function Tooltip({ label, text }: { label: string; text: string }) {
-    return (
-        <span className="wizardTooltip">
-            <button
-                type="button"
-                className="wizardTooltipBtn"
-                aria-label={label}
-                title={text}
-                onClick={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
-            >
-                ?
-            </button>
-            <span role="tooltip" className="wizardTooltipBubble">
-                {text}
-            </span>
-        </span>
-    );
-}
-
-export function SelectionTile({
-    title,
-    copy,
-    help,
-    tone,
-    active,
-    onClick,
-    spacesLabel,
-    onEditSpaces,
-}: {
-    title: string;
-    copy: string;
-    help: string;
-    tone: Tone;
-    active: boolean;
-    onClick: () => void;
-    spacesLabel?: string;
-    onEditSpaces?: () => void;
-}) {
-    return (
-        <article
-            className={`wizardTile wizardTile--${tone}${active ? " is-active" : ""}`}
-            role="button"
-            tabIndex={0}
-            aria-pressed={active}
-            onClick={onClick}
-            onKeyDown={(event) => {
-                if (event.target !== event.currentTarget) return;
-                if (event.key !== "Enter" && event.key !== " ") return;
-                event.preventDefault();
-                onClick();
-            }}
-        >
-            <div className="wizardTileSelect">
-                <div className="wizardTileHead">
-                    <Tooltip label={`${title} mode help`} text={help} />
-                </div>
-                <span className="wizardTileTitle">{title}</span>
-                <span className="wizardTileCopy">{copy}</span>
-            </div>
-
-            {active && onEditSpaces && spacesLabel && (
-                <div className="wizardTileSpotsRow">
-                    <span className="wizardTileSpotsValue">{spacesLabel}</span>
-                    <button
-                        type="button"
-                        className="btn wizardTileSpotsBtn"
-                        onClick={(event) => {
-                            event.stopPropagation();
-                            onEditSpaces();
-                        }}
-                    >
-                        Edit spots
-                    </button>
-                </div>
-            )}
-        </article>
-    );
+    return <InfoTooltip label={label} text={text} triggerClassName="wizardTooltipBtn" contentClassName="wizardTooltipBubble" />;
 }
 
 export function WizardSheet({
@@ -346,31 +253,17 @@ export function WizardSheet({
     children: ReactNode;
     wide?: boolean;
 }) {
-    if (!open) return null;
-
     return (
-        <div className="createSheetBackdrop" role="presentation" onClick={onClose}>
-            <section
-                className={`createSheet${wide ? " createSheet--wide" : ""}`}
-                role="dialog"
-                aria-modal="true"
-                aria-label={title}
-                onClick={(event) => event.stopPropagation()}
-            >
-                <div className="createSheetHead">
-                    <div>
-                        <div className="heroKicker">SETUP</div>
-                        <div className="h3">{title}</div>
-                        <div className="createFieldHint">{subtitle}</div>
-                    </div>
-                    <button type="button" className="btn" onClick={onClose}>
-                        Close
-                    </button>
-                </div>
-
-                {children}
-            </section>
-        </div>
+        <AppDialog
+            open={open}
+            onClose={onClose}
+            title={title}
+            subtitle={subtitle}
+            width={wide ? "wide" : "default"}
+            className="createSheet"
+        >
+            {children}
+        </AppDialog>
     );
 }
 
@@ -391,38 +284,43 @@ export function SheetActions({
 }) {
     return (
         <div className="createSheetActions">
-            <button type="button" className="btn" onClick={onSecondary} disabled={secondaryDisabled}>
+            <AppButton type="button" onPress={onSecondary} disabled={secondaryDisabled}>
                 {secondaryLabel}
-            </button>
-            <button type="button" className="btn btn-primary" onClick={onPrimary} disabled={primaryDisabled}>
+            </AppButton>
+            <AppButton type="button" variant="primary" onPress={onPrimary} disabled={primaryDisabled}>
                 {primaryLabel}
-            </button>
+            </AppButton>
         </div>
     );
 }
 
 export function AvailabilityCalendarSection({
-    month,
     dateFrom,
     dateTo,
     windows,
     issue,
     onSelectDate,
-    onShiftMonth,
     onRemoveWindow,
 }: {
-    month: Date;
     dateFrom: string;
     dateTo: string;
     windows: AvailabilityWindow[];
     issue: string;
     onSelectDate: (ymd: string) => void;
-    onShiftMonth: (offset: number) => void;
     onRemoveWindow: (windowId: string) => void;
 }) {
-    const monthLabel = formatMonthYearLabel(month);
-    const cells = useMemo(() => buildMonthCells(month), [month]);
-    const todayKey = toLocalDateInput(new Date());
+    const anchorYmd = dateFrom || windows.at(-1)?.from || toLocalDateInput(new Date());
+    const [visibleMonth, setVisibleMonth] = useState(() => calendarMonthFromYmd(anchorYmd));
+    const today = useMemo(() => {
+        const value = new Date();
+        value.setHours(0, 0, 0, 0);
+        return value;
+    }, []);
+    const selectedSingleDate = dateFrom && (!dateTo || dateFrom === dateTo) ? dateFrom : "";
+
+    useEffect(() => {
+        setVisibleMonth(calendarMonthFromYmd(anchorYmd));
+    }, [anchorYmd]);
 
     return (
         <div className="wizardSection">
@@ -434,47 +332,39 @@ export function AvailabilityCalendarSection({
                 />
             </div>
 
-            <div className="slotCal wizardAvailabilityCal">
-                <div className="wizardCalNav">
-                    <button type="button" className="btn btn-ghost" onClick={() => onShiftMonth(-1)}>
-                        Prev
-                    </button>
-                    <strong className="wizardCalMonth">{monthLabel}</strong>
-                    <button type="button" className="btn btn-ghost" onClick={() => onShiftMonth(1)}>
-                        Next
-                    </button>
-                </div>
-                <div className="slotCalHead">
-                    {WEEKDAY_SHORT.map((day) => (
-                        <span key={day}>{day}</span>
-                    ))}
-                </div>
-                <div className="slotCalGrid">
-                    {cells.map((day, index) => {
-                        if (!day) return <div key={`availability-blank-${index}`} className="slotCalBlank" />;
-                        const key = toLocalDateInput(day);
-                        const inPast = key < todayKey;
-                        const selected = key === dateFrom || key === dateTo;
-                        const inRange = !inPast && (isYmdInRange(key, dateFrom, dateTo) || windows.some((window) => isYmdInWindow(key, window)));
-
-                        return (
-                            <button
-                                key={key}
-                                type="button"
-                                className={`slotCalDay ${inPast ? "slotCalDay--off" : "slotCalDay--available"} ${selected ? "slotCalDay--selected" : ""} ${inRange ? "slotCalDay--range" : ""}`}
-                                onClick={() => onSelectDate(key)}
-                                disabled={inPast}
-                            >
-                                <span className="slotCalNum">{day.getDate()}</span>
-                                {day.getDate() === 1 && (
-                                    <span className="slotCalMonth">
-                                        {formatMonthShortLabel(day)}
-                                    </span>
-                                )}
-                            </button>
-                        );
-                    })}
-                </div>
+            <div className="wizardAvailabilityCal">
+                <AppCalendar
+                    month={visibleMonth}
+                    onMonthChange={setVisibleMonth}
+                    disabled={{ before: today }}
+                    onDayClick={(day, modifiers) => {
+                        if (modifiers.disabled) return;
+                        onSelectDate(toLocalDateInput(day));
+                    }}
+                    modifiers={{
+                        draftSingle: (day) => hasDraftAvailabilityDayState(dateFrom, dateTo, day, "single"),
+                        draftStart: (day) => hasDraftAvailabilityDayState(dateFrom, dateTo, day, "start"),
+                        draftMiddle: (day) => hasDraftAvailabilityDayState(dateFrom, dateTo, day, "middle"),
+                        draftEnd: (day) => hasDraftAvailabilityDayState(dateFrom, dateTo, day, "end"),
+                        savedSingle: (day) => hasAvailabilityDayState(windows, day, "single"),
+                        savedStart: (day) => hasAvailabilityDayState(windows, day, "start"),
+                        savedMiddle: (day) => hasAvailabilityDayState(windows, day, "middle"),
+                        savedEnd: (day) => hasAvailabilityDayState(windows, day, "end"),
+                        selectedSingle: (day) => !!selectedSingleDate && toLocalDateInput(day) === selectedSingleDate,
+                    }}
+                    modifiersClassNames={{
+                        draftSingle: "appCalendarDay--draftSingle",
+                        draftStart: "appCalendarDay--draftStart",
+                        draftMiddle: "appCalendarDay--draftMiddle",
+                        draftEnd: "appCalendarDay--draftEnd",
+                        savedSingle: "appCalendarDay--savedSingle",
+                        savedStart: "appCalendarDay--savedStart",
+                        savedMiddle: "appCalendarDay--savedMiddle",
+                        savedEnd: "appCalendarDay--savedEnd",
+                        selectedSingle: "appCalendarDay--selectedSingle",
+                    }}
+                    className="appCalendar--availability"
+                />
             </div>
 
             <div className="createFieldHint">Pick a start date, then an end date to add a slot.</div>
@@ -500,4 +390,38 @@ export function AvailabilityCalendarSection({
             {issue && <div className="createInlineError">{issue}</div>}
         </div>
     );
+}
+
+function calendarMonthFromYmd(ymd: string) {
+    const parsed = parseYmd(ymd) ?? new Date();
+    return new Date(parsed.getFullYear(), parsed.getMonth(), 1);
+}
+
+type AvailabilityDayState = "single" | "start" | "middle" | "end";
+
+function getDraftAvailabilityDayState(dateFrom: string, dateTo: string, dayKey: string): AvailabilityDayState | null {
+    if (!dateFrom) return null;
+    const rangeEnd = dateTo || dateFrom;
+    if (dayKey < dateFrom || dayKey > rangeEnd) return null;
+    if (dateFrom === rangeEnd) return "single";
+    if (dayKey === dateFrom) return "start";
+    if (dayKey === rangeEnd) return "end";
+    return "middle";
+}
+
+function hasDraftAvailabilityDayState(dateFrom: string, dateTo: string, day: Date, state: AvailabilityDayState) {
+    return getDraftAvailabilityDayState(dateFrom, dateTo, toLocalDateInput(day)) === state;
+}
+
+function getAvailabilityDayState(window: AvailabilityWindow, dayKey: string): AvailabilityDayState | null {
+    if (dayKey < window.from || dayKey > window.to) return null;
+    if (window.from === window.to) return "single";
+    if (dayKey === window.from) return "start";
+    if (dayKey === window.to) return "end";
+    return "middle";
+}
+
+function hasAvailabilityDayState(windows: AvailabilityWindow[], day: Date, state: AvailabilityDayState) {
+    const key = toLocalDateInput(day);
+    return windows.some((window) => getAvailabilityDayState(window, key) === state);
 }

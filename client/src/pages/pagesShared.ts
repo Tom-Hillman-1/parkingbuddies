@@ -11,6 +11,12 @@ const TIME_FORMATTER = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
     minute: "2-digit",
     hour12: false,
 });
+const GBP_FORMATTER = new Intl.NumberFormat(DISPLAY_LOCALE, {
+    style: "currency",
+    currency: "GBP",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+});
 const MONTH_YEAR_FORMATTER = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
     month: "long",
     year: "numeric",
@@ -75,6 +81,35 @@ export function calcUnitsForMinutes(
     }
     if (unit === "day") return Math.max(1, Math.ceil(minutes / (24 * 60)));
     return Math.max(1, Math.ceil(minutes / (7 * 24 * 60)));
+}
+
+export function calcRangeMinutes(start?: Date | string | null, end?: Date | string | null) {
+    if (!start || !end) return 0;
+    const startDate = start instanceof Date ? start : new Date(start);
+    const endDate = end instanceof Date ? end : new Date(end);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate <= startDate) return 0;
+    return Math.round((endDate.getTime() - startDate.getTime()) / 60000);
+}
+
+export function calcAuctionUnitsForRange(start?: Date | string | null, end?: Date | string | null, unit: PriceUnit = "hour") {
+    return calcUnitsForMinutes(calcRangeMinutes(start, end), unit, "auction");
+}
+
+export function calcAuctionMoneyTotal(amountPerUnit: unknown, units: number) {
+    const amount = toFiniteNumber(amountPerUnit);
+    if (amount <= 0 || !Number.isFinite(units) || units <= 0) return 0;
+    return Math.round(amount * units * 100) / 100;
+}
+
+export function calcAuctionPointsTotal(amountPerUnit: unknown, units: number) {
+    const amount = toFiniteNumber(amountPerUnit);
+    if (amount <= 0 || !Number.isFinite(units) || units <= 0) return 0;
+    return Math.ceil(amount * units);
+}
+
+export function formatGbp(value: unknown, fallback = GBP_FORMATTER.format(0)) {
+    const amount = Number(value);
+    return Number.isFinite(amount) ? GBP_FORMATTER.format(amount) : fallback;
 }
 
 export function formatDateTimeCompact(value?: string | null, fallback = "-") {

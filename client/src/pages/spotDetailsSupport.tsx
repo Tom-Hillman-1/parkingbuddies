@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { DayButton as DayPickerDayButton, type DayButtonProps } from "react-day-picker";
+import { AppCalendar } from "../components/ui/AppCalendar";
+import { AppDialog } from "../components/ui/AppDialog";
+import { AppButton } from "../components/ui/AppForm";
 import {
     formatDateDisplay,
     formatDateTimeCompact,
-    formatMonthYearLabel,
     pad2,
     parseYmd,
     timeToMinutes,
@@ -46,7 +49,6 @@ export type AuctionBidLike = {
     amount_points?: number | null;
 };
 
-export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MAX_DURATION_MINUTES = 30 * 24 * 60;
 export const DURATION_OPTIONS = buildDurationOptions();
 
@@ -65,63 +67,47 @@ export function SlotCalendar<TSpot extends AvailabilitySpot>({
     onPickDate,
     disabled,
 }: SlotCalendarProps<TSpot>) {
-    const [visibleMonth, setVisibleMonth] = useState(() => monthAnchorFromYmd(startDate));
-    const cells = useMemo(() => buildCalendarMonthCells(visibleMonth), [visibleMonth]);
-    const monthLabel = useMemo(() => formatMonthYearLabel(visibleMonth), [visibleMonth]);
-
-    useEffect(() => {
-        setVisibleMonth(monthAnchorFromYmd(startDate));
-    }, [startDate]);
+    const [visibleMonth, setVisibleMonth] = useState(() => calendarMonthFromYmd(startDate));
+    const selectedSingleDate = startDate && (!endDate || startDate === endDate) ? startDate : "";
+    const dayLabels = useMemo(() => buildSlotDayLabels(spot), [spot]);
+    const selectedRange = useMemo(() => {
+        const from = parseYmd(startDate);
+        if (!from) return undefined;
+        const to = endDate ? parseYmd(endDate) : undefined;
+        return to ? { from, to } : { from, to: from };
+    }, [endDate, startDate]);
 
     return (
-        <div className="slotCal">
-            <div className="wizardCalNav">
-                <button
-                    type="button"
-                    className="btn"
-                    onClick={() => setVisibleMonth((prev) => addMonths(startOfMonth(prev), -1))}
-                >
-                    Prev
-                </button>
-                <strong className="wizardCalMonth">{monthLabel}</strong>
-                <button
-                    type="button"
-                    className="btn"
-                    onClick={() => setVisibleMonth((prev) => addMonths(startOfMonth(prev), 1))}
-                >
-                    Next
-                </button>
-            </div>
-
-            <div className="slotCalHead">
-                {WEEKDAYS.map((day) => (
-                    <span key={day}>{day}</span>
-                ))}
-            </div>
-
-            <div className="slotCalGrid">
-                {cells.map((day, idx) => {
-                    if (!day) return <div key={`blank-${idx}`} className="slotCalBlank" />;
-
-                    const key = toLocalDateInput(day);
-                    const available = isDaySelectable(spot, day);
-                    const inRange = isDayInSelectedRange(day, startDate, endDate);
-                    const selected = key === startDate || key === endDate;
-
-                    return (
-                        <button
-                            key={key}
-                            type="button"
-                            className={`slotCalDay ${available ? "slotCalDay--available" : "slotCalDay--off"} ${selected ? "slotCalDay--selected" : ""} ${inRange ? "slotCalDay--range" : ""}`}
-                            onClick={() => onPickDate(key)}
-                            disabled={disabled || !available}
-                        >
-                            <span className="slotCalHint">{available ? getDayAvailabilityLabel(spot, day) : "Unavailable"}</span>
-                            <span className="slotCalNum">{day.getDate()}</span>
-                        </button>
-                    );
-                })}
-            </div>
+        <div className={`slotCal${disabled ? " is-disabled" : ""}`}>
+            <AppCalendar
+                mode="range"
+                month={visibleMonth}
+                onMonthChange={setVisibleMonth}
+                selected={selectedRange}
+                disabled={(day) => disabled || !isDaySelectable(spot, day)}
+                modifiers={{
+                    availableSingle: (day) => hasWindowDayState(spot, day, "single"),
+                    availableStart: (day) => hasWindowDayState(spot, day, "start"),
+                    availableMiddle: (day) => hasWindowDayState(spot, day, "middle"),
+                    availableEnd: (day) => hasWindowDayState(spot, day, "end"),
+                    selectedSingle: (day) => !!selectedSingleDate && toLocalDateInput(day) === selectedSingleDate,
+                }}
+                modifiersClassNames={{
+                    availableSingle: "appCalendarDay--availableSingle",
+                    availableStart: "appCalendarDay--availableStart",
+                    availableMiddle: "appCalendarDay--availableMiddle",
+                    availableEnd: "appCalendarDay--availableEnd",
+                    selectedSingle: "appCalendarDay--selectedSingle",
+                }}
+                components={{
+                    DayButton: (props) => <SlotDayButton {...props} dayLabels={dayLabels} />,
+                }}
+                onDayClick={(day, modifiers) => {
+                    if (disabled || modifiers.disabled) return;
+                    onPickDate(toLocalDateInput(day));
+                }}
+                className="appCalendar--slots"
+            />
         </div>
     );
 }
@@ -160,94 +146,62 @@ export function SlotDialog({
     const slotRangeValid = !!slotStart && !!slotEnd && slotStart < slotEnd;
     const slotAllowed = !!slotStart && !!slotEnd && isSlotAllowed(spot, slotStart, slotEnd);
 
-    if (!open) return null;
-
     return (
-        <div className="slotDialogBackdrop" role="dialog" aria-modal="true">
-            <div className="card slotDialog">
-                <div className="h3">Pick slot timing</div>
-                <div className="tiny muted">
-                    {formattedStartDate} {" -> "} {formattedEndDate}
+        <AppDialog
+            open={open}
+            onClose={onClose}
+            title="Pick slot timing"
+            subtitle={`${formattedStartDate} -> ${formattedEndDate}`}
+            width="compact"
+            className="slotDialog"
+        >
+            <label className="field">
+                <span>Start time on {formattedStartDate}</span>
+                <input
+                    className="input"
+                    type="time"
+                    step={900}
+                    value={normalizeTimeInput(startTime)}
+                    onChange={(e) => setStartTime(normalizeTimeInput(e.target.value))}
+                />
+            </label>
+
+            <label className="field">
+                <span>End time on {formattedEndDate}</span>
+                <input
+                    className="input"
+                    type="time"
+                    step={900}
+                    value={normalizeTimeInput(endTime)}
+                    onChange={(e) => setEndTime(normalizeTimeInput(e.target.value))}
+                />
+            </label>
+
+            {slotStart && slotEnd && (
+                <div className="slotDialogPreview">
+                    {formatDateTimeCompact(slotStart.toISOString())} {" -> "} {formatDateTimeCompact(slotEnd.toISOString())}
                 </div>
+            )}
+            {!slotRangeValid && <div className="slotDialogPreview">End time must be after the start time.</div>}
+            {slotRangeValid && !slotAllowed && (
+                <div className="slotDialogPreview">That range sits outside this listing&apos;s availability window.</div>
+            )}
 
-                <label className="field">
-                    <span>Start time on {formattedStartDate}</span>
-                    <input
-                        className="input"
-                        type="time"
-                        step={900}
-                        value={normalizeTimeInput(startTime)}
-                        onChange={(e) => setStartTime(normalizeTimeInput(e.target.value))}
-                    />
-                </label>
-
-                <label className="field">
-                    <span>End time on {formattedEndDate}</span>
-                    <input
-                        className="input"
-                        type="time"
-                        step={900}
-                        value={normalizeTimeInput(endTime)}
-                        onChange={(e) => setEndTime(normalizeTimeInput(e.target.value))}
-                    />
-                </label>
-
-                {slotStart && slotEnd && (
-                    <div className="slotDialogPreview">
-                        {formatDateTimeCompact(slotStart.toISOString())} {" -> "} {formatDateTimeCompact(slotEnd.toISOString())}
-                    </div>
-                )}
-                {!slotRangeValid && <div className="slotDialogPreview">End time must be after the start time.</div>}
-                {slotRangeValid && !slotAllowed && (
-                    <div className="slotDialogPreview">That range sits outside this listing&apos;s availability window.</div>
-                )}
-
-                <div className="rowInline" style={{ justifyContent: "flex-end" }}>
-                    <button type="button" className="btn" onClick={onClose}>
-                        Cancel
-                    </button>
-                    <button type="button" className="btn btn-primary" onClick={onApply} disabled={!slotRangeValid}>
-                        Apply
-                    </button>
-                </div>
+            <div className="rowInline" style={{ justifyContent: "flex-end" }}>
+                <AppButton type="button" onClick={onClose}>
+                    Cancel
+                </AppButton>
+                <AppButton type="button" variant="primary" onClick={onApply} disabled={!slotRangeValid}>
+                    Apply
+                </AppButton>
             </div>
-        </div>
+        </AppDialog>
     );
 }
 
-function buildCalendarMonthCells(monthDate: Date) {
-    const start = startOfMonth(monthDate);
-    const cells: Array<Date | null> = [];
-    const daysInMonth = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
-
-    for (let i = 0; i < start.getDay(); i += 1) cells.push(null);
-
-    for (let day = 1; day <= daysInMonth; day += 1) {
-        cells.push(new Date(start.getFullYear(), start.getMonth(), day));
-    }
-
-    while (cells.length % 7 !== 0) cells.push(null);
-
-    return cells;
-}
-
-function monthAnchorFromYmd(ymd: string) {
-    const parsed = parseYmd(ymd);
-    return startOfMonth(parsed ?? new Date());
-}
-
-function startOfMonth(date: Date) {
-    return new Date(date.getFullYear(), date.getMonth(), 1);
-}
-
-function addMonths(date: Date, amount: number) {
-    return new Date(date.getFullYear(), date.getMonth() + amount, 1);
-}
-
-function isDayInSelectedRange(day: Date, startDate: string, endDate?: string | null) {
-    if (!endDate || endDate <= startDate) return false;
-    const dayKey = toLocalDateInput(startOfDay(day));
-    return dayKey > startDate && dayKey < endDate;
+function calendarMonthFromYmd(ymd: string) {
+    const parsed = parseYmd(ymd) ?? new Date();
+    return new Date(parsed.getFullYear(), parsed.getMonth(), 1);
 }
 
 function isTimeHHMM(value: string) {
@@ -285,6 +239,21 @@ function getWindowSlots(spot: AvailabilitySpot) {
 function windowMatchesDay(window: WindowSlot, day: Date) {
     const key = toLocalDateInput(startOfDay(day));
     return key >= window.date_from && key <= window.date_to;
+}
+
+type WindowDayState = "single" | "start" | "middle" | "end";
+
+function getWindowDayState(window: WindowSlot, dayKey: string): WindowDayState | null {
+    if (dayKey < window.date_from || dayKey > window.date_to) return null;
+    if (window.date_from === window.date_to) return "single";
+    if (dayKey === window.date_from) return "start";
+    if (dayKey === window.date_to) return "end";
+    return "middle";
+}
+
+function hasWindowDayState(spot: AvailabilitySpot, day: Date, state: WindowDayState) {
+    const key = toLocalDateInput(startOfDay(day));
+    return getWindowSlots(spot).some((window) => getWindowDayState(window, key) === state);
 }
 
 function isWindowRangeAllowed(window: WindowSlot, start: Date, end: Date) {
@@ -330,27 +299,6 @@ export function getAutoStartForDate(spot: AvailabilitySpot | null, ymd: string) 
     return nextWholeQuarterHour();
 }
 
-function getDayAvailabilityLabel(spot: AvailabilitySpot, day: Date) {
-    const labels = getWindowSlots(spot)
-        .filter((slot) => windowMatchesDay(slot, day))
-        .map((slot) => formatWindowLabelForDay(slot, day));
-    if (labels.length) {
-        const joined = Array.from(new Set(labels)).join(", ");
-        return joined.length > 22 ? `${joined.slice(0, 22)}...` : joined;
-    }
-    return "Unavailable";
-}
-
-function formatWindowLabelForDay(slot: WindowSlot, day: Date) {
-    const dayKey = toLocalDateInput(startOfDay(day));
-    if (slot.date_from === slot.date_to) {
-        return `${slot.start}-${slot.end}`;
-    }
-    if (dayKey === slot.date_from) return `${slot.start}-00:00`;
-    if (dayKey === slot.date_to) return `00:00-${slot.end}`;
-    return "00:00-00:00";
-}
-
 export function formatAvailability(spot: AvailabilitySpot) {
     const windows = getWindowSlots(spot);
     if (windows.length > 0) {
@@ -369,6 +317,62 @@ export function isSlotAllowed(spot: AvailabilitySpot, start: Date, end: Date) {
 
     const windows = getWindowSlots(spot);
     return windows.some((window) => isWindowRangeAllowed(window, start, end));
+}
+
+function SlotDayButton({
+    day,
+    modifiers,
+    dayLabels,
+    className,
+    ...buttonProps
+}: DayButtonProps & { dayLabels: Map<string, string> }) {
+    const slotLabel = dayLabels.get(day.isoDate) ?? "";
+
+    return (
+        <DayPickerDayButton
+            day={day}
+            modifiers={modifiers}
+            className={className}
+            data-slot-time={slotLabel}
+            {...buttonProps}
+        >
+            {day.date.getDate()}
+        </DayPickerDayButton>
+    );
+}
+
+function buildSlotDayLabels(spot: AvailabilitySpot) {
+    const labels = new Map<string, string>();
+
+    for (const window of getWindowSlots(spot)) {
+        const start = parseYmd(window.date_from);
+        const end = parseYmd(window.date_to);
+        if (!start || !end) continue;
+
+        for (let day = startOfDay(start); day <= end; day = addDays(day, 1)) {
+            const key = toLocalDateInput(day);
+            const nextLabel = formatWindowLabelForDay(window, key);
+            if (!nextLabel) continue;
+
+            const existingLabel = labels.get(key);
+            if (existingLabel && existingLabel !== nextLabel) {
+                labels.set(key, "Multiple slots");
+                continue;
+            }
+
+            labels.set(key, nextLabel);
+        }
+    }
+
+    return labels;
+}
+
+function formatWindowLabelForDay(window: WindowSlot, dayKey: string) {
+    if (dayKey < window.date_from || dayKey > window.date_to) return "";
+    if (window.date_from === window.date_to) return `${window.start}-${window.end}`;
+    if (dayKey === window.date_from) return `From ${window.start}`;
+    if (dayKey === window.date_to) return `Until ${window.end}`;
+    return "All day";
 }
 
 export function parseDurationQuery(raw: string) {
@@ -465,6 +469,12 @@ export function normalizeTimeInput(value: string) {
 
 export function addMinutes(date: Date, minutes: number) {
     return new Date(date.getTime() + minutes * 60000);
+}
+
+function addDays(date: Date, days: number) {
+    const next = new Date(date);
+    next.setDate(next.getDate() + days);
+    return next;
 }
 
 export function setTime(date: Date, hhmm: string) {

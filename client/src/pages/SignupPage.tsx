@@ -3,6 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import { Link, useNavigate } from "react-router-dom";
+import { AppButton, AppField, AppInput } from "../components/ui/AppForm";
 import { useAuth } from "../lib/auth";
 import { SUPPORT_EMAIL } from "./pagesShared";
 
@@ -86,66 +87,57 @@ export default function SignupPage() {
                     {msg && <div className="card formSection" style={{ color: "crimson" }}>{msg}</div>}
 
                     <form onSubmit={onSubmit} className="authForm">
-                        <label>
-                            <span>Name</span>
-                            <input
-                                className="input"
+                        <AppField label="Name" error={form.formState.errors.name?.message}>
+                            <AppInput
                                 autoComplete="name"
                                 placeholder="Jamie Parker"
                                 {...form.register("name")}
                             />
-                        </label>
-                        {form.formState.errors.name && <div className="spotAlert">{form.formState.errors.name.message}</div>}
+                        </AppField>
 
-                        <label>
-                            <span>Email</span>
-                            <input
-                                className="input"
+                        <AppField label="Email" error={form.formState.errors.email?.message}>
+                            <AppInput
                                 type="email"
                                 autoComplete="email"
                                 placeholder="you@example.com"
                                 {...form.register("email")}
                             />
-                        </label>
-                        {form.formState.errors.email && <div className="spotAlert">{form.formState.errors.email.message}</div>}
+                        </AppField>
 
-                        <label>
-                            <span>Password</span>
+                        <AppField
+                            label="Password"
+                            description={
+                                <>
+                                    <div className="authNote">Minimum 8 characters. Mix letters and numbers for best results.</div>
+                                    <div className="strengthBar" aria-hidden>
+                                        <div className="strengthFill" style={{ width: strengthWidth, background: strengthColor }} />
+                                    </div>
+                                    <div className="tiny muted">Strength: {strengthLabel}</div>
+                                </>
+                            }
+                            error={form.formState.errors.password?.message}
+                        >
                             <div className="authInputRow">
-                                <input
-                                    className="input"
+                                <AppInput
                                     type={showPass ? "text" : "password"}
                                     autoComplete="new-password"
                                     placeholder="Create a password"
                                     {...form.register("password")}
                                 />
-                                <button type="button" className="btn" onClick={() => setShowPass((value) => !value)}>
+                                <AppButton type="button" onClick={() => setShowPass((value) => !value)}>
                                     {showPass ? "Hide" : "Show"}
-                                </button>
+                                </AppButton>
                             </div>
-                            <div className="authNote">Minimum 8 characters. Mix letters and numbers for best results.</div>
-                            <div className="strengthBar" aria-hidden>
-                                <div className="strengthFill" style={{ width: strengthWidth, background: strengthColor }} />
-                            </div>
-                            <div className="tiny muted">Strength: {strengthLabel}</div>
-                        </label>
-                        {form.formState.errors.password && (
-                            <div className="spotAlert">{form.formState.errors.password.message}</div>
-                        )}
+                        </AppField>
 
-                        <label>
-                            <span>Confirm password</span>
-                            <input
-                                className="input"
+                        <AppField label="Confirm password" error={form.formState.errors.confirmPassword?.message}>
+                            <AppInput
                                 type={showPass ? "text" : "password"}
                                 autoComplete="new-password"
                                 placeholder="Repeat password"
                                 {...form.register("confirmPassword")}
                             />
-                        </label>
-                        {form.formState.errors.confirmPassword && (
-                            <div className="spotAlert">{form.formState.errors.confirmPassword.message}</div>
-                        )}
+                        </AppField>
 
                         <label className="chip">
                             <input type="checkbox" {...form.register("agree")} />
@@ -153,9 +145,9 @@ export default function SignupPage() {
                         </label>
                         {form.formState.errors.agree && <div className="spotAlert">{form.formState.errors.agree.message}</div>}
 
-                        <button type="submit" className="btn btn-primary" disabled={form.formState.isSubmitting}>
+                        <AppButton type="submit" variant="primary" disabled={form.formState.isSubmitting}>
                             {form.formState.isSubmitting ? "Creating account..." : "Create account"}
-                        </button>
+                        </AppButton>
                     </form>
 
                     <div className="authDivider" />

@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Link, Navigate, useNavigate } from "react-router-dom";
+import { AppButton, AppField, AppInput } from "../components/ui/AppForm";
 import { apiGet, apiPatch, readErrorMessage } from "../lib/api";
 import { useAuth, useStripeConnect } from "../lib/auth";
 import type { User } from "../types";
@@ -20,7 +21,6 @@ const profileSchema = z.object({
 const passwordSchema = z.object({
     currentPassword: z.string().trim().min(1, "Enter your current password."),
     newPassword: z.string().trim().min(8, "New password must be at least 8 characters."),
-    confirmPassword: z.string().trim().min(1, "Confirm your new password."),
 }).superRefine((value, ctx) => {
     if (!/[A-Za-z]/.test(value.newPassword) || !/[0-9]/.test(value.newPassword)) {
         ctx.addIssue({
@@ -36,28 +36,25 @@ const passwordSchema = z.object({
             message: "New password must be different from your current password.",
         });
     }
-    if (value.newPassword !== value.confirmPassword) {
-        ctx.addIssue({
-            code: "custom",
-            path: ["confirmPassword"],
-            message: "New password and confirmation do not match.",
-        });
-    }
 });
 
 type ProfileFormValues = z.infer<typeof profileSchema>;
 type PasswordFormValues = z.infer<typeof passwordSchema>;
 type SettingsResponse = { name: string; email: string };
-type SettingsQueryData = { name: string; email: string };
+type SettingsQueryData = { name: string; email: string; pointsBalance: number; createdAt: string };
 
 export default function SettingsPage() {
-    const { token, logout } = useAuth();
+    const { token, logout, user, refreshMe } = useAuth();
     const navigate = useNavigate();
 
-    const [msg, setMsg] = useState<string | null>(null);
-    const [err, setErr] = useState<string | null>(null);
+    const [profileMsg, setProfileMsg] = useState<string | null>(null);
+    const [profileErr, setProfileErr] = useState<string | null>(null);
+    const [payoutMsg, setPayoutMsg] = useState<string | null>(null);
+    const [payoutErr, setPayoutErr] = useState<string | null>(null);
     const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
     const [passwordErr, setPasswordErr] = useState<string | null>(null);
+    const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+    const [showNewPassword, setShowNewPassword] = useState(false);
     const {
         connect,
         connectBusy,
@@ -72,7 +69,7 @@ export default function SettingsPage() {
     });
     const passwordForm = useForm<PasswordFormValues>({
         resolver: zodResolver(passwordSchema),
-        defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
+        defaultValues: { currentPassword: "", newPassword: "" },
     });
 
     const settingsQuery = useQuery<SettingsQueryData>({
@@ -99,6 +96,8 @@ export default function SettingsPage() {
             return {
                 name: settings.name ?? "",
                 email: settings.email ?? "",
+                pointsBalance: Number(meRes.user.points_balance ?? 0),
+                createdAt: meRes.user.created_at ?? "",
             };
         },
     });
@@ -137,34 +136,39 @@ export default function SettingsPage() {
     const loadErr = settingsQuery.error
         ? readErrorMessage(settingsQuery.error, "Failed to load settings")
         : null;
+    const memberSince = settingsQuery.data?.createdAt
+        ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(
+              new Date(settingsQuery.data.createdAt)
+          )
+        : "Recently joined";
 
     async function handleBeginConnectOnboarding(mode: "stripe" | "demo" = "stripe") {
-        setErr(null);
-        setMsg(null);
+        setPayoutErr(null);
+        setPayoutMsg(null);
         const result = await beginConnectOnboarding(mode);
         if (!result.ok && result.error) {
-            setErr(result.error);
+            setPayoutErr(result.error);
             return;
         }
         if (result.ok && result.message) {
-            setMsg(result.message);
+            setPayoutMsg(result.message);
         }
     }
 
     async function handleOpenStripeDashboard() {
-        setErr(null);
+        setPayoutErr(null);
         const result = await openConnectDashboard();
         if (!result.ok) {
-            setErr(result.error);
+            setPayoutErr(result.error);
         }
     }
 
     const saveProfile = profileForm.handleSubmit(async (values) => {
-        setErr(null);
-        setMsg(null);
+        setProfileErr(null);
+        setProfileMsg(null);
 
         try {
-            await apiPatch<{ user: User }>(
+            const response = await apiPatch<{ user: User }>(
                 "/settings/profile",
                 {
                     name: values.name.trim() || undefined,
@@ -172,9 +176,14 @@ export default function SettingsPage() {
                 },
                 token
             );
-            setMsg("Saved");
+            profileForm.reset({
+                name: response.user.name ?? "",
+                email: response.user.email ?? "",
+            });
+            await Promise.all([refreshMe(), settingsQuery.refetch()]);
+            setProfileMsg("Profile updated successfully.");
         } catch (error: unknown) {
-            setErr(readErrorMessage(error, "Save failed"));
+            setProfileErr(readErrorMessage(error, "Save failed"));
         }
     });
 
@@ -189,7 +198,7 @@ export default function SettingsPage() {
                 token
             );
             setPasswordMsg("Password changed successfully.");
-            passwordForm.reset({ currentPassword: "", newPassword: "", confirmPassword: "" });
+            passwordForm.reset({ currentPassword: "", newPassword: "" });
         } catch (error: unknown) {
             const raw = readErrorMessage(error, "Password update failed");
             if (/current password is incorrect/i.test(raw)) {
@@ -220,12 +229,79 @@ export default function SettingsPage() {
                 <div className="heroSub muted">Update your profile and preferences.</div>
             </div>
 
-            {(err ?? loadErr) && <div className="card formSection" style={{ color: "crimson" }}>{err ?? loadErr}</div>}
-            {msg && <div className="card formSection settingsSavedNotice">{msg}</div>}
+            {(payoutErr ?? loadErr) && <div className="card formSection" style={{ color: "crimson" }}>{payoutErr ?? loadErr}</div>}
+            {payoutMsg && <div className="card formSection settingsSavedNotice">{payoutMsg}</div>}
 
             {!settingsQuery.isLoading && (
                 <div className="settingsGrid">
-                    <div className="settingsStack">
+                        <div className="card formSection settingsPanel settingsPanel--security">
+                            <div className="sectionHeader sectionHeader--payments">
+                                <div className="sectionHeaderTitle">
+                                    <span className="sectionDot" />
+                                    <div className="h3">Security</div>
+                                </div>
+                                <span className="badge badge--rose">Password</span>
+                            </div>
+                            <AppField label="Current password" error={passwordForm.formState.errors.currentPassword?.message}>
+                                <div className="authInputRow settingsPasswordFieldRow">
+                                    <AppInput
+                                        type={showCurrentPassword ? "text" : "password"}
+                                        placeholder="Enter current password"
+                                        {...passwordForm.register("currentPassword", {
+                                            onChange: () => {
+                                                setPasswordErr(null);
+                                                setPasswordMsg(null);
+                                            },
+                                        })}
+                                    />
+                                    <AppButton
+                                        onClick={() => setShowCurrentPassword((value) => !value)}
+                                        className="settingsPasswordToggle"
+                                    >
+                                        {showCurrentPassword ? "Hide" : "Show"}
+                                    </AppButton>
+                                </div>
+                            </AppField>
+                            <AppField
+                                label="New password"
+                                description="Minimum 8 characters with at least one letter and one number."
+                                error={passwordForm.formState.errors.newPassword?.message}
+                            >
+                                <div className="authInputRow settingsPasswordFieldRow">
+                                    <AppInput
+                                        type={showNewPassword ? "text" : "password"}
+                                        placeholder="Create a new password"
+                                        {...passwordForm.register("newPassword", {
+                                            onChange: () => {
+                                                setPasswordErr(null);
+                                                setPasswordMsg(null);
+                                            },
+                                        })}
+                                    />
+                                    <AppButton
+                                        onClick={() => setShowNewPassword((value) => !value)}
+                                        className="settingsPasswordToggle"
+                                    >
+                                        {showNewPassword ? "Hide" : "Show"}
+                                    </AppButton>
+                                </div>
+                            </AppField>
+                            {passwordErr && <div className="spotAlert">{passwordErr}</div>}
+                            {passwordMsg && <div className="badge badge--green">{passwordMsg}</div>}
+                            <div className="rowInline settingsPanelActions">
+                                <AppButton onClick={updatePassword} variant="primary" disabled={passwordForm.formState.isSubmitting}>
+                                    {passwordForm.formState.isSubmitting ? "Updating..." : "Update password"}
+                                </AppButton>
+                                <AppButton
+                                    onClick={() => {
+                                        logout();
+                                        navigate("/", { replace: true });
+                                    }}
+                                >
+                                    Log out
+                                </AppButton>
+                            </div>
+                        </div>
                         <div className="card formSection settingsPanel settingsPanel--profile">
                             <div className="sectionHeader sectionHeader--driver">
                                 <div className="sectionHeaderTitle">
@@ -235,109 +311,43 @@ export default function SettingsPage() {
                                 <span className="badge badge--cool">Visible to hosts</span>
                             </div>
 
-                            <label>
-                                <span>Name</span>
-                                <input className="input" placeholder="Your name" {...profileForm.register("name")} />
-                            </label>
+                            <AppField label="Name">
+                                <AppInput
+                                    placeholder="Your name"
+                                    {...profileForm.register("name", {
+                                        onChange: () => {
+                                            setProfileErr(null);
+                                            setProfileMsg(null);
+                                        },
+                                    })}
+                                />
+                            </AppField>
 
-                            <label>
-                                <span>Email</span>
-                                <input className="input" placeholder="you@example.com" {...profileForm.register("email")} />
-                            </label>
-                            {profileForm.formState.errors.email && (
-                                <div className="spotAlert">{profileForm.formState.errors.email.message}</div>
-                            )}
+                            <AppField
+                                label="Email"
+                                description="Please enter a valid new email."
+                                error={profileForm.formState.errors.email?.message}
+                            >
+                                <AppInput
+                                    placeholder="you@example.com"
+                                    {...profileForm.register("email", {
+                                        onChange: () => {
+                                            setProfileErr(null);
+                                            setProfileMsg(null);
+                                        },
+                                    })}
+                                />
+                            </AppField>
+                            {profileErr && <div className="spotAlert">{profileErr}</div>}
+                            {profileMsg && <div className="badge badge--green">{profileMsg}</div>}
 
-                            <div className="rowInline">
-                                <button onClick={saveProfile} disabled={profileForm.formState.isSubmitting} className="btn btn-primary">
+                            <div className="rowInline settingsPanelActions">
+                                <AppButton onClick={saveProfile} disabled={profileForm.formState.isSubmitting} variant="primary">
                                     {profileForm.formState.isSubmitting ? "Saving..." : "Save changes"}
-                                </button>
-                                <Link to="/dashboard" className="btn">Back to dashboard</Link>
+                                </AppButton>
+                                <Link to="/dashboard" className="btn settingsPanelLinkBtn">Back to dashboard</Link>
                             </div>
                         </div>
-
-                        <div className="card formSection settingsPanel settingsPanel--security">
-                            <div className="sectionHeader sectionHeader--payments">
-                                <div className="sectionHeaderTitle">
-                                    <span className="sectionDot" />
-                                    <div className="h3">Security</div>
-                                </div>
-                                <span className="badge badge--rose">Password</span>
-                            </div>
-                            <label>
-                                <span>Current password</span>
-                                <input
-                                    className="input"
-                                    type="password"
-                                    placeholder="Enter current password"
-                                    {...passwordForm.register("currentPassword", {
-                                        onChange: () => {
-                                            setPasswordErr(null);
-                                            setPasswordMsg(null);
-                                        },
-                                    })}
-                                />
-                            </label>
-                            {passwordForm.formState.errors.currentPassword && (
-                                <div className="spotAlert">{passwordForm.formState.errors.currentPassword.message}</div>
-                            )}
-                            <label>
-                                <span>New password</span>
-                                <input
-                                    className="input"
-                                    type="password"
-                                    placeholder="Create a new password"
-                                    {...passwordForm.register("newPassword", {
-                                        onChange: () => {
-                                            setPasswordErr(null);
-                                            setPasswordMsg(null);
-                                        },
-                                    })}
-                                />
-                            </label>
-                            <div className="tiny muted">
-                                Minimum 8 characters with at least one letter and one number.
-                            </div>
-                            {passwordForm.formState.errors.newPassword && (
-                                <div className="spotAlert">{passwordForm.formState.errors.newPassword.message}</div>
-                            )}
-                            <label>
-                                <span>Confirm new password</span>
-                                <input
-                                    className="input"
-                                    type="password"
-                                    placeholder="Repeat new password"
-                                    {...passwordForm.register("confirmPassword", {
-                                        onChange: () => {
-                                            setPasswordErr(null);
-                                            setPasswordMsg(null);
-                                        },
-                                    })}
-                                />
-                            </label>
-                            {passwordForm.formState.errors.confirmPassword && (
-                                <div className="spotAlert">{passwordForm.formState.errors.confirmPassword.message}</div>
-                            )}
-                            {passwordErr && <div className="spotAlert">{passwordErr}</div>}
-                            {passwordMsg && <div className="badge badge--green">{passwordMsg}</div>}
-                            <div className="rowInline">
-                                <button onClick={updatePassword} className="btn btn-primary" disabled={passwordForm.formState.isSubmitting}>
-                                    {passwordForm.formState.isSubmitting ? "Updating..." : "Update password"}
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        logout();
-                                        navigate("/", { replace: true });
-                                    }}
-                                    className="btn"
-                                >
-                                    Log out
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="settingsStack">
                         <div className="card formSection settingsPanel settingsPanel--payouts">
                             <div className="sectionHeader sectionHeader--payments">
                                 <div className="sectionHeaderTitle">
@@ -375,9 +385,9 @@ export default function SettingsPage() {
                                     {connect?.details_submitted ? "Details submitted" : "Details required"}
                                 </span>
                             </div>
-                            <div className="rowInline">
-                                <button
-                                    className="btn btn-primary"
+                            <div className="rowInline settingsPanelActions">
+                                <AppButton
+                                    variant="primary"
                                     onClick={() => handleBeginConnectOnboarding("stripe")}
                                     disabled={connectBusy}
                                 >
@@ -390,26 +400,57 @@ export default function SettingsPage() {
                                                 : connect.onboarding_complete
                                                     ? "Update Stripe details"
                                                     : "Continue onboarding"}
-                                </button>
+                                </AppButton>
                                 {connect?.demo_available && !connect?.demo_bypass && !connect?.account_id && (
-                                    <button
-                                        className="btn"
+                                    <AppButton
                                         onClick={() => handleBeginConnectOnboarding("demo")}
                                         disabled={connectBusy}
                                     >
                                         Use demo payouts
-                                    </button>
+                                    </AppButton>
                                 )}
-                                <button
-                                    className="btn"
+                                <AppButton
                                     onClick={handleOpenStripeDashboard}
                                     disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}
                                 >
                                     Open Stripe dashboard
-                                </button>
+                                </AppButton>
                             </div>
                         </div>
-                    </div>
+                        <div className="card formSection settingsPanel settingsPanel--overview">
+                            <div className="sectionHeader sectionHeader--overview">
+                                <div className="sectionHeaderTitle">
+                                    <span className="sectionDot" />
+                                    <div className="h3">Profile overview</div>
+                                </div>
+                                <span className="badge badge--cool">Live account</span>
+                            </div>
+
+                            <div className="tiny muted">Quick summary of the account currently signed in.</div>
+
+                            <div className="settingRow">
+                                <div className="settingRowTitle">
+                                    <div className="tiny muted">Account holder</div>
+                                    <div className="spotInfoValue">{settingsQuery.data?.name || user?.name || "Not set"}</div>
+                                </div>
+                                <span className="badge badge--cool">{settingsQuery.data?.pointsBalance ?? 0} pts</span>
+                            </div>
+                            <div className="settingRow">
+                                <div className="settingRowTitle">
+                                    <div className="tiny muted">Email on account</div>
+                                    <div className="spotInfoValue">{settingsQuery.data?.email || user?.email || "Not set"}</div>
+                                </div>
+                            </div>
+                            <div className="settingRow">
+                                <div className="settingRowTitle">
+                                    <div className="tiny muted">Member since</div>
+                                    <div className="spotInfoValue">{memberSince}</div>
+                                </div>
+                                <span className={connect?.account_id ? "badge badge--green" : "badge badge--warm"}>
+                                    {connect?.account_id ? "Payouts ready" : "Payouts not connected"}
+                                </span>
+                            </div>
+                        </div>
                 </div>
             )}
         </div>

@@ -3,6 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { AppButton, AppField, AppInput } from "../components/ui/AppForm";
 import { useAuth } from "../lib/auth";
 import { SUPPORT_EMAIL } from "./pagesShared";
 
@@ -73,38 +74,28 @@ export default function LoginPage() {
                     {msg && <div className="card formSection" style={{ color: statusTone }}>{msg}</div>}
 
                     <form onSubmit={onSubmit} className="authForm">
-                        <label>
-                            <span>Email</span>
-                            <input
-                                className="input"
+                        <AppField label="Email" error={form.formState.errors.email?.message}>
+                            <AppInput
                                 type="email"
                                 autoComplete="username"
                                 placeholder="you@example.com"
                                 {...form.register("email")}
                             />
-                        </label>
-                        {form.formState.errors.email && (
-                            <div className="spotAlert">{form.formState.errors.email.message}</div>
-                        )}
+                        </AppField>
 
-                        <label>
-                            <span>Password</span>
+                        <AppField label="Password" error={form.formState.errors.password?.message}>
                             <div className="authInputRow">
-                                <input
-                                    className="input"
+                                <AppInput
                                     type={showPass ? "text" : "password"}
                                     autoComplete="current-password"
                                     placeholder="Enter your password"
                                     {...form.register("password")}
                                 />
-                                <button type="button" className="btn" onClick={() => setShowPass((value) => !value)}>
+                                <AppButton type="button" onClick={() => setShowPass((value) => !value)}>
                                     {showPass ? "Hide" : "Show"}
-                                </button>
+                                </AppButton>
                             </div>
-                        </label>
-                        {form.formState.errors.password && (
-                            <div className="spotAlert">{form.formState.errors.password.message}</div>
-                        )}
+                        </AppField>
 
                         <div className="rowInline" style={{ justifyContent: "space-between" }}>
                             <label className="chip">
@@ -114,9 +105,9 @@ export default function LoginPage() {
                             <span className="tiny muted">Forgot password? Ask support.</span>
                         </div>
 
-                        <button type="submit" className="btn btn-primary" disabled={form.formState.isSubmitting}>
+                        <AppButton type="submit" variant="primary" disabled={form.formState.isSubmitting}>
                             {form.formState.isSubmitting ? "Logging in..." : "Log in"}
-                        </button>
+                        </AppButton>
                     </form>
 
                     <div className="authDivider" />
