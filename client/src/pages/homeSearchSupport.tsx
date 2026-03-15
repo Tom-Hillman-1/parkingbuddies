@@ -2,29 +2,20 @@ import { useMemo } from "react";
 import { AppCalendar } from "../components/ui/AppCalendar";
 import { AppDialog } from "../components/ui/AppDialog";
 import { AppButton } from "../components/ui/AppForm";
+import { AppTimePickerDialog } from "../components/ui/AppTimePicker";
 import { formatDateDisplay, parseYmd, toLocalDateInput } from "./pagesShared";
 
 export function HomeDatePickerDialog({
     open,
     selectedDate,
-    startTime,
-    durationMinutes,
-    durationOptions,
     onSelectDate,
-    onStartTimeChange,
-    onDurationChange,
     onApply,
     onClear,
     onClose,
 }: {
     open: boolean;
     selectedDate: string;
-    startTime: string;
-    durationMinutes: number;
-    durationOptions: Array<{ value: number; label: string }>;
     onSelectDate: (value: string) => void;
-    onStartTimeChange: (value: string) => void;
-    onDurationChange: (value: number) => void;
     onApply: () => void;
     onClear: () => void;
     onClose: () => void;
@@ -43,6 +34,7 @@ export function HomeDatePickerDialog({
             title="Choose date"
             subtitle="Pick a parking day, or leave it open to search all times."
             className="homeDateDialog"
+            width="wide"
         >
             <div className="homeDateDialogBody">
                 <div className="homeDatePickerShell">
@@ -57,50 +49,16 @@ export function HomeDatePickerDialog({
                         className="appCalendar--home"
                     />
                 </div>
-
-                <aside className="homeDateDialogSide">
-                    <div className="homeDateDialogSummary">
-                        <span className="homeDateDialogLabel">Selected date</span>
-                        <strong>{selectedDate ? formatDateDisplay(selectedDate) : "Any date"}</strong>
-                    </div>
-
-                    <label className="homeDateField">
-                        <span className="homeDateDialogLabel">Start time</span>
-                        <input
-                            className="homeFilterInput"
-                            type="time"
-                            step={900}
-                            value={startTime}
-                            onChange={(event) => onStartTimeChange(event.target.value)}
-                            disabled={!selectedDate}
-                        />
-                    </label>
-
-                    <label className="homeDateField">
-                        <span className="homeDateDialogLabel">Duration</span>
-                        <select
-                            className="homeFilterInput"
-                            value={durationMinutes}
-                            onChange={(event) => onDurationChange(Number(event.target.value))}
-                            disabled={!selectedDate}
-                        >
-                            {durationOptions.map((option) => (
-                                <option key={`dialog-duration-${option.value}`} value={option.value}>
-                                    {option.label}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
-                </aside>
             </div>
 
-            <div className="rowInline" style={{ justifyContent: "space-between" }}>
-                <AppButton type="button" variant="ghost" onClick={onClear}>
-                    Clear date
-                </AppButton>
+            <div className="rowInline homeDateDialogFooter">
+                <div className="homeDateDialogSummary">
+                    <span className="homeDateDialogLabel">Selected date</span>
+                    <strong>{selectedDate ? formatDateDisplay(selectedDate) : "Any date"}</strong>
+                </div>
                 <div className="rowInline">
-                    <AppButton type="button" onClick={onClose}>
-                        Cancel
+                    <AppButton type="button" variant="ghost" onClick={onClear}>
+                        Reset date
                     </AppButton>
                     <AppButton type="button" variant="primary" onClick={onApply}>
                         Apply date
@@ -108,5 +66,35 @@ export function HomeDatePickerDialog({
                 </div>
             </div>
         </AppDialog>
+    );
+}
+
+export function HomeTimePickerDialog({
+    open,
+    value,
+    onChange,
+    onClose,
+}: {
+    open: boolean;
+    value: string;
+    onChange: (value: string) => void;
+    onClose: () => void;
+}) {
+    if (!open) return null;
+
+    return (
+        <AppTimePickerDialog
+            open={open}
+            initialValue={value}
+            onCommit={onChange}
+            onClose={onClose}
+            title="Choose time"
+            subtitle="Pick the start time for the parking search."
+            className="homeTimeDialog"
+            width="compact"
+            summaryLabel="Selected time"
+            applyLabel="Apply time"
+            incrementMinutes={5}
+        />
     );
 }

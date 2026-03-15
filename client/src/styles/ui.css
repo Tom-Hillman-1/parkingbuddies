@@ -188,6 +188,145 @@
     outline: none;
 }
 
+.appTimePickerTrigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    text-align: left;
+    cursor: pointer;
+}
+
+.appTimePickerTrigger--placeholder {
+    color: #7a8ea8;
+}
+
+.appTimePickerInline {
+    display: grid;
+    justify-items: center;
+    gap: 0.75rem;
+}
+
+.appTimePickerDialog {
+    display: grid;
+    gap: 1rem;
+}
+
+
+
+.appTimePickerInlineMount {
+    width: 100%;
+    min-height: 1px;
+}
+
+.appTimePickerHiddenInput {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
+.appTimePickerDialogFooter {
+    justify-content: space-between;
+}
+
+.appTimePickerSummary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.7rem;
+    border-radius: 18px;
+    border: 1px solid #dde7f3;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(242, 247, 255, 0.94) 100%);
+    color: #2f4666;
+    padding: 0.88rem 0.92rem;
+}
+
+.appTimePickerSummaryLabel {
+    color: #7a8ea8;
+    font-size: 0.78rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.tp-ui-wrapper {
+    font-family: "Manrope", "Segoe UI", sans-serif !important;
+    --tp-primary: #1873fe;
+    --tp-on-primary: #ffffff;
+    --tp-primary-container: #d9e9ff;
+    --tp-on-primary-container: #154785;
+    --tp-outline: #71bcff;
+    --tp-surface: #eef4fd;
+    --tp-surface-hover: #e4edf9;
+    --tp-input-bg: #eef4fd;
+    --tp-text: #14233a;
+    --tp-text-secondary: #5f7187;
+    --tp-text-type-time: #4a617d;
+    --tp-text-icon: #496485;
+    --tp-am-pm-active: #d9e9ff;
+    --tp-am-pm-text-selected: #154785;
+    --tp-am-pm-text-unselected: #56667c;
+    --tp-border: #d7e2f2;
+    --tp-hover-bg: #e4edf9;
+    --tp-shadow: 0 28px 70px rgba(12, 18, 28, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.86);
+    border: none !important;
+    border-radius: 24px !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    max-width: 100% !important;
+    min-height: auto !important;
+}
+
+.tp-ui-wrapper .tp-ui-header,
+.tp-ui-wrapper .tp-ui-footer,
+.tp-ui-wrapper .tp-ui-footer-mobile {
+    font-family: inherit !important;
+}
+
+.appTimePickerInline .tp-ui--inline,
+.appTimePickerInline .tp-ui--inline .tp-ui-wrapper {
+    display: block !important;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    transform: none !important;
+    width: 100% !important;
+}
+
+.appTimePickerInline .tp-ui--inline .tp-ui-wrapper {
+    margin: 0 auto !important;
+}
+
+.tp-ui-wrapper .tp-ui-hour,
+.tp-ui-wrapper .tp-ui-minutes {
+    border-radius: 16px !important;
+}
+
+.tp-ui-wrapper .tp-ui-select-time,
+.tp-ui-wrapper .tp-ui-hour-text,
+.tp-ui-wrapper .tp-ui-minute-text,
+.tp-ui-wrapper .tp-ui-range-tab-label {
+    color: #6c8098 !important;
+}
+
+.tp-ui-wrapper .tp-ui-cancel-btn,
+.tp-ui-wrapper .tp-ui-ok-btn,
+.tp-ui-wrapper .tp-ui-ok.btn-mobile {
+    color: #1873fe !important;
+}
+
+.tp-ui-wrapper .tp-ui-cancel-btn,
+.tp-ui-wrapper .tp-ui-ok-btn,
+.tp-ui-wrapper .tp-ui-ok.btn-mobile {
+    border-radius: 999px !important;
+}
+
 .appSwitch {
     width: fit-content;
     display: inline-flex;
@@ -345,17 +484,18 @@
 .appCalendar .appCalendarDay--availableMiddle {
     background-repeat: no-repeat;
     background-position: center;
-    background-size: calc(100% + 0.4rem) 1rem;
+    background-size: calc(100% + 0.18rem) 0.56rem;
+    border-radius: 999px;
 }
 
 .appCalendar .rdp-day.rdp-range_middle,
 .appCalendar .appCalendarDay--draftMiddle {
-    background-image: linear-gradient(90deg, rgba(196, 221, 255, 0.12) 0%, rgba(196, 221, 255, 0.84) 14%, rgba(196, 221, 255, 0.84) 86%, rgba(196, 221, 255, 0.12) 100%);
+    background-image: linear-gradient(90deg, rgba(196, 221, 255, 0.14) 0%, rgba(196, 221, 255, 0.76) 18%, rgba(196, 221, 255, 0.76) 82%, rgba(196, 221, 255, 0.14) 100%);
 }
 
 .appCalendar .appCalendarDay--savedMiddle,
 .appCalendar .appCalendarDay--availableMiddle {
-    background-image: linear-gradient(90deg, rgba(213, 245, 225, 0.12) 0%, rgba(213, 245, 225, 0.88) 14%, rgba(213, 245, 225, 0.88) 86%, rgba(213, 245, 225, 0.12) 100%);
+    background-image: linear-gradient(90deg, rgba(213, 245, 225, 0.14) 0%, rgba(213, 245, 225, 0.78) 18%, rgba(213, 245, 225, 0.78) 82%, rgba(213, 245, 225, 0.14) 100%);
 }
 
 .appCalendar .rdp-day.rdp-range_start,
@@ -368,27 +508,28 @@
 .appCalendar .appCalendarDay--availableEnd {
     background-repeat: no-repeat;
     background-position: center;
-    background-size: calc(100% + 0.4rem) 1rem;
+    background-size: calc(100% + 0.18rem) 0.56rem;
+    border-radius: 999px;
 }
 
 .appCalendar .rdp-day.rdp-range_start,
 .appCalendar .appCalendarDay--draftStart {
-    background-image: linear-gradient(90deg, transparent 0%, transparent 49%, rgba(196, 221, 255, 0.88) 49%, rgba(196, 221, 255, 0.88) 100%);
+    background-image: linear-gradient(90deg, transparent 0%, transparent 44%, rgba(196, 221, 255, 0.76) 44%, rgba(196, 221, 255, 0.76) 100%);
 }
 
 .appCalendar .rdp-day.rdp-range_end,
 .appCalendar .appCalendarDay--draftEnd {
-    background-image: linear-gradient(90deg, rgba(196, 221, 255, 0.88) 0%, rgba(196, 221, 255, 0.88) 51%, transparent 51%, transparent 100%);
+    background-image: linear-gradient(90deg, rgba(196, 221, 255, 0.76) 0%, rgba(196, 221, 255, 0.76) 56%, transparent 56%, transparent 100%);
 }
 
 .appCalendar .appCalendarDay--savedStart,
 .appCalendar .appCalendarDay--availableStart {
-    background-image: linear-gradient(90deg, transparent 0%, transparent 49%, rgba(213, 245, 225, 0.9) 49%, rgba(213, 245, 225, 0.9) 100%);
+    background-image: linear-gradient(90deg, transparent 0%, transparent 44%, rgba(213, 245, 225, 0.78) 44%, rgba(213, 245, 225, 0.78) 100%);
 }
 
 .appCalendar .appCalendarDay--savedEnd,
 .appCalendar .appCalendarDay--availableEnd {
-    background-image: linear-gradient(90deg, rgba(213, 245, 225, 0.9) 0%, rgba(213, 245, 225, 0.9) 51%, transparent 51%, transparent 100%);
+    background-image: linear-gradient(90deg, rgba(213, 245, 225, 0.78) 0%, rgba(213, 245, 225, 0.78) 56%, transparent 56%, transparent 100%);
 }
 
 .appCalendar .rdp-range_start,
@@ -512,19 +653,19 @@
 }
 
 .appCalendar--home .rdp-month_grid {
-    border-spacing: 0.4rem 0.42rem;
+    border-spacing: 0.46rem 0.46rem;
 }
 
 .appCalendar--home .rdp-day_button {
-    width: 2.55rem;
-    height: 2.55rem;
-    min-width: 2.55rem;
-    min-height: 2.55rem;
+    width: 2.52rem;
+    height: 2.52rem;
+    min-width: 2.52rem;
+    min-height: 2.52rem;
     font-size: 0.92rem;
 }
 
 .appCalendar--home .rdp-month {
-    max-width: 28rem;
+    max-width: 31rem;
     margin-inline: auto;
 }
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { DayButton as DayPickerDayButton, type DayButtonProps } from "react-day-picker";
 import { AppCalendar } from "../components/ui/AppCalendar";
 import { AppDialog } from "../components/ui/AppDialog";
 import { AppButton } from "../components/ui/AppForm";
@@ -18,7 +19,7 @@ export type WizardStep = 1 | 2 | 3 | 4 | 5 | 6;
 export type FlowStep = Exclude<WizardStep, 1>;
 export type SpaceChoice = "1" | "2" | "3plus";
 export type Tone = "blue" | "lilac" | "mint" | "cream" | "sky";
-export type WizardSheetName = "spaces" | "custom" | "confirm";
+export type WizardSheetName = "spaces" | "custom" | "confirm" | "delete";
 
 export type GeocodeSuggestion = { display_name: string; lat: string; lon: string };
 export type AvailabilityWindow = {
@@ -84,7 +85,7 @@ export const MODEL_CHOICES: Array<{ mode: Mode; title: string; copy: string; ton
 ];
 
 export const STEP_META: Record<FlowStep, { panelTitle: string; panelCopy: string; panelTone: Tone; title: string; subtitle: string }> = {
-    2: { panelTitle: "Basics", panelCopy: "Set the core details so drivers quickly understand your space.", panelTone: "blue", title: "Listing basics", subtitle: "Keep this short, clear, and practical." },
+    2: { panelTitle: "Basics", panelCopy: "Set the core details so drivers quickly understand your space.", panelTone: "blue", title: "Listing information", subtitle: "Keep this short, clear, and practical." },
     3: { panelTitle: "Pricing", panelCopy: "Choose a simple pricing setup that matches your listing model.", panelTone: "mint", title: "Pricing", subtitle: "Set how drivers pay for this listing." },
     4: { panelTitle: "Availability", panelCopy: "Add one or more date/time slots to describe when the listing is available.", panelTone: "lilac", title: "Availability", subtitle: "Pick two dates, then add a slot for that range." },
     5: { panelTitle: "Location", panelCopy: "Add a searchable address and confirm the exact map pin.", panelTone: "cream", title: "Location", subtitle: "Search once, then fine-tune by tapping on the map." },
@@ -300,6 +301,7 @@ export function AvailabilityCalendarSection({
     windows,
     issue,
     onSelectDate,
+    onResetSelection,
     onRemoveWindow,
 }: {
     dateFrom: string;
@@ -307,6 +309,7 @@ export function AvailabilityCalendarSection({
     windows: AvailabilityWindow[];
     issue: string;
     onSelectDate: (ymd: string) => void;
+    onResetSelection: () => void;
     onRemoveWindow: (windowId: string) => void;
 }) {
     const anchorYmd = dateFrom || windows.at(-1)?.from || toLocalDateInput(new Date());
@@ -317,6 +320,7 @@ export function AvailabilityCalendarSection({
         return value;
     }, []);
     const selectedSingleDate = dateFrom && (!dateTo || dateFrom === dateTo) ? dateFrom : "";
+    const dayLabels = useMemo(() => buildAvailabilityDayLabels(windows), [windows]);
 
     useEffect(() => {
         setVisibleMonth(calendarMonthFromYmd(anchorYmd));
@@ -363,11 +367,22 @@ export function AvailabilityCalendarSection({
                         savedEnd: "appCalendarDay--savedEnd",
                         selectedSingle: "appCalendarDay--selectedSingle",
                     }}
-                    className="appCalendar--availability"
+                    components={{
+                        DayButton: (props) => <AvailabilityDayButton {...props} dayLabels={dayLabels} />,
+                    }}
+                    className="appCalendar--availability appCalendar--slots"
                 />
             </div>
 
             <div className="createFieldHint">Pick a start date, then an end date to add a slot.</div>
+
+            {(dateFrom || dateTo) && (
+                <div className="wizardAvailabilityActions">
+                    <button type="button" className="btn btn-ghost" onClick={onResetSelection}>
+                        Reset selection
+                    </button>
+                </div>
+            )}
 
             {windows.length > 0 && (
                 <div className="stack">
@@ -424,4 +439,43 @@ function getAvailabilityDayState(window: AvailabilityWindow, dayKey: string): Av
 function hasAvailabilityDayState(windows: AvailabilityWindow[], day: Date, state: AvailabilityDayState) {
     const key = toLocalDateInput(day);
     return windows.some((window) => getAvailabilityDayState(window, key) === state);
+}
+
+function AvailabilityDayButton({
+    day,
+    modifiers,
+    dayLabels,
+    className,
+    ...buttonProps
+}: DayButtonProps & { dayLabels: Map<string, string> }) {
+    const slotLabel = dayLabels.get(day.isoDate) ?? "";
+
+    return (
+        <DayPickerDayButton day={day} modifiers={modifiers} className={className} data-slot-time={slotLabel} {...buttonProps}>
+            {day.date.getDate()}
+        </DayPickerDayButton>
+    );
+}
+
+function buildAvailabilityDayLabels(windows: AvailabilityWindow[]) {
+    const labels = new Map<string, string>();
+
+    for (const window of windows) {
+        for (let dayKey = window.from; dayKey <= window.to; ) {
+            labels.set(dayKey, formatAvailabilityLabelForDay(window, dayKey));
+            const nextDay = parseYmd(dayKey);
+            if (!nextDay) break;
+            nextDay.setDate(nextDay.getDate() + 1);
+            dayKey = toLocalDateInput(nextDay);
+        }
+    }
+
+    return labels;
+}
+
+function formatAvailabilityLabelForDay(window: AvailabilityWindow, dayKey: string) {
+    if (window.from === window.to) return `${window.start}-${window.end}`;
+    if (dayKey === window.from) return `From ${window.start}`;
+    if (dayKey === window.to) return `Until ${window.end}`;
+    return "All day";
 }

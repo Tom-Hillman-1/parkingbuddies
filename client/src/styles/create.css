@@ -505,6 +505,11 @@
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
+.wizardAvailabilityActions {
+    display: flex;
+    justify-content: flex-end;
+}
+
 .wizardTooltipBtn {
     width: 1.28rem;
     height: 1.28rem;
@@ -543,9 +548,17 @@
     box-shadow: 0 10px 24px rgba(16, 24, 40, 0.06);
 }
 
+.wizardActionsLead {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.56rem;
+}
+
 .wizardActions--intro {
-    grid-template-columns: auto auto;
+    grid-template-columns: repeat(3, auto);
     justify-content: flex-end;
+    align-items: center;
     border: 0;
     border-radius: 0;
     box-shadow: none;

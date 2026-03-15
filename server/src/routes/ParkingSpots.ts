@@ -527,13 +527,13 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
            parking_type=$18,
            capacity_total=$19,
            updated_at=now()
-       WHERE id=$20 AND owner_user_id=$21
+       WHERE id=$20 AND owner_user_id=$21 AND is_active = true
        RETURNING *`,
             updateValues
         );
 
         if (!r.rowCount) {
-            return res.status(404).json({ ok: false, error: "Parking spot not found or not owned by user" });
+            return res.status(404).json({ ok: false, error: "Parking spot not found, inactive, or not owned by user" });
         }
 
         return res.json({ ok: true, parking_spot: r.rows[0] });
@@ -548,65 +548,23 @@ router.delete("/:id", requireAuth, async (req: AuthRequest, res) => {
     const spotId = parsedParams.data.id;
     const userId = req.userId;
 
-    const client = await pool.connect();
     try {
-        await client.query("BEGIN");
-
-        const ownedSpot = await client.query(
-            `SELECT id, title
-             FROM parking_spots
-             WHERE id = $1 AND owner_user_id = $2`,
+        const ownedSpot = await pool.query(
+            `UPDATE parking_spots
+             SET is_active = false,
+                 updated_at = now()
+             WHERE id = $1 AND owner_user_id = $2 AND is_active = true
+             RETURNING id, title`,
             [spotId, userId]
         );
 
         if (!ownedSpot.rowCount) {
-            await client.query("ROLLBACK");
-            return res.status(404).json({ ok: false, error: "Parking spot not found or not owned by user" });
+            return res.status(404).json({ ok: false, error: "Parking spot not found, already deleted, or not owned by user" });
         }
-        const activityR = await client.query(
-            `SELECT
-                 EXISTS(SELECT 1 FROM bookings WHERE parking_spot_id = $1) AS has_bookings,
-                 EXISTS(
-                     SELECT 1
-                     FROM payments p
-                     JOIN bookings b ON b.id = p.booking_id
-                     WHERE b.parking_spot_id = $1
-                 ) AS has_payments,
-                 EXISTS(SELECT 1 FROM auction_bids WHERE parking_spot_id = $1) AS has_bids`,
-            [spotId]
-        );
-        const activity = activityR.rows[0] as {
-            has_bookings?: boolean;
-            has_payments?: boolean;
-            has_bids?: boolean;
-        };
-        if (activity?.has_bookings || activity?.has_payments || activity?.has_bids) {
-            await client.query("ROLLBACK");
-            return res.status(400).json({
-                ok: false,
-                error: "This listing has booking or bidding history and cannot be deleted.",
-            });
-        }
-        await client.query(
-            `UPDATE reward_transactions
-             SET related_spot_id = NULL
-             WHERE related_spot_id = $1`,
-            [spotId]
-        );
 
-        await client.query(
-            `DELETE FROM parking_spots
-             WHERE id = $1 AND owner_user_id = $2`,
-            [spotId, userId]
-        );
-
-        await client.query("COMMIT");
         return res.json({ ok: true, deleted: true, parking_spot: ownedSpot.rows[0] });
     } catch (e) {
-        await client.query("ROLLBACK");
         return res.status(500).json({ ok: false, error: String(e) });
-    } finally {
-        client.release();
     }
 });
 

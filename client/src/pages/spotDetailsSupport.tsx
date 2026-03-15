@@ -3,6 +3,7 @@ import { DayButton as DayPickerDayButton, type DayButtonProps } from "react-day-
 import { AppCalendar } from "../components/ui/AppCalendar";
 import { AppDialog } from "../components/ui/AppDialog";
 import { AppButton } from "../components/ui/AppForm";
+import { AppTimePicker } from "../components/ui/AppTimePicker";
 import {
     formatDateDisplay,
     formatDateTimeCompact,
@@ -157,23 +158,19 @@ export function SlotDialog({
         >
             <label className="field">
                 <span>Start time on {formattedStartDate}</span>
-                <input
+                <AppTimePicker
                     className="input"
-                    type="time"
-                    step={900}
                     value={normalizeTimeInput(startTime)}
-                    onChange={(e) => setStartTime(normalizeTimeInput(e.target.value))}
+                    onChange={(value) => setStartTime(normalizeTimeInput(value))}
                 />
             </label>
 
             <label className="field">
                 <span>End time on {formattedEndDate}</span>
-                <input
+                <AppTimePicker
                     className="input"
-                    type="time"
-                    step={900}
                     value={normalizeTimeInput(endTime)}
-                    onChange={(e) => setEndTime(normalizeTimeInput(e.target.value))}
+                    onChange={(value) => setEndTime(normalizeTimeInput(value))}
                 />
             </label>
 

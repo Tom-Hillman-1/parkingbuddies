@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import "./index.css";
 import "leaflet/dist/leaflet.css";
 import "react-day-picker/style.css";
+import "timepicker-ui/index.css";
 import App from "./App";
 import { AuthProvider } from "./lib/auth";
 const HomePage = lazy(() => import("./pages/HomePage"));

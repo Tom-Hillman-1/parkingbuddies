@@ -40,7 +40,6 @@ export default function LoginPage() {
         setMsg(null);
         try {
             await login(values.email, values.password);
-            localStorage.removeItem("pb_password");
             if (values.remember) {
                 localStorage.setItem("pb_remember", "true");
                 localStorage.setItem("pb_email", values.email);

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import {
     CalendarIcon,
     ChevronDownIcon,
+    ClockIcon,
     Crosshair2Icon,
     DashboardIcon,
     MagnifyingGlassIcon,
@@ -11,6 +12,7 @@ import {
     ValueIcon,
 } from "@radix-ui/react-icons";
 import Lottie from "lottie-react";
+import { Button, ListBox, ListBoxItem, Popover, Select, SelectValue } from "react-aria-components";
 import { Link } from "react-router-dom";
 import SpotsMap from "../components/SpotsMap";
 import { AppDisclosure } from "../components/ui/AppDisclosure";
@@ -18,13 +20,13 @@ import { AppMultiToggleGroup, AppRadioCards } from "../components/ui/AppChoiceCo
 import { InfoTooltip } from "../components/ui/InfoTooltip";
 import { apiGet } from "../lib/api";
 import type { ParkingSpot } from "../types";
-import { capitalizeLabel, toFiniteNumber } from "./pagesShared";
+import { capitalizeLabel, formatDateDisplay, toFiniteNumber } from "./pagesShared";
 import {
     buildSearchWindow,
     formatSearchWindowSummary,
     type HomeSearchState,
 } from "./homeSearchUtils";
-import { HomeDatePickerDialog } from "./homeSearchSupport";
+import { HomeDatePickerDialog, HomeTimePickerDialog } from "./homeSearchSupport";
 import {
     isSlotAllowed as isSpotSlotAllowed,
     nextWholeQuarterHour,
@@ -44,8 +46,15 @@ const HOME_DURATION_OPTIONS = [
     { value: 30, label: "30 min" },
     { value: 60, label: "1 hour" },
     { value: 120, label: "2 hours" },
+    { value: 180, label: "3 hours" },
     { value: 240, label: "4 hours" },
-    { value: 1440, label: "All day" },
+    { value: 360, label: "6 hours" },
+    { value: 480, label: "8 hours" },
+    { value: 600, label: "10 hours" },
+    { value: 720, label: "12 hours" },
+    { value: 960, label: "16 hours" },
+    { value: 1200, label: "20 hours" },
+    { value: 1440, label: "24+ hours" },
 ];
 const SORT_OPTIONS: Array<{ value: SortMode; label: string }> = [
     { value: "distance", label: "Closest first" },
@@ -135,6 +144,47 @@ function HomeFilterSection({
     );
 }
 
+function HomeDurationSelect({
+    value,
+    onChange,
+    disabled,
+}: {
+    value: number;
+    onChange: (value: number) => void;
+    disabled?: boolean;
+}) {
+    return (
+        <Select
+            aria-label="Duration"
+            selectedKey={String(value)}
+            onSelectionChange={(key) => onChange(Number(key))}
+            isDisabled={disabled}
+            className="homeFilterSelect"
+        >
+            <Button className="homeFilterSelectButton">
+                <SelectValue className="homeFilterSelectValue" />
+                <ChevronDownIcon className="homeFilterSelectIcon" aria-hidden="true" />
+            </Button>
+            <Popover className="homeFilterSelectPopover" placement="bottom start" offset={8}>
+                <ListBox className="homeFilterSelectList">
+                    {HOME_DURATION_OPTIONS.map((option) => (
+                        <ListBoxItem
+                            key={`home-duration-${option.value}`}
+                            id={String(option.value)}
+                            textValue={option.label}
+                            className={({ isFocused, isSelected }) =>
+                                `homeFilterSelectOption${isFocused ? " is-focused" : ""}${isSelected ? " is-selected" : ""}`
+                            }
+                        >
+                            {option.label}
+                        </ListBoxItem>
+                    ))}
+                </ListBox>
+            </Popover>
+        </Select>
+    );
+}
+
 function priceValue(spot: ParkingSpot) {
     if (spot.mode === "free") return 0;
     if (spot.mode === "auction") return Math.max(0, toFiniteNumber(spot.auction_start_price_gbp));
@@ -189,7 +239,8 @@ export default function HomePage() {
     const [activeModeFilter, setActiveModeFilter] = useState<ModeFilter>(DEFAULT_MODE_FILTER);
     const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(null);
     const [locStatus, setLocStatus] = useState<string | null>(null);
-    const [searchDialogOpen, setSearchDialogOpen] = useState(false);
+    const [dateDialogOpen, setDateDialogOpen] = useState(false);
+    const [timeDialogOpen, setTimeDialogOpen] = useState(false);
     const [searchFeedback, setSearchFeedback] = useState<string | null>(null);
 
     const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -485,14 +536,54 @@ export default function HomePage() {
                         </div>
 
                         <HomeFilterSection icon={<CalendarIcon />} label="When" value={whenSummary} isSet={!!draftSearch.date}>
-                            <button
-                                type="button"
-                                className="homeFilterPickerButton"
-                                onClick={() => setSearchDialogOpen(true)}
-                            >
-                                <span className="homeFilterFieldEyebrow">Date and time</span>
-                              
-                            </button>
+                            <div className="homeFilterWhenGrid">
+                                <button
+                                    type="button"
+                                    className="homeFilterPickerButton homeFilterPickerButton--choice"
+                                    onClick={() => setDateDialogOpen(true)}
+                                >
+                                    <span className="homeFilterPickerIcon" aria-hidden="true">
+                                        <CalendarIcon />
+                                    </span>
+                                    <span className="homeFilterPickerCopy">
+                                        <span className="homeFilterFieldEyebrow">Date</span>
+                                        <span className="homeFilterPickerValue">
+                                            {draftSearch.date ? formatDateDisplay(draftSearch.date) : "Any date"}
+                                        </span>
+                                    </span>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    className="homeFilterPickerButton homeFilterPickerButton--choice"
+                                    onClick={() => setTimeDialogOpen(true)}
+                                    disabled={!draftSearch.date}
+                                >
+                                    <span className="homeFilterPickerIcon" aria-hidden="true">
+                                        <ClockIcon />
+                                    </span>
+                                    <span className="homeFilterPickerCopy">
+                                        <span className="homeFilterFieldEyebrow">Time</span>
+                                        <span className="homeFilterPickerValue">
+                                            {draftSearch.date ? draftSearch.startTime : "First select date"}
+                                        </span>
+                                    </span>
+                                </button>
+                            </div>
+
+                            <label className="homeFilterField">
+                                <span className="homeFilterFieldEyebrow">Duration</span>
+                                <HomeDurationSelect
+                                    value={draftSearch.durationMinutes}
+                                    onChange={(durationMinutes) =>
+                                        setDraftSearch((current) => ({
+                                            ...current,
+                                            durationMinutes,
+                                        }))
+                                    }
+                                    disabled={!draftSearch.date}
+                                />
+                            </label>
                         </HomeFilterSection>
 
                         <HomeFilterSection
@@ -675,32 +766,28 @@ export default function HomePage() {
             </section>
 
             <HomeDatePickerDialog
-                open={searchDialogOpen}
+                open={dateDialogOpen}
                 selectedDate={draftSearch.date}
-                startTime={draftSearch.startTime}
-                durationMinutes={draftSearch.durationMinutes}
-                durationOptions={HOME_DURATION_OPTIONS}
                 onSelectDate={(date) => setDraftSearch((current) => ({ ...current, date }))}
-                onStartTimeChange={(startTime) =>
-                    setDraftSearch((current) => ({
-                        ...current,
-                        startTime: normalizeTimeInput(startTime),
-                    }))
-                }
-                onDurationChange={(durationMinutes) =>
-                    setDraftSearch((current) => ({
-                        ...current,
-                        durationMinutes,
-                    }))
-                }
-                onApply={() => setSearchDialogOpen(false)}
+                onApply={() => setDateDialogOpen(false)}
                 onClear={() =>
                     setDraftSearch((current) => ({
                         ...current,
                         date: "",
                     }))
                 }
-                onClose={() => setSearchDialogOpen(false)}
+                onClose={() => setDateDialogOpen(false)}
+            />
+            <HomeTimePickerDialog
+                open={timeDialogOpen}
+                value={draftSearch.startTime}
+                onChange={(startTime) =>
+                    setDraftSearch((current) => ({
+                        ...current,
+                        startTime: normalizeTimeInput(startTime),
+                    }))
+                }
+                onClose={() => setTimeDialogOpen(false)}
             />
         </div>
     );

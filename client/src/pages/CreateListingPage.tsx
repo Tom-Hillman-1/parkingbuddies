@@ -6,7 +6,8 @@ import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react
 import SpotsMap from "../components/SpotsMap";
 import { AppRadioCards, AppSwitchField } from "../components/ui/AppChoiceControls";
 import { AppButton, AppField, AppInput, AppTextarea } from "../components/ui/AppForm";
-import { apiGet, apiPatch, apiPost, readErrorMessage } from "../lib/api";
+import { AppTimePicker } from "../components/ui/AppTimePicker";
+import { apiDelete, apiGet, apiPatch, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import successAnimation from "../assets/Success.json";
 import type { ParkingSpot } from "../types";
@@ -191,6 +192,7 @@ export default function CreateListingPage() {
     const [pendingSpacesCustom, setPendingSpacesCustom] = useState("3");
 
     const [saving, setSaving] = useState(false);
+    const [deleting, setDeleting] = useState(false);
     const [error, setError] = useState("");
     const [slotSheetError, setSlotSheetError] = useState("");
     const [publishingOverlayOpen, setPublishingOverlayOpen] = useState(false);
@@ -201,6 +203,7 @@ export default function CreateListingPage() {
     const spacesSheetOpen = activeSheet === "spaces";
     const customSheetOpen = activeSheet === "custom";
     const confirmSheetOpen = activeSheet === "confirm";
+    const deleteSheetOpen = activeSheet === "delete";
 
     const parsedCoords = parseCoordinates(lat, lng);
     const mapCenter = parsedCoords ?? { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] };
@@ -444,6 +447,13 @@ export default function CreateListingPage() {
         openCustomSheet(dateFrom, ymd);
     }
 
+    function resetAvailabilitySelection() {
+        setDateFrom("");
+        setDateTo("");
+        setSlotSheetError("");
+        setError("");
+    }
+
     function removeAvailabilityWindow(windowId: string) {
         setAvailabilityWindows((prev) => prev.filter((window) => window.id !== windowId));
     }
@@ -489,6 +499,12 @@ export default function CreateListingPage() {
     function closeSheet() {
         setActiveSheet(null);
         setSlotSheetError("");
+    }
+
+    function openDeleteSheet() {
+        if (!isEdit || !editId) return;
+        setError("");
+        setActiveSheet("delete");
     }
 
     function onImageFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -664,6 +680,25 @@ export default function CreateListingPage() {
             setError(readErrorMessage(error, isEdit ? "Failed to save listing." : "Failed to publish listing."));
         } finally {
             setSaving(false);
+        }
+    }
+
+    async function deleteListing() {
+        if (!token || !editId) {
+            setError("This listing cannot be deleted right now.");
+            return;
+        }
+
+        setError("");
+        setDeleting(true);
+        try {
+            await apiDelete(`/parking-spots/${editId}`, token);
+            closeSheet();
+            navigate("/dashboard?tab=manageListings", { replace: true });
+        } catch (error: unknown) {
+            setError(readErrorMessage(error, "Failed to delete listing."));
+        } finally {
+            setDeleting(false);
         }
     }
 
@@ -906,6 +941,7 @@ export default function CreateListingPage() {
                     windows={availabilityWindows}
                     issue={availabilityIssue}
                     onSelectDate={selectAvailabilityDate}
+                    onResetSelection={resetAvailabilitySelection}
                     onRemoveWindow={removeAvailabilityWindow}
                 />
             );
@@ -1080,6 +1116,16 @@ export default function CreateListingPage() {
                                 </div>
 
                                 <div className="wizardActions wizardActions--intro">
+                                    {isEdit && (
+                                        <AppButton
+                                            type="button"
+                                            variant="ghost"
+                                            onPress={openDeleteSheet}
+                                            disabled={saving || deleting}
+                                        >
+                                            Delete listing
+                                        </AppButton>
+                                    )}
                                     <Link className="btn" to={isEdit && editId ? `/spots/${editId}` : "/dashboard"}>
                                         Cancel
                                     </Link>
@@ -1118,15 +1164,17 @@ export default function CreateListingPage() {
                                     <div className="wizardCardBody">{renderStepBody(flowStep)}</div>
                                     <footer className="wizardCardFoot">
                                         <div className="wizardActions">
-                                            <AppButton type="button" onClick={goBack} disabled={activeStep <= 1 || saving}>
-                                                Back
-                                            </AppButton>
+                                            <div className="wizardActionsLead">
+                                                <AppButton type="button" onClick={goBack} disabled={activeStep <= 1 || saving || deleting}>
+                                                    Back
+                                                </AppButton>
+                                            </div>
                                             <div className="wizardActionHint">{actionHint}</div>
                                             <AppButton
                                                 type="button"
                                                 variant="primary"
                                                 onClick={goNext}
-                                                disabled={(activeStep !== 2 && !currentStepReady) || saving}
+                                                disabled={(activeStep !== 2 && !currentStepReady) || saving || deleting}
                                             >
                                                 {activeStep === 6 ? "Publish" : "Next"}
                                             </AppButton>
@@ -1194,19 +1242,15 @@ export default function CreateListingPage() {
 
                     <div className="slotSheetFields">
                         <AppField className="slotSheetField" label="Start time" description={<div className="slotSheetFieldNote">{draftStartLabel}</div>}>
-                            <AppInput
-                                type="time"
-                                step={900}
+                            <AppTimePicker
                                 value={draftSlotStart}
-                                onChange={(event) => setDraftSlotStart(event.target.value)}
+                                onChange={setDraftSlotStart}
                             />
                         </AppField>
                         <AppField className="slotSheetField" label="End time" description={<div className="slotSheetFieldNote">{draftEndLabel}</div>}>
-                            <AppInput
-                                type="time"
-                                step={900}
+                            <AppTimePicker
                                 value={draftSlotEnd}
-                                onChange={(event) => setDraftSlotEnd(event.target.value)}
+                                onChange={setDraftSlotEnd}
                             />
                         </AppField>
                     </div>
@@ -1255,6 +1299,48 @@ export default function CreateListingPage() {
                     onPrimary={() => void submitListing()}
                     primaryDisabled={!publishReady || saving}
                 />
+            </WizardSheet>
+
+            <WizardSheet
+                open={deleteSheetOpen}
+                title="Delete listing"
+                subtitle="This removes the listing from search and stops any new bookings or bids."
+                onClose={() => {
+                    closeSheet();
+                    setError("");
+                }}
+            >
+                <div className="slotSheet">
+                    <div className="slotSheetSummary">
+                        <div className="slotSheetSummaryLabel">Listing</div>
+                        <div className="slotSheetSummaryValue">{title.trim() || "Untitled listing"}</div>
+                    </div>
+                    <div className="createFieldHint">
+                        Existing booking and bidding history is kept for records, but the listing will no longer be active.
+                    </div>
+                    {error && <div className="createInlineError">{error}</div>}
+                </div>
+
+                <div className="createSheetActions">
+                    <AppButton
+                        type="button"
+                        onPress={() => {
+                            closeSheet();
+                            setError("");
+                        }}
+                        disabled={deleting}
+                    >
+                        Keep listing
+                    </AppButton>
+                    <AppButton
+                        type="button"
+                        variant="ghost"
+                        onPress={() => void deleteListing()}
+                        disabled={deleting}
+                    >
+                        {deleting ? "Deleting..." : "Delete listing"}
+                    </AppButton>
+                </div>
             </WizardSheet>
 
             {publishingOverlayOpen && (

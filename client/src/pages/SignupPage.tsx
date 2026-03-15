@@ -8,11 +8,16 @@ import { useAuth } from "../lib/auth";
 import { SUPPORT_EMAIL } from "./pagesShared";
 
 const signupSchema = z.object({
-    name: z.string().trim().min(3, "Name must be at least 3 characters.").refine((value) => /[A-Za-z]/.test(value), {
+    name: z.string().trim().min(2, "Name must be at least 2 characters.").refine((value) => /[A-Za-z]/.test(value), {
         message: "Name must include letters.",
     }),
     email: z.string().trim().email("Enter a valid email."),
-    password: z.string().min(8, "Password must be at least 8 characters."),
+    password: z
+        .string()
+        .min(8, "Password must be at least 8 characters.")
+        .refine((value) => /[A-Za-z]/.test(value) && /[0-9]/.test(value), {
+            message: "Password must include at least one letter and one number.",
+        }),
     confirmPassword: z.string().min(1, "Confirm your password."),
     agree: z.boolean().refine((value) => value, { message: "Please accept the terms to continue." }),
 }).superRefine((value, ctx) => {

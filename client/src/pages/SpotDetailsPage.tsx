@@ -86,14 +86,20 @@ export default function SpotDetailsPage() {
     const [hasSelectedSlot, setHasSelectedSlot] = useState(false);
     const [calendarDraftStartDate, setCalendarDraftStartDate] = useState<string | null>(null);
     const [calendarDraftEndDate, setCalendarDraftEndDate] = useState<string | null>(null);
+    const [calendarResetNonce, setCalendarResetNonce] = useState(0);
+
+    const initialSlotDraft = useMemo(
+        () => ({
+            startDate: toLocalDateInput(initialStart),
+            endDate: toLocalDateInput(initialEnd),
+            startTime: toTimeInput(initialStart),
+            endTime: toTimeInput(initialEnd),
+        }),
+        [initialEnd, initialStart]
+    );
 
     const [slotDialogOpen, setSlotDialogOpen] = useState(false);
-    const [slotDialogDraft, setSlotDialogDraft] = useState(() => ({
-        startDate: toLocalDateInput(initialStart),
-        endDate: toLocalDateInput(initialEnd),
-        startTime: toTimeInput(initialStart),
-        endTime: toTimeInput(initialEnd),
-    }));
+    const [slotDialogDraft, setSlotDialogDraft] = useState(() => initialSlotDraft);
 
     const [payMethod, setPayMethod] = useState<PayMethod>("money");
 
@@ -202,8 +208,12 @@ export default function SpotDetailsPage() {
     const spotsLeft = Math.max(0, capacity - overlappingBookings.length);
     const slotFull = spotsLeft <= 0;
 
+    const isOwner = !!user && !!spot && user.id === spot.owner_user_id;
+    const listingInactive = !!spot && !spot.is_active;
+
     const slotStatus = useMemo(() => {
         if (!hasSelectedSlot) return { ok: false, label: "Choose a slot to continue." };
+        if (listingInactive) return { ok: false, label: "This listing is no longer active." };
         if (!slotRangeValid) return { ok: false, label: "Pick a valid slot." };
         if (!startsInFuture) return { ok: false, label: "Start time must be in the future." };
         if (!slotAllowed) return { ok: false, label: "Requested slot is outside listing availability." };
@@ -217,9 +227,7 @@ export default function SpotDetailsPage() {
             ok: true,
             label: capacity > 1 ? `${spotsLeft} spot${spotsLeft === 1 ? "" : "s"} left for this slot.` : "Slot is available.",
         };
-    }, [hasSelectedSlot, slotRangeValid, startsInFuture, slotAllowed, slotFull, capacity, spotsLeft]);
-
-    const isOwner = !!user && !!spot && user.id === spot.owner_user_id;
+    }, [hasSelectedSlot, listingInactive, slotRangeValid, startsInFuture, slotAllowed, slotFull, capacity, spotsLeft]);
 
     const listingUnit = (spot?.price_unit ?? "hour") as PriceUnit;
     const estimatedTotal = useMemo(() => {
@@ -300,8 +308,18 @@ export default function SpotDetailsPage() {
     }
 
     function resetCalendarSelection() {
-        closeSlotDialog();
+        setSlotDialogOpen(false);
+        setCalendarDraftStartDate(null);
+        setCalendarDraftEndDate(null);
+        setSelectedStartDate(initialSlotDraft.startDate);
+        setSelectedEndDate(initialSlotDraft.endDate);
+        setSelectedStartTime(initialSlotDraft.startTime);
+        setSelectedEndTime(initialSlotDraft.endTime);
+        setSlotDialogDraft(initialSlotDraft);
         setHasSelectedSlot(false);
+        setActionMsg(null);
+        setBidMsg(null);
+        setCalendarResetNonce((value) => value + 1);
     }
 
     const calendarStartDate = calendarDraftStartDate ?? (hasSelectedSlot ? selectedStartDate : "");
@@ -316,6 +334,7 @@ export default function SpotDetailsPage() {
     async function createBooking() {
         if (!token) return setActionMsg("Please log in to book this listing.");
         if (!spot || spot.mode === "auction") return;
+        if (listingInactive) return setActionMsg("This listing is no longer active.");
         if (isOwner) return setActionMsg("You cannot book your own listing.");
         if (!slotStatus.ok) return setActionMsg(slotStatus.label);
         if (payMethod === "money" && !canUseMoneyBooking) return setActionMsg("This listing accepts points only.");
@@ -356,6 +375,7 @@ export default function SpotDetailsPage() {
     function goToBidConfirm() {
         if (!spot || spot.mode !== "auction") return;
         if (!token) return setBidMsg("Please log in to place a bid.");
+        if (listingInactive) return setBidMsg("This listing is no longer active.");
         if (isOwner) return setBidMsg("Owners cannot bid on their own listing.");
         if (auctionClosed) return setBidMsg("No slots left for this listing.");
         if (!slotStatus.ok) return setBidMsg(slotStatus.label);
@@ -458,6 +478,7 @@ export default function SpotDetailsPage() {
                             <span className="badge">{modeLabel}</span>
                             <span className="badge badge--cool">{priceLabel}</span>
                             <span className="badge">{formatAvailability(spot)}</span>
+                            {listingInactive && <span className="badge badge--rose">Inactive</span>}
                             {capacity > 1 && (
                                 <span className={`badge ${spotsLeft > 0 ? "badge--green" : "badge--rose"}`}>
                                     {spotsLeft}/{capacity} available
@@ -476,12 +497,12 @@ export default function SpotDetailsPage() {
                         </p>
 
                         <SlotCalendar
-                            key={calendarAnchorDate.slice(0, 7)}
+                            key={`${calendarAnchorDate.slice(0, 7)}-${calendarResetNonce}`}
                             spot={spot}
                             startDate={calendarStartDate}
                             endDate={calendarEndDate}
                             onPickDate={pickCalendarDate}
-                            disabled={busy || bidBusy}
+                            disabled={busy || bidBusy || listingInactive}
                         />
 
                         <div className="rowInline" style={{ justifyContent: "flex-end", marginTop: 8 }}>
@@ -489,7 +510,7 @@ export default function SpotDetailsPage() {
                                 type="button"
                                 className="btn"
                                 onClick={resetCalendarSelection}
-                                disabled={busy || bidBusy}
+                                disabled={busy || bidBusy || listingInactive}
                                 style={{ padding: "6px 12px", fontSize: 12 }}
                             >
                                 Reset
@@ -543,6 +564,7 @@ export default function SpotDetailsPage() {
                                 </div>
                             )}
                             {isOwner && <div className="spotAlert">You are the owner of this listing.</div>}
+                            {listingInactive && <div className="spotAlert">This listing is no longer active for new bids.</div>}
 
                             <AppRadioCards
                                 ariaLabel="Bid payment method"
@@ -552,7 +574,7 @@ export default function SpotDetailsPage() {
                                 orientation="horizontal"
                                 value={bidPayMethod}
                                 onChange={setBidPayMethod}
-                                isDisabled={auctionClosed || bidBusy}
+                                isDisabled={auctionClosed || bidBusy || listingInactive}
                                 options={[
                                     ...(canUseMoneyBids ? [{ id: "money" as const, content: "Money" }] : []),
                                     ...(canUsePoints ? [{ id: "points" as const, content: "Points" }] : []),
@@ -570,7 +592,7 @@ export default function SpotDetailsPage() {
                                         value={bidMoneyPerHour}
                                         onChange={(e) => setBidMoneyPerHour(e.target.value)}
                                         placeholder="e.g. 8"
-                                        disabled={auctionClosed || bidBusy}
+                                        disabled={auctionClosed || bidBusy || listingInactive}
                                     />
                                     <div className="tiny muted">Estimated total: {bidTotalMoney > 0 ? formatGbp(bidTotalMoney) : "-"}</div>
                                 </label>
@@ -585,7 +607,7 @@ export default function SpotDetailsPage() {
                                         value={bidPointsPerHour}
                                         onChange={(e) => setBidPointsPerHour(e.target.value)}
                                         placeholder={`Points per ${listingUnit}`}
-                                        disabled={auctionClosed || bidBusy}
+                                        disabled={auctionClosed || bidBusy || listingInactive}
                                     />
                                     <div className="tiny muted">Estimated total: {bidTotalPoints > 0 ? `${bidTotalPoints} pts` : "-"}</div>
                                     {bidPointsInsufficient && (
@@ -600,7 +622,7 @@ export default function SpotDetailsPage() {
                                 <button
                                     onClick={goToBidConfirm}
                                     className="btn btn-primary"
-                                    disabled={!token || isOwner || auctionClosed || bidBusy || !slotStatus.ok}
+                                    disabled={!token || isOwner || auctionClosed || bidBusy || listingInactive || !slotStatus.ok}
                                 >
                                     Review bid
                                 </button>
@@ -617,6 +639,7 @@ export default function SpotDetailsPage() {
                                 </div>
                             )}
                             {isOwner && <div className="spotAlert">You cannot book your own listing.</div>}
+                            {listingInactive && <div className="spotAlert">This listing is no longer active for new bookings.</div>}
 
                             <div className="spotSimpleInlineMeta">
                                 <span className="tiny muted">Estimated total</span>
@@ -631,7 +654,7 @@ export default function SpotDetailsPage() {
                                 orientation="horizontal"
                                 value={payMethod}
                                 onChange={setPayMethod}
-                                isDisabled={busy}
+                                isDisabled={busy || listingInactive}
                                 options={[
                                     ...(canUseMoneyBooking ? [{ id: "money" as const, content: "Card" }] : []),
                                     ...(canUsePoints ? [{ id: "points" as const, content: "Points" }] : []),
@@ -642,7 +665,7 @@ export default function SpotDetailsPage() {
                                 <button
                                     onClick={createBooking}
                                     className="btn btn-primary"
-                                    disabled={!token || isOwner || busy || !slotStatus.ok}
+                                    disabled={!token || isOwner || busy || listingInactive || !slotStatus.ok}
                                 >
                                     {busy ? "Booking..." : payMethod === "money" ? "Continue to payment" : "Confirm points booking"}
                                 </button>

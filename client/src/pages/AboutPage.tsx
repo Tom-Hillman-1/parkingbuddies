@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDownIcon, DragHandleDots2Icon } from "@radix-ui/react-icons";
-import { Link } from "react-router-dom";
+import {
+    CheckCircledIcon,
+    ChevronDownIcon,
+    ClockIcon,
+    DragHandleDots2Icon,
+    LockClosedIcon,
+    MagnifyingGlassIcon,
+    MixerHorizontalIcon,
+    RocketIcon,
+} from "@radix-ui/react-icons";
+import { Link, useLocation } from "react-router-dom";
 import { AppDisclosure } from "../components/ui/AppDisclosure";
 import { AppButton, AppField, AppInput, AppSelect, AppTextarea } from "../components/ui/AppForm";
 import { SUPPORT_EMAIL } from "./pagesShared";
@@ -79,14 +88,19 @@ const FAQ_ITEMS: FaqItem[] = [
         answer: "Yes, when a listing allows points you can choose either card or points during booking. If points are not enabled for that listing, card remains the payment option.",
     },
     {
-        id: "faq-owner-start",
-        question: "How do I create a listing as an owner?",
-        answer: "Go to Create listing, then add a clear title, location, pricing model, availability window, and image so drivers can understand the space quickly.",
+        id: "faq-owner-create",
+        question: "How do I create a listing step by step?",
+        answer: "Open Create listing, add the basics like title and contact details, choose rent or auction, set the money or points price, confirm the location on the map, upload an image, then add the availability slots you want drivers to book.",
     },
     {
-        id: "faq-owner-model",
-        question: "How do owners control bookings and bids?",
-        answer: "Owners decide whether a listing uses direct rent bookings or manual auction approvals, and they can manage incoming activity from the dashboard.",
+        id: "faq-owner-details",
+        question: "What details make a listing easier for drivers to book?",
+        answer: "The clearest listings use a specific title, accurate map location, realistic pricing, a useful image, and availability windows that match when the space can actually be used.",
+    },
+    {
+        id: "faq-owner-availability",
+        question: "How do availability windows work for owners?",
+        answer: "Owners choose the dates and times when a space can be booked. Drivers only see and book slots that fit inside those saved windows, so availability stays tied to the schedule the owner set.",
     },
     {
         id: "faq-overlap",
@@ -94,9 +108,39 @@ const FAQ_ITEMS: FaqItem[] = [
         answer: "Availability windows, overlap checks, and listing capacity rules work together to stop bookings or approvals that clash with an already occupied slot.",
     },
     {
+        id: "faq-owner-bids",
+        question: "What happens after a driver places an auction bid?",
+        answer: "The owner sees the offer in the dashboard, reviews the time window and amount, and can then accept or reject it. Nothing is fully settled until the owner accepts.",
+    },
+    {
+        id: "faq-money-system",
+        question: "How does the money system work for bookings and auctions?",
+        answer: "Normal rent bookings take payment for the chosen slot when the booking is confirmed. Auction money bids use an authorization first, then only capture the payment if the owner accepts the bid.",
+    },
+    {
+        id: "faq-owner-payouts",
+        question: "How do Stripe payouts work for owners?",
+        answer: "Owners connect their Stripe account from Settings so successful money bookings can be routed through Stripe Connect. That keeps payouts separate from the booking flow and lets owners manage payout details directly.",
+    },
+    {
+        id: "faq-password-security",
+        question: "How is my password protected?",
+        answer: "Passwords are not stored as plain text. The server saves a hashed version instead, so the original password is not readable from the database.",
+    },
+    {
+        id: "faq-account-updates",
+        question: "Can I change my name, email, or password later?",
+        answer: "Yes. The Settings page lets you update profile details and change your password, so account information can be kept current after signup.",
+    },
+    {
+        id: "faq-owner-model",
+        question: "How do owners control bookings and bids?",
+        answer: "Owners decide whether a listing uses direct rent bookings or manual auction approvals, and they can manage incoming activity from the dashboard.",
+    },
+    {
         id: "faq-points-rate",
-        question: "What is the value of a point?",
-        answer: "ParkingBuddies recommends 10 points = GBP 1 as the baseline for pricing, but owners can still set a slightly higher or lower custom points rate on a listing.",
+        question: "How do points and rewards work across the platform?",
+        answer: "ParkingBuddies uses a recommended baseline of 10 points = GBP 1. Users earn rewards from actions like signup, profile completion, first published listings, and successful paid bookings, while owners can still fine-tune points pricing on a listing.",
     },
     {
         id: "faq-earn-points",
@@ -109,7 +153,17 @@ const FAQ_ITEMS: FaqItem[] = [
         answer: "They do not settle immediately. Money stays as authorization only, and points remain in the balance, until the owner accepts the auction bid.",
     },
     {
+        id: "faq-delete-listing",
+        question: "What happens if an owner deletes a listing?",
+        answer: "The listing is made inactive, so it no longer appears in search results and new bookings cannot be made against it. Existing history stays preserved for records and past activity.",
+    },
+    {
         id: "faq-signup-reward",
+        question: "What rewards do new users and new owners get at the start?",
+        answer: "New users receive signup points straight away, profile completion adds another bonus, and owners also earn rewards for each of their first published listings, up to the initial platform limit.",
+    },
+    {
+        id: "faq-signup-points",
         question: "How many points do I get for signing up?",
         answer: "New users receive 25 points when they create an account, giving them a starting balance they can build on through platform activity.",
     },
@@ -127,6 +181,11 @@ const FAQ_ITEMS: FaqItem[] = [
         id: "faq-cashback-bonus",
         question: "What do cashback and host bonus actually mean?",
         answer: "On successful paid bookings, drivers earn points back as cashback and owners earn a smaller host bonus, so both sides benefit when a money booking is completed.",
+    },
+    {
+        id: "faq-why-times-vary",
+        question: "Why do some listings show different times on different days?",
+        answer: "Availability is tied to the exact slots the owner created, so some listings may allow a full day on one date and only a shorter window on another. The calendar shows those differences directly so drivers can choose more accurately.",
     },
 ];
 
@@ -268,6 +327,7 @@ function AboutFaqItem({ item }: { item: FaqItem }) {
 export default function AboutPage() {
     const rootRef = useRef<HTMLDivElement | null>(null);
     const railRef = useRef<HTMLDivElement | null>(null);
+    const location = useLocation();
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
     const [topic, setTopic] = useState("General question");
@@ -348,6 +408,18 @@ export default function AboutPage() {
         };
     }, []);
 
+    useEffect(() => {
+        if (!location.hash) return;
+
+        const targetId = location.hash.slice(1);
+        const scrollToTarget = () => {
+            const target = document.getElementById(targetId);
+            if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+        };
+
+        window.requestAnimationFrame(scrollToTarget);
+    }, [location.hash]);
+
     async function submitHelp(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault();
         setSending(true);
@@ -390,11 +462,11 @@ export default function AboutPage() {
                 <p className="aboutPremiumKicker">About ParkingBuddies</p>
                 <h1 className="aboutPremiumTitle">Project set to solve real world parking problems</h1>
                 <p className="aboutPremiumSub">
-                    Built as a final-year BSc Computer Science project, ParkingBuddies helps drivers book faster
-                    and gives owners clear control over approvals, pricing, and availability.
+                    Built as part of a dissertation project, ParkingBuddies is a community-driven platform that uses a points-based system, allowing users to earn and redeem points without involving real-money payments. It also gives space owners clear, flexible control over approvals, pricing, and availability.
+
                 </p>
                 <div className="aboutPremiumActions">
-                    <Link to="/" className="aboutPremiumBtn aboutPremiumBtn--primary">Browse spots</Link>
+                    <a href="#contact-bottom" className="aboutPremiumBtn aboutPremiumBtn--primary">Contact</a>
                     <Link to="/create-listing" className="aboutPremiumBtn aboutPremiumBtn--secondary">Create listing</Link>
                 </div>
             </header>
@@ -432,57 +504,91 @@ export default function AboutPage() {
 
             <section className="aboutPremiumJourney aboutReveal" aria-labelledby="about-journey-title">
                 <div className="aboutJourneyStack">
-                    <article className="aboutJourneyIntroTab">
-                        <p className="aboutPremiumLabel">How the platform works</p>
-                        <h2 id="about-journey-title" className="aboutJourneyIntroTitle">Built for both sides of the parking journey</h2>
-                        <p className="aboutJourneyIntroCopy">
-                            ParkingBuddies keeps the experience simple for drivers without taking control away from owners. Search, timing, booking,
-                            bidding, approvals, and rewards all sit inside one shared flow that feels easier to follow.
-                        </p>
-
-                        <div className="aboutJourneyIntroChips">
-                            <span className="aboutJourneyChip">Search smarter</span>
-                            <span className="aboutJourneyChip">Choose exact timing</span>
-                            <span className="aboutJourneyChip">Book or bid</span>
-                            <span className="aboutJourneyChip">Shared points model</span>
-                        </div>
-                    </article>
-
                     <div className="aboutJourneyRoleGrid">
                         <article className="aboutJourneyRoleCard aboutJourneyRoleCard--driver">
-                            <span className="aboutJourneyRoleBadge">For drivers</span>
+                            <div className="aboutJourneyRoleTop">
+                                <span className="aboutJourneyRoleMark" aria-hidden="true">
+                                    <MagnifyingGlassIcon />
+                                </span>
+                                <span className="aboutJourneyRoleBadge">For drivers</span>
+                            </div>
                             <h3 className="aboutJourneyRoleTitle">Choose your parking space based on what's right for you</h3>
+                            <div className="aboutJourneyRoleTags" aria-hidden="true">
+                                <span className="aboutJourneyRoleTag">Search</span>
+                                <span className="aboutJourneyRoleTag">Book</span>
+                                <span className="aboutJourneyRoleTag">Park</span>
+                            </div>
                             <ul className="aboutJourneyRoleList">
-                                <li>
-                                    <strong>Search faster</strong>
-                                    Filter by area, date, time, price, or listing type to narrow the best options quickly.
+                                <li className="aboutJourneyRoleItem">
+                                    <span className="aboutJourneyRoleItemIcon" aria-hidden="true">
+                                        <MagnifyingGlassIcon />
+                                    </span>
+                                    <span>
+                                        <strong>Find the right space</strong>
+                                        Filter by area, date, time, price, or listing type to narrow the best options quickly.
+                                    </span>
                                 </li>
-                                <li>
-                                    <strong>Pick exact timing</strong>
-                                    Choose a start and end date, then set the exact times that match the stay you need.
+                                <li className="aboutJourneyRoleItem">
+                                    <span className="aboutJourneyRoleItemIcon" aria-hidden="true">
+                                        <ClockIcon />
+                                    </span>
+                                    <span>
+                                        <strong>Pick exact timing</strong>
+                                        Choose a start and end date, then set the exact times that match the stay you need.
+                                    </span>
                                 </li>
-                                <li>
-                                    <strong>Book or bid</strong>
-                                    Reserve instantly on rent listings, or place an offer when the space is listed as an auction.
+                                <li className="aboutJourneyRoleItem">
+                                    <span className="aboutJourneyRoleItemIcon" aria-hidden="true">
+                                        <RocketIcon />
+                                    </span>
+                                    <span>
+                                        <strong>Book or bid</strong>
+                                        Reserve instantly on rent listings, or place an offer when the space is listed as an auction.
+                                    </span>
                                 </li>
                             </ul>
                         </article>
 
                         <article className="aboutJourneyRoleCard aboutJourneyRoleCard--owner">
-                            <span className="aboutJourneyRoleBadge">For owners</span>
+                            <div className="aboutJourneyRoleTop">
+                                <span className="aboutJourneyRoleMark" aria-hidden="true">
+                                    <LockClosedIcon />
+                                </span>
+                                <span className="aboutJourneyRoleBadge">For owners</span>
+                            </div>
                             <h3 className="aboutJourneyRoleTitle">Stay in control of bookings, bids, and availability</h3>
+                            <div className="aboutJourneyRoleTags" aria-hidden="true">
+                                <span className="aboutJourneyRoleTag">Model</span>
+                                <span className="aboutJourneyRoleTag">Capacity</span>
+                                <span className="aboutJourneyRoleTag">Approvals</span>
+                            </div>
                             <ul className="aboutJourneyRoleList">
-                                <li>
-                                    <strong>Choose the model</strong>
-                                    Use rent mode for instant reservations or auction mode when offers should be reviewed first.
+                                <li className="aboutJourneyRoleItem">
+                                    <span className="aboutJourneyRoleItemIcon" aria-hidden="true">
+                                        <MixerHorizontalIcon />
+                                    </span>
+                                    <span>
+                                        <strong>Choose the model</strong>
+                                        Use rent mode for instant reservations or auction mode when offers should be reviewed first.
+                                    </span>
                                 </li>
-                                <li>
-                                    <strong>Protect each slot</strong>
-                                    Capacity and overlap checks help prevent double-booking across the same time window.
+                                <li className="aboutJourneyRoleItem">
+                                    <span className="aboutJourneyRoleItemIcon" aria-hidden="true">
+                                        <CheckCircledIcon />
+                                    </span>
+                                    <span>
+                                        <strong>Protect each slot</strong>
+                                        Capacity and overlap checks help prevent double-booking across the same time window.
+                                    </span>
                                 </li>
-                                <li>
-                                    <strong>Approve with confidence</strong>
-                                    Money bids stay as authorization only, and points stay in the user balance, until acceptance.
+                                <li className="aboutJourneyRoleItem">
+                                    <span className="aboutJourneyRoleItemIcon" aria-hidden="true">
+                                        <LockClosedIcon />
+                                    </span>
+                                    <span>
+                                        <strong>Approve with confidence</strong>
+                                        Money bids stay as authorization only, and points stay in the user balance, until acceptance.
+                                    </span>
                                 </li>
                             </ul>
                         </article>

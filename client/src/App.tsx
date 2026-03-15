@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import Lottie from "lottie-react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import logoNameLongBlue from "./assets/logo_name_long_blue.png";
 import NavBar from "./components/NavBar";
 
@@ -107,7 +107,12 @@ export default function App() {
                 <Outlet />
             </main>
             <footer className="site-footer">
-                <p className="site-footer-text">ParkingBuddies project © {new Date().getFullYear()}. All rights reserved.</p>
+                <p className="site-footer-text">
+                    ParkingBuddies project © {new Date().getFullYear()}. All rights reserved.{" "}
+                    <Link to="/about#contact-bottom" className="site-footer-link">
+                         Contact us.
+                    </Link>
+                </p>
             </footer>
         </div>
     );
