@@ -9,6 +9,7 @@ import { stripe } from "../stripe";
 import { moneyBookingRewardPoints, moneyHostingRewardPoints, toMoney } from "../lib/shared";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
+import { serverError } from "../lib/errors";
 
 const router = Router();
 
@@ -334,7 +335,7 @@ async function finalizePaymentIntent(paymentIntent: Stripe.PaymentIntent) {
 
         await upsertLatestPaymentRow(client, bookingId, paymentIntent.id, paidAmountGbp, "succeeded");
 
-        if (booking.status !== "confirmed") {
+        if (booking.status === "pending") {
             await client.query(
                 `UPDATE bookings
                  SET status = 'confirmed', updated_at = now()
@@ -343,7 +344,9 @@ async function finalizePaymentIntent(paymentIntent: Stripe.PaymentIntent) {
             );
         }
 
-        await awardMoneyBookingRewardsIfNeeded(client, booking);
+        if (booking.status === "pending" || booking.status === "confirmed") {
+            await awardMoneyBookingRewardsIfNeeded(client, booking);
+        }
         await client.query("COMMIT");
     } catch (e) {
         await client.query("ROLLBACK");
@@ -410,7 +413,7 @@ async function syncBookingPaymentFromReceipt(
         await upsertLatestPaymentRow(client, bookingId, paymentIntentId, amountGbp, status);
 
         if (status === "succeeded") {
-            if (booking.status !== "confirmed") {
+            if (booking.status === "pending") {
                 await client.query(
                     `UPDATE bookings
                      SET status = 'confirmed', updated_at = now()
@@ -418,7 +421,9 @@ async function syncBookingPaymentFromReceipt(
                     [bookingId]
                 );
             }
-        await awardMoneyBookingRewardsIfNeeded(client, booking);
+            if (booking.status === "pending" || booking.status === "confirmed") {
+                await awardMoneyBookingRewardsIfNeeded(client, booking);
+            }
         }
 
         await client.query("COMMIT");
@@ -504,7 +509,7 @@ router.post("/connect/onboard", requireAuth, async (req: AuthRequest, res) => {
 
         return res.json({ ok: true, url: link.url, connect: status });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to start Stripe onboarding right now");
     } finally {
         client.release();
     }
@@ -537,7 +542,7 @@ router.get("/connect/status", requireAuth, async (req: AuthRequest, res) => {
         const status = await syncStripeAccountStatus(client, userId, accountId);
         return res.json({ ok: true, connect: status });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load Stripe connect status right now");
     } finally {
         client.release();
     }
@@ -574,7 +579,7 @@ router.post("/connect/dashboard-link", requireAuth, async (req: AuthRequest, res
         const link = await stripe.accounts.createLoginLink(accountId);
         return res.json({ ok: true, url: link.url, connect: status });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to open Stripe dashboard right now");
     } finally {
         client.release();
     }
@@ -701,7 +706,7 @@ router.post("/checkout-session", requireAuth, async (req: AuthRequest, res) => {
 
         return res.json({ ok: true, url: session.url });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to start checkout right now");
     }
 });
 
@@ -771,7 +776,7 @@ router.post("/auction-intent", requireAuth, async (req: AuthRequest, res) => {
             payment_intent_id: intent.id,
         });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to create auction payment authorization right now");
     }
 });
 
@@ -806,7 +811,7 @@ router.post("/auction-intent/cancel", requireAuth, async (req: AuthRequest, res)
         if (stripeCode === "payment_intent_unexpected_state") {
             return res.status(400).json({ ok: false, error: "Payment intent is in a non-cancellable state" });
         }
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to cancel payment authorization right now");
     }
 });
 
@@ -895,7 +900,7 @@ router.get("/booking/:bookingId/receipt", requireAuth, async (req: AuthRequest, 
 
         return res.json({ ok: true, receipt, payment_status: normalizedPaymentStatus });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load payment receipt right now");
     }
 });
 
@@ -976,14 +981,14 @@ router.get("/me", requireAuth, async (req: AuthRequest, res) => {
 
         return res.json({ ok: true, payments: r.rows });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load payment history right now");
     }
 });
 
 export async function stripeWebhookHandler(req: Request, res: Response) {
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
     if (!webhookSecret) {
-        return res.status(500).json({ ok: false, error: "Missing STRIPE_WEBHOOK_SECRET" });
+        return serverError(res, new Error("Missing STRIPE_WEBHOOK_SECRET"));
     }
 
     const signature = req.headers["stripe-signature"];
@@ -994,8 +999,8 @@ export async function stripeWebhookHandler(req: Request, res: Response) {
     let event: Stripe.Event;
     try {
         event = stripe.webhooks.constructEvent(req.body as Buffer, signature, webhookSecret);
-    } catch (e) {
-        return res.status(400).json({ ok: false, error: `Webhook signature verification failed: ${String(e)}` });
+    } catch {
+        return res.status(400).json({ ok: false, error: "Webhook signature verification failed" });
     }
 
     try {
@@ -1006,7 +1011,7 @@ export async function stripeWebhookHandler(req: Request, res: Response) {
         }
         return res.json({ ok: true, received: true });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Webhook processing failed");
     }
 }
 

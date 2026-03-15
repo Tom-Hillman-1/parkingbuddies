@@ -167,7 +167,7 @@ export default function SpotDetailsPage() {
     }, [canUsePoints, payMethod]);
 
     const listingPrice = toFiniteNumber(spot?.price_gbp);
-    const canUseMoneyBooking = !!spot && spot.mode !== "free" && listingPrice > 0;
+    const canUseMoneyBooking = !!spot && (spot.mode === "free" || listingPrice > 0);
     const canUseMoneyBids = !spot || spot.mode !== "auction" || toFiniteNumber(spot.auction_start_price_gbp) >= 0.1;
 
     useEffect(() => {
@@ -235,6 +235,7 @@ export default function SpotDetailsPage() {
         const units = calcUnitsForMinutes(selectedMinutes, listingUnit);
         return roundMoney(listingPrice * units);
     }, [spot, selectedMinutes, listingUnit, listingPrice]);
+    const isFreeBooking = !!spot && spot.mode !== "auction" && estimatedTotal <= 0;
 
     const pointsMinTotal = useMemo(() => {
         if (!canUsePoints || !spot) return 0;
@@ -364,6 +365,7 @@ export default function SpotDetailsPage() {
                 booking?.id;
 
             if (needsPayment) return navigate(`/pay/${booking.id}`);
+            if (booking?.id) return navigate(`/pay/${booking.id}`);
             navigate("/dashboard?tab=myBookings");
         } catch (error: unknown) {
             setActionMsg(readErrorMessage(error, "Booking failed."));
@@ -667,7 +669,13 @@ export default function SpotDetailsPage() {
                                     className="btn btn-primary"
                                     disabled={!token || isOwner || busy || listingInactive || !slotStatus.ok}
                                 >
-                                    {busy ? "Booking..." : payMethod === "money" ? "Continue to payment" : "Confirm points booking"}
+                                    {busy
+                                        ? "Booking..."
+                                        : payMethod === "points"
+                                          ? "Confirm points booking"
+                                          : isFreeBooking
+                                            ? "Confirm free booking"
+                                            : "Continue to payment"}
                                 </button>
                                 {actionMsg && <span className="tiny muted">{actionMsg}</span>}
                             </div>

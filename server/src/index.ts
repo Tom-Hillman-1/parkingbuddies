@@ -10,6 +10,7 @@ import settingsRoutes from "./routes/settings";
 import dashboardRoutes from "./routes/dashboard";
 import paymentsRoutes, { stripeWebhookHandler } from "./routes/payments";
 import auctionsRoutes from "./routes/auctions";
+import { serverError } from "./lib/errors";
 dotenv.config();
 
 const app = express();
@@ -58,7 +59,7 @@ app.get("/db-health", async (_req: Request, res: Response) => {
         const r = await pool.query("SELECT 1 AS ok");
         res.json({ ok: r.rows[0].ok === 1 });
     } catch (e) {
-        res.status(500).json({ ok: false, error: String(e) });
+        serverError(res, e);
     }
 });
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;

@@ -2,12 +2,14 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
-import { availabilityDateRange, isWindowSlot, remainingMinutes } from "../lib/availability";
+import { availabilityDateRange, isWindowSlot, parseLondonDateTime, remainingMinutes } from "../lib/availability";
 import {
     LISTING_PUBLISH_REWARD_POINTS,
     MAX_LISTING_PUBLISH_REWARDS,
 } from "../lib/shared";
 import { parseWithSchema } from "../lib/validation";
+import { serverError } from "../lib/errors";
+import { simpleRateLimit } from "../lib/rateLimit";
 
 const router = Router();
 
@@ -22,6 +24,12 @@ const NOMINATIM_HEADERS = {
     "Accept-Language": "en-GB,en;q=0.9",
     "User-Agent": "ParkingBuddies/1.0",
 };
+const geocodeRateLimit = simpleRateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    message: "Too many address lookups. Please wait a moment and try again.",
+    keyPrefix: "geocode",
+});
 const listingBodySchema = z.record(z.string(), z.unknown());
 const spotIdParamsSchema = z.object({
     id: z.string().uuid("id must be a valid listing ID"),
@@ -80,6 +88,14 @@ type NormalizedListingInput = {
     owner_contact_email: string | null;
     owner_contact_phone: string | null;
     owner_contact_info: string | null;
+};
+
+type PreparedListingMutation = Omit<NormalizedListingInput, "priceNum" | "points_cost"> & {
+    availability: AvailabilityJson;
+    priceNum: number;
+    pointsCost: number;
+    auction_end: string | null;
+    auction_start_price_gbp: number | null;
 };
 
 function isNonEmptyString(x: unknown, minLen = 1): x is string {
@@ -158,6 +174,23 @@ function isDemoConnectAccountId(accountId: string | null | undefined) {
     return typeof accountId === "string" && accountId.startsWith(DEMO_CONNECT_ACCOUNT_PREFIX);
 }
 
+function ownerOnboardingComplete(ownerConnect: any) {
+    return (
+        (DEMO_PAYOUTS_ENABLED && !ownerConnect?.stripe_account_id) ||
+        isDemoConnectAccountId(ownerConnect?.stripe_account_id) ||
+        (typeof ownerConnect?.stripe_account_id === "string" &&
+            ownerConnect.stripe_charges_enabled &&
+            ownerConnect.stripe_payouts_enabled &&
+            ownerConnect.stripe_details_submitted)
+    );
+}
+
+function listingNeedsMoneyPayout(data: PreparedListingMutation) {
+    if (data.mode === "rent") return data.priceNum > 0;
+    if (data.mode === "auction") return Number(data.auction_start_price_gbp ?? 0) > 0;
+    return false;
+}
+
 function auctionEndFromAvailability(availability: AvailabilityJson) {
     if (!Array.isArray(availability.windows) || availability.windows.length === 0) return null;
     const lastDate = availability.windows
@@ -166,7 +199,7 @@ function auctionEndFromAvailability(availability: AvailabilityJson) {
         .sort()
         .at(-1);
     if (!lastDate) return null;
-    return new Date(`${lastDate}T23:59:59.999Z`).toISOString();
+    return new Date(parseLondonDateTime(lastDate, "23:59").getTime() + 59 * 1000 + 999).toISOString();
 }
 
 function buildAvailabilityJson(body: any): { ok: true; availability: AvailabilityJson } | { ok: false; error: string } {
@@ -298,85 +331,98 @@ function resolveListingPricing(
     return { ok: true, data: { priceNum, pointsCost, auction_end, auction_start_price_gbp } };
 }
 
+function prepareListingMutation(
+    body: any
+): { ok: true; data: PreparedListingMutation } | { ok: false; error: string } {
+    const parsedInput = normalizeListingInput(body);
+    if (!parsedInput.ok) {
+        return parsedInput;
+    }
+
+    const availabilityResult = buildAvailabilityJson(body);
+    if (!availabilityResult.ok) {
+        return availabilityResult;
+    }
+
+    const pricingResult = resolveListingPricing(
+        body,
+        parsedInput.data.mode,
+        availabilityResult.availability,
+        parsedInput.data.priceNum,
+        parsedInput.data.allow_points,
+        parsedInput.data.points_cost
+    );
+    if (!pricingResult.ok) {
+        return pricingResult;
+    }
+
+    const { points_cost: _ignoredPointsCost, ...normalizedInput } = parsedInput.data;
+    return {
+        ok: true,
+        data: {
+            ...normalizedInput,
+            availability: availabilityResult.availability,
+            ...pricingResult.data,
+        },
+    };
+}
+
+function listingMutationCoreValues(data: PreparedListingMutation) {
+    return [
+        data.title,
+        data.description,
+        data.mode,
+        data.priceNum,
+        data.unit,
+        data.allow_points,
+        data.pointsCost,
+        data.address_text,
+        data.lat,
+        data.lng,
+        data.image_url,
+        data.availability,
+        data.auction_end,
+        data.auction_start_price_gbp,
+        data.parking_type,
+        data.capacity_total,
+        data.owner_contact_email,
+        data.owner_contact_phone,
+        data.owner_contact_info,
+    ];
+}
+
 router.post("/", requireAuth, async (req: AuthRequest, res) => {
     const parsedBody = parseWithSchema(listingBodySchema, req.body ?? {}, res, "listing_create");
     if (!parsedBody.ok) return;
     const body = parsedBody.data;
-    const parsedInput = normalizeListingInput(body);
-    if (!parsedInput.ok) return res.status(400).json({ ok: false, error: parsedInput.error });
-    const {
-        title,
-        description,
-        mode,
-        address_text,
-        lat,
-        lng,
-        parking_type,
-        capacity_total,
-        image_url,
-        unit,
-        priceNum: initialPriceNum,
-        allow_points,
-        points_cost,
-        owner_contact_email,
-        owner_contact_phone,
-        owner_contact_info,
-    } = parsedInput.data;
+    const prepared = prepareListingMutation(body);
+    if (!prepared.ok) return res.status(400).json({ ok: false, error: prepared.error });
 
-    const ownerConnectR = await pool.query(
-        `SELECT stripe_account_id,
-                stripe_charges_enabled,
-                stripe_payouts_enabled,
-                stripe_details_submitted
-         FROM users
-         WHERE id = $1`,
-        [req.userId]
-    );
-    if (!ownerConnectR.rowCount) {
-        return res.status(404).json({ ok: false, error: "User not found" });
+    if (listingNeedsMoneyPayout(prepared.data)) {
+        try {
+            const ownerConnectR = await pool.query(
+                `SELECT stripe_account_id,
+                        stripe_charges_enabled,
+                        stripe_payouts_enabled,
+                        stripe_details_submitted
+                 FROM users
+                 WHERE id = $1`,
+                [req.userId]
+            );
+            if (!ownerConnectR.rowCount) {
+                return res.status(404).json({ ok: false, error: "User not found" });
+            }
+            if (!ownerOnboardingComplete(ownerConnectR.rows[0])) {
+                return res.status(400).json({
+                    ok: false,
+                    error: "Complete Stripe onboarding in Settings before publishing a listing with money payments.",
+                });
+            }
+        } catch (e) {
+            return serverError(res, e, "Unable to publish listing right now");
+        }
     }
-    const ownerConnect = ownerConnectR.rows[0];
-    const onboardingComplete =
-        (DEMO_PAYOUTS_ENABLED && !ownerConnect.stripe_account_id) ||
-        isDemoConnectAccountId(ownerConnect.stripe_account_id) ||
-        (typeof ownerConnect.stripe_account_id === "string" &&
-            ownerConnect.stripe_charges_enabled &&
-            ownerConnect.stripe_payouts_enabled &&
-            ownerConnect.stripe_details_submitted);
-    if (!onboardingComplete) {
-        return res.status(400).json({
-            ok: false,
-            error: "Complete Stripe onboarding in Settings before publishing a listing.",
-        });
-    }
-    const av = buildAvailabilityJson(body);
-    if (!av.ok) return res.status(400).json({ ok: false, error: av.error });
-
-    const pricing = resolveListingPricing(body, mode, av.availability, initialPriceNum, allow_points, points_cost);
-    if (!pricing.ok) return res.status(400).json({ ok: false, error: pricing.error });
-    const { priceNum, pointsCost, auction_end, auction_start_price_gbp } = pricing.data;
-    const insertValues = [
-        req.userId,
-        title,
-        description,
-        mode,
-        priceNum,
-        unit,
-        allow_points,
-        pointsCost,
-        address_text,
-        lat,
-        lng,
-        image_url,
-        av.availability,
-        auction_end,
-        auction_start_price_gbp,
-        parking_type,
-        capacity_total,
-        owner_contact_email,
-        owner_contact_phone,
-        owner_contact_info,
-    ];
+    const insertValues = [req.userId, ...listingMutationCoreValues(prepared.data)];
 
     const client = await pool.connect();
     try {
@@ -437,7 +483,7 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         return res.status(201).json({ ok: true, parking_spot: spot });
     } catch (e) {
         await client.query("ROLLBACK");
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to publish listing right now");
     } finally {
         client.release();
     }
@@ -450,61 +496,32 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
     if (!parsedBody.ok) return;
     const body = parsedBody.data;
     const spotId = parsedParams.data.id;
-    const parsedInput = normalizeListingInput(body);
-    if (!parsedInput.ok) return res.status(400).json({ ok: false, error: parsedInput.error });
-    const {
-        title,
-        description,
-        mode,
-        address_text,
-        lat,
-        lng,
-        parking_type,
-        capacity_total,
-        image_url,
-        unit,
-        priceNum: initialPriceNum,
-        allow_points,
-        points_cost,
-        owner_contact_email,
-        owner_contact_phone,
-        owner_contact_info,
-    } = parsedInput.data;
-
-    const av = buildAvailabilityJson(body);
-    if (!av.ok) return res.status(400).json({ ok: false, error: av.error });
-
-    const pricing = resolveListingPricing(body, mode, av.availability, initialPriceNum, allow_points, points_cost);
-    if (!pricing.ok) return res.status(400).json({ ok: false, error: pricing.error });
-    const { priceNum, pointsCost, auction_end, auction_start_price_gbp } = pricing.data;
-    const updateBaseValues = [
-        title,
-        description,
-        mode,
-        priceNum,
-        unit,
-        allow_points,
-        pointsCost,
-        address_text,
-        lat,
-        lng,
-        image_url,
-        av.availability,
-        owner_contact_email,
-        owner_contact_phone,
-        owner_contact_info,
-    ];
-    const updateValues = [
-        ...updateBaseValues,
-        auction_end,
-        auction_start_price_gbp,
-        parking_type,
-        capacity_total,
-        spotId,
-        req.userId,
-    ];
+    const prepared = prepareListingMutation(body);
+    if (!prepared.ok) return res.status(400).json({ ok: false, error: prepared.error });
+    const updateValues = [...listingMutationCoreValues(prepared.data), spotId, req.userId];
 
     try {
+        if (listingNeedsMoneyPayout(prepared.data)) {
+            const ownerConnectR = await pool.query(
+                `SELECT stripe_account_id,
+                        stripe_charges_enabled,
+                        stripe_payouts_enabled,
+                        stripe_details_submitted
+                 FROM users
+                 WHERE id = $1`,
+                [req.userId]
+            );
+            if (!ownerConnectR.rowCount) {
+                return res.status(404).json({ ok: false, error: "User not found" });
+            }
+            if (!ownerOnboardingComplete(ownerConnectR.rows[0])) {
+                return res.status(400).json({
+                    ok: false,
+                    error: "Complete Stripe onboarding in Settings before publishing a listing with money payments.",
+                });
+            }
+        }
+
         const r = await pool.query(
             `UPDATE parking_spots
        SET title=$1,
@@ -519,13 +536,13 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
            lng=$10,
            image_url=$11,
            availability_json=$12,
-           owner_contact_email=$13,
-           owner_contact_phone=$14,
-           owner_contact_info=$15,
-           auction_end=$16,
-           auction_start_price_gbp=$17,
-           parking_type=$18,
-           capacity_total=$19,
+           auction_end=$13,
+           auction_start_price_gbp=$14,
+           parking_type=$15,
+           capacity_total=$16,
+           owner_contact_email=$17,
+           owner_contact_phone=$18,
+           owner_contact_info=$19,
            updated_at=now()
        WHERE id=$20 AND owner_user_id=$21 AND is_active = true
        RETURNING *`,
@@ -538,7 +555,7 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
 
         return res.json({ ok: true, parking_spot: r.rows[0] });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to update listing right now");
     }
 });
 
@@ -564,7 +581,7 @@ router.delete("/:id", requireAuth, async (req: AuthRequest, res) => {
 
         return res.json({ ok: true, deleted: true, parking_spot: ownedSpot.rows[0] });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to delete listing right now");
     }
 });
 
@@ -616,11 +633,11 @@ router.get("/", async (_req, res) => {
 
         return res.json({ ok: true, parking_spots: spots.map(stripPrivateOwnerContact) });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load listings right now");
     }
 });
 
-router.get("/geocode/search", async (req, res) => {
+router.get("/geocode/search", geocodeRateLimit, async (req, res) => {
     const parsedQuery = parseWithSchema(geocodeSearchQuerySchema, req.query ?? {}, res, "geocode_search");
     if (!parsedQuery.ok) return;
     const { q, limit, countrycodes, viewbox } = parsedQuery.data;
@@ -670,7 +687,7 @@ router.get("/geocode/search", async (req, res) => {
     }
 });
 
-router.get("/geocode/reverse", async (req, res) => {
+router.get("/geocode/reverse", geocodeRateLimit, async (req, res) => {
     const parsedQuery = parseWithSchema(geocodeReverseQuerySchema, req.query ?? {}, res, "geocode_reverse");
     if (!parsedQuery.ok) return;
     const { lat: latRaw, lng: lngRaw } = parsedQuery.data;
@@ -728,7 +745,7 @@ router.get("/:id/owner-contact", requireAuth, async (req: AuthRequest, res) => {
         }
         return res.json({ ok: true, owner_contact: r.rows[0] });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load owner contact right now");
     }
 });
 
@@ -749,7 +766,7 @@ router.get("/:id", async (req, res) => {
 
         return res.json({ ok: true, parking_spot: stripPrivateOwnerContact(r.rows[0]) });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load listing right now");
     }
 });
 

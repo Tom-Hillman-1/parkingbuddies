@@ -55,6 +55,8 @@ export default function PayBookingPage() {
     });
 
     const booking = bookingQuery.data ?? null;
+    const isPointsBooking = booking?.pay_method === "points";
+    const isFreeBooking = booking?.pay_method === "money" && toFiniteNumber(booking?.total_price_gbp) <= 0;
     const requiresPayment = useMemo(() => {
         if (!booking) return false;
         return (
@@ -154,13 +156,26 @@ export default function PayBookingPage() {
             { label: "Booked at", value: bookedAt },
         ]
         : [];
+    const pageKicker = requiresPayment ? "STRIPE" : isPointsBooking ? "POINTS" : "BOOKING";
+    const pageTitle = requiresPayment ? "Track booking" : "Booking confirmed";
+    const pageSubtitle = requiresPayment
+        ? "Pay securely, then open your official Stripe receipt."
+        : isPointsBooking
+            ? "Review the points used for this booking."
+            : "Review the details for your confirmed booking.";
+    const localSummaryTitle = isPointsBooking ? "Points receipt" : "Booking receipt";
+    const localSummarySubtitle = isPointsBooking
+        ? "Points were used for this booking and have been applied to the listing."
+        : isFreeBooking
+            ? "This booking was confirmed without any payment."
+            : "Booking details recorded locally by ParkingBuddies.";
 
     return (
         <div className="container">
             <div className="pageHeader">
-                <div className="heroKicker">STRIPE</div>
-                <div className="heroTitle">Track booking</div>
-                <div className="heroSub muted">Pay securely, then open your official Stripe receipt.</div>
+                <div className="heroKicker">{pageKicker}</div>
+                <div className="heroTitle">{pageTitle}</div>
+                <div className="heroSub muted">{pageSubtitle}</div>
             </div>
 
             {loading && <div className="card formSection">Loading checkout...</div>}
@@ -176,6 +191,31 @@ export default function PayBookingPage() {
                                 {hasStripeReceipt ? "your Stripe receipt is ready below." : "your receipt details are syncing below."}
                             </span>
                         </div>
+                    )}
+
+                    {!requiresPayment && (
+                        <ReceiptCard
+                            kicker="PARKINGBUDDIES"
+                            title={localSummaryTitle}
+                            subtitle={localSummarySubtitle}
+                            className="receiptCard--confirm payReceiptCard"
+                            actions={
+                                <>
+                                    <Link to="/dashboard?tab=myBookings" className="btn btn-primary">Back to dashboard</Link>
+                                    <Link to="/about#contact-bottom" className="btn">Contact support</Link>
+                                </>
+                            }
+                        >
+                            <ReceiptRow label="Booking" value={bookingTitle} />
+                            <ReceiptRow label="Location" value={bookingAddress} />
+                            <ReceiptRow label="Window" value={bookingWindow} />
+                            <ReceiptRow
+                                label={isPointsBooking ? "Points used" : "Amount"}
+                                value={isPointsBooking ? `${booking.total_points ?? 0} pts` : `${POUND}${toFiniteNumber(booking.total_price_gbp).toFixed(2)}`}
+                            />
+                            <ReceiptRow label="Status" value={String(booking.status ?? "confirmed")} />
+                            <ReceiptRow label="Booked at" value={bookedAt} />
+                        </ReceiptCard>
                     )}
 
                     {requiresPayment && !successCheckout && (

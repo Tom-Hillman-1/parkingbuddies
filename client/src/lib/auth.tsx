@@ -10,6 +10,7 @@ type AuthContextValue = {
     signup: (email: string, name: string, password: string) => Promise<void>;
     logout: () => void;
     refreshMe: () => Promise<void>;
+    replaceToken: (token: string) => void;
 };
 
 export type ConnectStatus = {
@@ -31,13 +32,41 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 const TOKEN_KEY = "pb_token";
 
+function readStoredToken() {
+    try {
+        const token = window.sessionStorage.getItem(TOKEN_KEY);
+        window.localStorage.removeItem(TOKEN_KEY);
+        return token;
+    } catch {
+        return null;
+    }
+}
+
+function writeStoredToken(token: string) {
+    try {
+        window.sessionStorage.setItem(TOKEN_KEY, token);
+        window.localStorage.removeItem(TOKEN_KEY);
+    } catch {
+        // Ignore storage failures and keep the in-memory session alive.
+    }
+}
+
+function clearStoredToken() {
+    try {
+        window.sessionStorage.removeItem(TOKEN_KEY);
+        window.localStorage.removeItem(TOKEN_KEY);
+    } catch {
+        // Ignore storage failures and keep the in-memory logout flow working.
+    }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-    const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
+    const [token, setToken] = useState<string | null>(() => readStoredToken());
     const [user, setUser] = useState<User | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
     const clearAuthState = useCallback(() => {
-        localStorage.removeItem(TOKEN_KEY);
+        clearStoredToken();
         setToken(null);
         setUser(null);
     }, []);
@@ -93,7 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const login = useCallback(async (email: string, password: string) => {
         const r = await apiPost<{ token: string }>("/auth/login", { email, password });
-        localStorage.setItem(TOKEN_KEY, r.token);
+        writeStoredToken(r.token);
         setToken(r.token);
         const me = await apiGet<{ user: User }>("/me", r.token);
         setUser(me.user);
@@ -101,7 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const signup = useCallback(async (email: string, name: string, password: string) => {
         const r = await apiPost<{ token: string }>("/auth/signup", { email, name, password });
-        localStorage.setItem(TOKEN_KEY, r.token);
+        writeStoredToken(r.token);
         setToken(r.token);
         const me = await apiGet<{ user: User }>("/me", r.token);
         setUser(me.user);
@@ -111,9 +140,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         clearAuthState();
     }, [clearAuthState]);
 
+    const replaceToken = useCallback((nextToken: string) => {
+        writeStoredToken(nextToken);
+        setToken(nextToken);
+    }, []);
+
     const value = useMemo<AuthContextValue>(
-        () => ({ token, user, isLoading, login, signup, logout, refreshMe }),
-        [token, user, isLoading, login, signup, logout, refreshMe]
+        () => ({ token, user, isLoading, login, signup, logout, refreshMe, replaceToken }),
+        [token, user, isLoading, login, signup, logout, refreshMe, replaceToken]
     );
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -226,6 +226,67 @@ function SlotCard({
     );
 }
 
+function DashboardCollection({
+    isEmpty,
+    emptyText,
+    className,
+    children,
+}: {
+    isEmpty: boolean;
+    emptyText: string;
+    className: string;
+    children: ReactNode;
+}) {
+    if (isEmpty) {
+        return <div className="muted">{emptyText}</div>;
+    }
+    return <div className={className}>{children}</div>;
+}
+
+function BookingContactDetails({
+    email,
+    phone,
+    info,
+}: {
+    email?: string | null;
+    phone?: string | null;
+    info?: string | null;
+}) {
+    return (
+        <div className="dashboardContactBlock">
+            <div className="dashboardSlotMetaLabel">Contact</div>
+            {email && (
+                <div className="dashboardContactLine">
+                    <span className="dashboardContactKey">Email:</span>
+                    <span className="dashboardContactText dashboardContactText--single">{email}</span>
+                </div>
+            )}
+            {phone && (
+                <div className="dashboardContactLine">
+                    <span className="dashboardContactKey">Phone:</span>
+                    <span className="dashboardContactText dashboardContactText--single">{phone}</span>
+                </div>
+            )}
+            {info && (
+                <div className="dashboardContactLine">
+                    <span className="dashboardContactKey">Info:</span>
+                    <span className="dashboardContactText">{info}</span>
+                </div>
+            )}
+        </div>
+    );
+}
+
+const bookingAmountLabel = (booking: Booking, direction: "-" | "+" = "-") =>
+    booking.pay_method === "money"
+        ? `${direction}${formatGbp(booking.total_price_gbp)}`
+        : `${direction}${booking.total_points ?? 0} pts`;
+
+const pendingBidAmountLabel = (bid: AuctionBid) =>
+    (bid.pay_method ?? "money") === "points"
+        ? `${estimateAuctionBidPoints(bid)} pts pending`
+        : `${formatGbp(bid.amount_gbp)} auth`;
+
 export default function DashboardPage() {
     const { token } = useAuth();
     const [searchParams] = useSearchParams();
@@ -517,68 +578,45 @@ export default function DashboardPage() {
                                 count={bookings.length}
                                 countClassName="badge badge--cool"
                             >
-                                {sortedMyBookings.length === 0 ? (
-                                    <div className="muted">No bookings yet.</div>
-                                ) : (
-                                    <div className="dashboardScrollRow">
-                                        {sortedMyBookings.map((booking) => {
-                                            const status = bookingStatusView(booking);
-                                            const { spot, title, address } = resolveBookingSpot(booking);
-                                                const amount = booking.pay_method === "money" ? `-${formatGbp(booking.total_price_gbp)}` : `-${booking.total_points ?? 0} pts`;
-                                            return (
-                                                <SlotCard
-                                                    key={booking.id}
-                                                    tone="blue"
-                                                    imageUrl={spot?.image_url}
-                                                    title={title}
-                                                    address={address}
-                                                    amount={amount}
-                                                    badges={renderBadgeRow([
-                                                        { label: status.label, className: status.className },
-                                                        { label: capitalizeLabel(booking.pay_method) },
-                                                    ])}
-                                                    time={slotTime(booking.start_time, booking.end_time)}
-                                                    details={
-                                                        <div className="dashboardContactBlock">
-                                                            <div className="dashboardSlotMetaLabel">Contact</div>
-                                                            {booking.owner_contact_email && (
-                                                                <div className="dashboardContactLine">
-                                                                    <span className="dashboardContactKey">Email:</span>
-                                                                    <span className="dashboardContactText dashboardContactText--single">{booking.owner_contact_email}</span>
-                                                                </div>
-                                                            )}
-                                                            {booking.owner_contact_phone && (
-                                                                <div className="dashboardContactLine">
-                                                                    <span className="dashboardContactKey">Phone:</span>
-                                                                    <span className="dashboardContactText dashboardContactText--single">{booking.owner_contact_phone}</span>
-                                                                </div>
-                                                            )}
-                                                            {booking.owner_contact_info && (
-                                                                <div className="dashboardContactLine">
-                                                                    <span className="dashboardContactKey">Info:</span>
-                                                                    <span className="dashboardContactText">{booking.owner_contact_info}</span>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    }
-                                                    actions={
+                                <DashboardCollection isEmpty={sortedMyBookings.length === 0} emptyText="No bookings yet." className="dashboardScrollRow">
+                                    {sortedMyBookings.map((booking) => {
+                                        const status = bookingStatusView(booking);
+                                        const { spot, title, address } = resolveBookingSpot(booking);
+                                        return (
+                                            <SlotCard
+                                                key={booking.id}
+                                                tone="blue"
+                                                imageUrl={spot?.image_url}
+                                                title={title}
+                                                address={address}
+                                                amount={bookingAmountLabel(booking)}
+                                                badges={renderBadgeRow([
+                                                    { label: status.label, className: status.className },
+                                                    { label: capitalizeLabel(booking.pay_method) },
+                                                ])}
+                                                time={slotTime(booking.start_time, booking.end_time)}
+                                                details={
+                                                    <BookingContactDetails
+                                                        email={booking.owner_contact_email}
+                                                        phone={booking.owner_contact_phone}
+                                                        info={booking.owner_contact_info}
+                                                    />
+                                                }
+                                                actions={
+                                                    booking.pay_method === "money" ? (
                                                         <>
-                                                            {booking.pay_method === "money" && (
-                                                                <>
-                                                                    <button className="btn btn-primary dashboardSlotActionBtn" onClick={() => openPaymentReceipt(booking.id)} disabled={receiptLoadingId === booking.id}>
-                                                                        {receiptLoadingId === booking.id ? "Loading..." : "Receipt"}
-                                                                    </button>
-                                                                    <Link to={`/pay/${booking.id}`} className="btn dashboardSlotActionBtn">Confirmation</Link>
-                                                                </>
-                                                            )}
+                                                            <button className="btn btn-primary dashboardSlotActionBtn" onClick={() => openPaymentReceipt(booking.id)} disabled={receiptLoadingId === booking.id}>
+                                                                {receiptLoadingId === booking.id ? "Loading..." : "Receipt"}
+                                                            </button>
+                                                            <Link to={`/pay/${booking.id}`} className="btn dashboardSlotActionBtn">Confirmation</Link>
                                                         </>
-                                                    }
-                                                    errorText={paymentReceiptErrors[booking.id]}
-                                                />
-                                            );
-                                        })}
-                                    </div>
-                                )}
+                                                    ) : null
+                                                }
+                                                errorText={paymentReceiptErrors[booking.id]}
+                                            />
+                                        );
+                                    })}
+                                </DashboardCollection>
                             </DashboardDisclosureCard>
 
                             <DashboardDisclosureCard
@@ -588,28 +626,23 @@ export default function DashboardPage() {
                                 count={myAuctionBids.length}
                                 countClassName="badge badge--warm"
                             >
-                                {sortedMyAuctionBids.length === 0 ? (
-                                    <div className="muted">No pending bids.</div>
-                                ) : (
-                                    <div className="dashboardScrollRow">
-                                        {sortedMyAuctionBids.map((bid) => {
-                                            const isPoints = (bid.pay_method ?? "money") === "points";
-                                            const totalPoints = estimateAuctionBidPoints(bid);
-                                            return (
-                                                <SlotCard
-                                                    key={bid.id}
-                                                    tone="rose"
-                                                    title={bid.spot_title ?? "Auction listing"}
-                                                    address="Awaiting owner decision"
-                                                    amount={isPoints ? `${totalPoints} pts pending` : `${formatGbp(bid.amount_gbp)} auth`}
-                                                    badges={renderBadgeRow([{ label: capitalizeLabel(bid.status), className: "badge badge--warm" }, { label: "Owner review" }, { label: isPoints ? "Not deducted yet" : "Not charged yet" }])}
-                                                    time={slotTime(bid.start_time, bid.end_time)}
-                                                    actions={<><Link to={`/bids/${bid.id}`} className="btn btn-primary">View local receipt</Link><Link to={`/spots/${bid.parking_spot_id}`} className="btn">View listing</Link></>}
-                                                />
-                                            );
-                                        })}
-                                    </div>
-                                )}
+                                <DashboardCollection isEmpty={sortedMyAuctionBids.length === 0} emptyText="No pending bids." className="dashboardScrollRow">
+                                    {sortedMyAuctionBids.map((bid) => {
+                                        const isPoints = (bid.pay_method ?? "money") === "points";
+                                        return (
+                                            <SlotCard
+                                                key={bid.id}
+                                                tone="rose"
+                                                title={bid.spot_title ?? "Auction listing"}
+                                                address="Awaiting owner decision"
+                                                amount={pendingBidAmountLabel(bid)}
+                                                badges={renderBadgeRow([{ label: capitalizeLabel(bid.status), className: "badge badge--warm" }, { label: "Owner review" }, { label: isPoints ? "Not deducted yet" : "Not charged yet" }])}
+                                                time={slotTime(bid.start_time, bid.end_time)}
+                                                actions={<><Link to={`/bids/${bid.id}`} className="btn btn-primary">View local receipt</Link><Link to={`/spots/${bid.parking_spot_id}`} className="btn">View listing</Link></>}
+                                            />
+                                        );
+                                    })}
+                                </DashboardCollection>
                             </DashboardDisclosureCard>
 
                             <DashboardDisclosureCard
@@ -620,28 +653,24 @@ export default function DashboardPage() {
                                 countClassName="badge badge--green"
                                 isLast
                             >
-                                {driverUpcoming.length === 0 ? (
-                                    <div className="muted">No upcoming driver bookings.</div>
-                                ) : (
-                                    <div className="dashboardScrollRow">
-                                        {driverUpcoming.map((booking) => {
-                                            const { spot, title, address } = resolveBookingSpot(booking);
-                                            return (
-                                                <SlotCard
-                                                    key={booking.id}
-                                                    tone="sage"
-                                                    imageUrl={spot?.image_url}
-                                                    title={title}
-                                                    address={address}
-                                                    amount={booking.pay_method === "points" ? `-${booking.total_points ?? 0} pts` : `-${formatGbp(booking.total_price_gbp)}`}
-                                                    badges={renderBadgeRow([{ label: "Upcoming", className: "badge badge--cool" }])}
-                                                    time={slotTime(booking.start_time, booking.end_time)}
-                                                    actions={<Link to={`/spots/${booking.parking_spot_id}`} className="btn">View listing</Link>}
-                                                />
-                                            );
-                                        })}
-                                    </div>
-                                )}
+                                <DashboardCollection isEmpty={driverUpcoming.length === 0} emptyText="No upcoming driver bookings." className="dashboardScrollRow">
+                                    {driverUpcoming.map((booking) => {
+                                        const { spot, title, address } = resolveBookingSpot(booking);
+                                        return (
+                                            <SlotCard
+                                                key={booking.id}
+                                                tone="sage"
+                                                imageUrl={spot?.image_url}
+                                                title={title}
+                                                address={address}
+                                                amount={bookingAmountLabel(booking)}
+                                                badges={renderBadgeRow([{ label: "Upcoming", className: "badge badge--cool" }])}
+                                                time={slotTime(booking.start_time, booking.end_time)}
+                                                actions={<Link to={`/spots/${booking.parking_spot_id}`} className="btn">View listing</Link>}
+                                            />
+                                        );
+                                    })}
+                                </DashboardCollection>
                         </DashboardDisclosureCard>
                     </div>
                 </TabPanel>
@@ -680,9 +709,9 @@ export default function DashboardPage() {
                                                 </div>
                                             </article>
                                         );
-                                        })}
-                                    </div>
-                                )}
+                                    })}
+                                </div>
+                            )}
                             </DashboardDisclosureCard>
 
                             <DashboardDisclosureCard
@@ -692,38 +721,34 @@ export default function DashboardPage() {
                                 count={confirmedOwnerBookings.length}
                                 countClassName="badge badge--green"
                             >
-                                {confirmedOwnerBookings.length === 0 ? (
-                                    <div className="muted">No confirmed bookings yet.</div>
-                                ) : (
-                                    <div className="dashboardChipRow dashboardChipRow--booked">
-                                        {confirmedOwnerBookings.map((booking) => {
-                                            const { title, address } = resolveBookingSpot(booking);
-                                            const isPoints = booking.pay_method === "points";
-                                            return (
-                                                <div key={booking.id} className="dashboardChip dashboardChip--strip dashboardStrip--incoming">
-                                                    <div className="dashboardStripAccent" />
-                                                    <div className="dashboardStripBody">
-                                                        <div className="dashboardStripTop">
-                                                            <div className="dashboardStripTitle">{title}</div>
-                                                            <div className={`dashboardStripAmount ${isPoints ? "" : "dashboardChipAmount--in"}`}>
-                                                                {isPoints ? `+${booking.total_points ?? 0} pts` : `+${formatGbp(booking.total_price_gbp)}`}
-                                                            </div>
-                                                        </div>
-                                                        <div className="tiny muted dashboardStripMeta">{address}</div>
-                                                        <div className="tiny muted dashboardStripMeta">{slotTime(booking.start_time, booking.end_time)}</div>
-                                                        <div className="dashboardStripBottom">
-                                                            <div className="rowInline" style={{ gap: 6 }}>
-                                                                <span className="badge badge--green">Confirmed</span>
-                                                                <span className="badge">{capitalizeLabel(booking.pay_method)}</span>
-                                                            </div>
-                                                            <Link to={`/spots/${booking.parking_spot_id}`} className="dashboardTextAction">View &gt;</Link>
+                                <DashboardCollection isEmpty={confirmedOwnerBookings.length === 0} emptyText="No confirmed bookings yet." className="dashboardChipRow dashboardChipRow--booked">
+                                    {confirmedOwnerBookings.map((booking) => {
+                                        const { title, address } = resolveBookingSpot(booking);
+                                        const isPoints = booking.pay_method === "points";
+                                        return (
+                                            <div key={booking.id} className="dashboardChip dashboardChip--strip dashboardStrip--incoming">
+                                                <div className="dashboardStripAccent" />
+                                                <div className="dashboardStripBody">
+                                                    <div className="dashboardStripTop">
+                                                        <div className="dashboardStripTitle">{title}</div>
+                                                        <div className={`dashboardStripAmount ${isPoints ? "" : "dashboardChipAmount--in"}`}>
+                                                            {bookingAmountLabel(booking, "+")}
                                                         </div>
                                                     </div>
+                                                    <div className="tiny muted dashboardStripMeta">{address}</div>
+                                                    <div className="tiny muted dashboardStripMeta">{slotTime(booking.start_time, booking.end_time)}</div>
+                                                    <div className="dashboardStripBottom">
+                                                        <div className="rowInline" style={{ gap: 6 }}>
+                                                            <span className="badge badge--green">Confirmed</span>
+                                                            <span className="badge">{capitalizeLabel(booking.pay_method)}</span>
+                                                        </div>
+                                                        <Link to={`/spots/${booking.parking_spot_id}`} className="dashboardTextAction">View &gt;</Link>
+                                                    </div>
                                                 </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </DashboardCollection>
                             </DashboardDisclosureCard>
 
                             <DashboardDisclosureCard
@@ -733,28 +758,43 @@ export default function DashboardPage() {
                                 count={pendingOwnerBids.length}
                                 countClassName="badge badge--warm"
                             >
-                                {pendingOwnerBids.length === 0 ? (
-                                    <div className="muted">No bids yet.</div>
-                                ) : (
-                                    <div className="dashboardScrollRow">
-                                        {pendingOwnerBids.map((bid) => {
-                                            const isPoints = (bid.pay_method ?? "money") === "points";
-                                            const totalPoints = estimateAuctionBidPoints(bid);
-                                            return (
-                                                <SlotCard
-                                                    key={bid.id}
-                                                    tone="rose"
-                                                    title={bid.spot_title ?? "Auction listing"}
-                                                    address={bid.bidder_name ?? bid.bidder_email ?? "Demo Driver"}
-                                                    amount={isPoints ? `${totalPoints} pts pending` : `${formatGbp(bid.amount_gbp)} auth`}
-                                                    badges={renderBadgeRow([{ label: "Action required", className: "badge badge--rose" }, { label: isPoints ? "Points" : "Money" }, { label: "Charge on acceptance" }])}
-                                                    time={slotTime(bid.start_time, bid.end_time)}
-                                                    actions={<><Link to={`/bids/${bid.id}`} className="btn">View local receipt</Link><button className="btn btn-primary" onClick={() => acceptBid(bid.parking_spot_id, bid.id)} disabled={busyId === bid.id}>Accept</button><button className="btn" onClick={() => rejectBid(bid.parking_spot_id, bid.id)} disabled={busyId === bid.id}>Reject</button></>}
-                                                />
-                                            );
-                                        })}
-                                    </div>
-                                )}
+                                <DashboardCollection isEmpty={pendingOwnerBids.length === 0} emptyText="No bids yet." className="dashboardScrollRow">
+                                    {pendingOwnerBids.map((bid) => {
+                                        const isPoints = (bid.pay_method ?? "money") === "points";
+                                        return (
+                                            <SlotCard
+                                                key={bid.id}
+                                                tone="rose"
+                                                title={bid.spot_title ?? "Auction listing"}
+                                                address={bid.bidder_name ?? bid.bidder_email ?? "Demo Driver"}
+                                                amount={pendingBidAmountLabel(bid)}
+                                                badges={renderBadgeRow([{ label: "Action required", className: "badge badge--rose" }, { label: isPoints ? "Points" : "Money" }, { label: "Charge on acceptance" }])}
+                                                time={slotTime(bid.start_time, bid.end_time)}
+                                                actions={
+                                                    <div className="dashboardSlotActionGrid">
+                                                        <Link to={`/bids/${bid.id}`} className="btn dashboardSlotActionGridWide">
+                                                            View local receipt
+                                                        </Link>
+                                                        <button
+                                                            className="btn btn-primary"
+                                                            onClick={() => acceptBid(bid.parking_spot_id, bid.id)}
+                                                            disabled={busyId === bid.id}
+                                                        >
+                                                            Accept
+                                                        </button>
+                                                        <button
+                                                            className="btn"
+                                                            onClick={() => rejectBid(bid.parking_spot_id, bid.id)}
+                                                            disabled={busyId === bid.id}
+                                                        >
+                                                            Reject
+                                                        </button>
+                                                    </div>
+                                                }
+                                            />
+                                        );
+                                    })}
+                                </DashboardCollection>
                             </DashboardDisclosureCard>
 
                             <DashboardDisclosureCard
@@ -765,29 +805,24 @@ export default function DashboardPage() {
                                 countClassName="badge badge--green"
                                 isLast
                             >
-                                {ownerUpcoming.length === 0 ? (
-                                    <div className="muted">No upcoming owner bookings.</div>
-                                ) : (
-                                    <div className="dashboardScrollRow">
-                                        {ownerUpcoming.map((booking) => {
-                                            const { spot, title, address } = resolveBookingSpot(booking);
-                                            const isPoints = booking.pay_method === "points";
-                                            return (
-                                                <SlotCard
-                                                    key={booking.id}
-                                                    tone="sage"
-                                                    imageUrl={spot?.image_url}
-                                                    title={title}
-                                                    address={address}
-                                                    amount={isPoints ? `+${booking.total_points ?? 0} pts` : `+${formatGbp(booking.total_price_gbp)}`}
-                                                    badges={renderBadgeRow([{ label: "Upcoming", className: "badge badge--green" }])}
-                                                    time={slotTime(booking.start_time, booking.end_time)}
-                                                    actions={<Link to={`/spots/${booking.parking_spot_id}`} className="btn">View listing</Link>}
-                                                />
-                                            );
-                                        })}
-                                    </div>
-                                )}
+                                <DashboardCollection isEmpty={ownerUpcoming.length === 0} emptyText="No upcoming owner bookings." className="dashboardScrollRow">
+                                    {ownerUpcoming.map((booking) => {
+                                        const { spot, title, address } = resolveBookingSpot(booking);
+                                        return (
+                                            <SlotCard
+                                                key={booking.id}
+                                                tone="sage"
+                                                imageUrl={spot?.image_url}
+                                                title={title}
+                                                address={address}
+                                                amount={bookingAmountLabel(booking, "+")}
+                                                badges={renderBadgeRow([{ label: "Upcoming", className: "badge badge--green" }])}
+                                                time={slotTime(booking.start_time, booking.end_time)}
+                                                actions={<Link to={`/spots/${booking.parking_spot_id}`} className="btn">View listing</Link>}
+                                            />
+                                        );
+                                    })}
+                                </DashboardCollection>
                         </DashboardDisclosureCard>
                     </div>
                 </TabPanel>
@@ -801,31 +836,27 @@ export default function DashboardPage() {
                                 count={sortedRewards.length}
                                 countClassName="badge badge--cool"
                             >
-                            {sortedRewards.length === 0 ? (
-                                <div className="muted">No reward activity yet.</div>
-                            ) : (
-                                <div className="dashboardChipRow dashboardChipRow--rewards">
-                                    {sortedRewards.map((reward) => {
-                                        const incoming = String(reward.type ?? "").toLowerCase() === "earn";
-                                        const reason = reward.reason || "Reward";
-                                        return (
-                                            <div key={reward.id} className="dashboardChip dashboardRewardPill">
-                                                <div className={`dashboardRewardAvatar${incoming ? " is-earn" : " is-spend"}`}>
-                                                    {reason.slice(0, 1).toUpperCase()}
-                                                </div>
-                                                <div className="dashboardChipLeft">
-                                                    <div className="dashboardChipTitle">{reason}</div>
-                                                    <div className="tiny muted dashboardChipMeta">{formatDateTimeLocal(reward.created_at)}</div>
-                                                </div>
-                                                <div className="dashboardPillDivider" />
-                                                <div className={`dashboardChipAmount ${incoming ? "dashboardChipAmount--in" : "dashboardChipAmount--out"}`}>
-                                                    {incoming ? "+" : "-"}{reward.amount} pts
-                                                </div>
+                            <DashboardCollection isEmpty={sortedRewards.length === 0} emptyText="No reward activity yet." className="dashboardChipRow dashboardChipRow--rewards">
+                                {sortedRewards.map((reward) => {
+                                    const incoming = String(reward.type ?? "").toLowerCase() === "earn";
+                                    const reason = reward.reason || "Reward";
+                                    return (
+                                        <div key={reward.id} className="dashboardChip dashboardRewardPill">
+                                            <div className={`dashboardRewardAvatar${incoming ? " is-earn" : " is-spend"}`}>
+                                                {reason.slice(0, 1).toUpperCase()}
                                             </div>
-                                        );
-                                    })}
-                                </div>
-                                )}
+                                            <div className="dashboardChipLeft">
+                                                <div className="dashboardChipTitle">{reason}</div>
+                                                <div className="tiny muted dashboardChipMeta">{formatDateTimeLocal(reward.created_at)}</div>
+                                            </div>
+                                            <div className="dashboardPillDivider" />
+                                            <div className={`dashboardChipAmount ${incoming ? "dashboardChipAmount--in" : "dashboardChipAmount--out"}`}>
+                                                {incoming ? "+" : "-"}{reward.amount} pts
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </DashboardCollection>
                             </DashboardDisclosureCard>
 
                             <DashboardDisclosureCard
@@ -835,58 +866,54 @@ export default function DashboardPage() {
                                 count={payments.length}
                                 countClassName="badge badge--green"
                             >
-                            {payments.length === 0 ? (
-                                <div className="muted">No payments yet.</div>
-                            ) : (
-                                <div className="dashboardRailRow dashboardRailRow--transactions">
-                                    {payments.map((payment) => {
-                                        const isOutgoing = payment.direction === "outgoing";
+                            <DashboardCollection isEmpty={payments.length === 0} emptyText="No payments yet." className="dashboardRailRow dashboardRailRow--transactions">
+                                {payments.map((payment) => {
+                                    const isOutgoing = payment.direction === "outgoing";
                                     const amountText = `${isOutgoing ? "-" : "+"}${formatGbp(payment.amount_gbp)}`;
-                                        const statusText = capitalizeLabel(payment.status);
-                                        const providerText = capitalizeLabel(payment.provider);
-                                        return (
-                                            <article key={payment.id} className="dashboardTxReceiptCard">
-                                                <div className={`dashboardTxReceiptTop ${payment.direction === "incoming" ? "is-incoming" : "is-outgoing"}`}>
-                                                    <div className={`dashboardTxAmount ${payment.direction === "incoming" ? "is-incoming" : "is-outgoing"}`}>{amountText}</div>
-                                                    <div className="dashboardTxSpot">{payment.spot_title || "Parking spot"}</div>
+                                    const statusText = capitalizeLabel(payment.status);
+                                    const providerText = capitalizeLabel(payment.provider);
+                                    return (
+                                        <article key={payment.id} className="dashboardTxReceiptCard">
+                                            <div className={`dashboardTxReceiptTop ${payment.direction === "incoming" ? "is-incoming" : "is-outgoing"}`}>
+                                                <div className={`dashboardTxAmount ${payment.direction === "incoming" ? "is-incoming" : "is-outgoing"}`}>{amountText}</div>
+                                                <div className="dashboardTxSpot">{payment.spot_title || "Parking spot"}</div>
+                                            </div>
+                                            <div className="dashboardTxDivider" />
+                                            <div className="dashboardTxReceiptBottom">
+                                                <div className="dashboardTxMetaRow">
+                                                    <span className="dashboardTxMetaLabel">Date</span>
+                                                    <span className="dashboardTxMetaValue">{formatDateTimeLocal(payment.created_at)}</span>
                                                 </div>
-                                                <div className="dashboardTxDivider" />
-                                                <div className="dashboardTxReceiptBottom">
-                                                    <div className="dashboardTxMetaRow">
-                                                        <span className="dashboardTxMetaLabel">Date</span>
-                                                        <span className="dashboardTxMetaValue">{formatDateTimeLocal(payment.created_at)}</span>
-                                                    </div>
-                                                    <div className="dashboardTxMetaRow">
-                                                        <span className="dashboardTxMetaLabel">Status</span>
-                                                        <span className="dashboardTxMetaValue">{statusText}</span>
-                                                    </div>
-                                                    <div className="dashboardTxMetaRow">
-                                                        <span className="dashboardTxMetaLabel">Via</span>
-                                                        <span className="dashboardTxMetaValue">{providerText}</span>
-                                                    </div>
-                                                    <div className="dashboardTxLinks">
-                                                        {isOutgoing ? (
-                                                            <>
-                                                                <button className="dashboardTxLink" onClick={() => openPaymentReceipt(payment.booking_id)} disabled={receiptLoadingId === payment.booking_id}>
-                                                                    {receiptLoadingId === payment.booking_id ? "Loading..." : "Receipt >"}
-                                                                </button>
-                                                                <Link to={`/pay/${payment.booking_id}`} className="dashboardTxLink">Confirmation {">"}</Link>
-                                                            </>
-                                                        ) : (
-                                                            <button className="dashboardTxLink" onClick={handleOpenConnectDashboard} disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}>
-                                                                Stripe dashboard {">"}
+                                                <div className="dashboardTxMetaRow">
+                                                    <span className="dashboardTxMetaLabel">Status</span>
+                                                    <span className="dashboardTxMetaValue">{statusText}</span>
+                                                </div>
+                                                <div className="dashboardTxMetaRow">
+                                                    <span className="dashboardTxMetaLabel">Via</span>
+                                                    <span className="dashboardTxMetaValue">{providerText}</span>
+                                                </div>
+                                                <div className="dashboardTxLinks">
+                                                    {isOutgoing ? (
+                                                        <>
+                                                            <button className="dashboardTxLink" onClick={() => openPaymentReceipt(payment.booking_id)} disabled={receiptLoadingId === payment.booking_id}>
+                                                                {receiptLoadingId === payment.booking_id ? "Loading..." : "Receipt >"}
                                                             </button>
-                                                        )}
-                                                    </div>
-                                                    {paymentReceiptErrors[payment.booking_id] && (
-                                                        <div className="dashboardTxMetaValue">{paymentReceiptErrors[payment.booking_id]}</div>
+                                                            <Link to={`/pay/${payment.booking_id}`} className="dashboardTxLink">Confirmation {">"}</Link>
+                                                        </>
+                                                    ) : (
+                                                        <button className="dashboardTxLink" onClick={handleOpenConnectDashboard} disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}>
+                                                            Stripe dashboard {">"}
+                                                        </button>
                                                     )}
                                                 </div>
-                                            </article>
-                                        );
-                                    })}
-                                </div>
-                                )}
+                                                {paymentReceiptErrors[payment.booking_id] && (
+                                                    <div className="dashboardTxMetaValue">{paymentReceiptErrors[payment.booking_id]}</div>
+                                                )}
+                                            </div>
+                                        </article>
+                                    );
+                                })}
+                            </DashboardCollection>
                             </DashboardDisclosureCard>
 
                             <DashboardDisclosureCard

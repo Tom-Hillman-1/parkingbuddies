@@ -1,6 +1,5 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { pool } from "../db";
 import {
@@ -12,6 +11,9 @@ import {
     SIGNUP_REWARD_POINTS,
 } from "../lib/shared";
 import { parseWithSchema } from "../lib/validation";
+import { serverError } from "../lib/errors";
+import { simpleRateLimit } from "../lib/rateLimit";
+import { issueAuthToken } from "../lib/tokens";
 
 const router = Router();
 const signupBodySchema = z.object({
@@ -25,14 +27,14 @@ const loginBodySchema = z.object({
     password: z.string(),
 });
 
-function issueToken(userId: string) {
-    const secret = process.env.JWT_SECRET;
-    if (!secret) throw new Error("JWT_SECRET not configured");
+const authRateLimit = simpleRateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 15,
+    message: "Too many authentication attempts. Please try again shortly.",
+    keyPrefix: "auth",
+});
 
-    return jwt.sign({ userId }, secret, { expiresIn: "7d" });
-}
-
-router.post("/signup", async (req, res) => {
+router.post("/signup", authRateLimit, async (req, res) => {
     const parsedBody = parseWithSchema(signupBodySchema, req.body ?? {}, res, "signup");
     if (!parsedBody.ok) return;
     const { email, name, password } = parsedBody.data;
@@ -69,7 +71,7 @@ router.post("/signup", async (req, res) => {
             const created = await client.query(
                 `INSERT INTO users (email, name, password_hash, points_balance)
                  VALUES ($1, $2, $3, $4)
-                 RETURNING id, email, name, points_balance, created_at`,
+                 RETURNING id, email, name, points_balance, created_at, token_version`,
                 [trimmedEmail, trimmedName, passwordHash, SIGNUP_REWARD_POINTS]
             );
 
@@ -81,7 +83,7 @@ router.post("/signup", async (req, res) => {
             );
 
             await client.query("COMMIT");
-            const token = issueToken(user.id);
+            const token = issueAuthToken(user.id, Number(user.token_version ?? 0));
             return res.status(201).json({ ok: true, token, user });
         } catch (e: any) {
             await client.query("ROLLBACK");
@@ -93,11 +95,11 @@ router.post("/signup", async (req, res) => {
             client.release();
         }
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to create account right now");
     }
 });
 
-router.post("/login", async (req, res) => {
+router.post("/login", authRateLimit, async (req, res) => {
     const parsedBody = parseWithSchema(loginBodySchema, req.body ?? {}, res, "login");
     if (!parsedBody.ok) return;
     const { email, password } = parsedBody.data;
@@ -106,7 +108,7 @@ router.post("/login", async (req, res) => {
 
     try {
         const r = await pool.query(
-            `SELECT id, email, name, password_hash, points_balance, created_at
+            `SELECT id, email, name, password_hash, points_balance, created_at, token_version
        FROM users
        WHERE email = $1`,
             [trimmedEmail]
@@ -123,7 +125,7 @@ router.post("/login", async (req, res) => {
             return res.status(401).json({ ok: false, error: "Invalid email or password" });
         }
 
-        const token = issueToken(user.id);
+        const token = issueAuthToken(user.id, Number(user.token_version ?? 0));
 
         const safeUser = {
             id: user.id,
@@ -135,7 +137,7 @@ router.post("/login", async (req, res) => {
 
         return res.json({ ok: true, token, user: safeUser });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to log in right now");
     }
 });
 

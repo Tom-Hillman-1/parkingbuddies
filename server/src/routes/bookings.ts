@@ -7,6 +7,7 @@ import { calcBookingUnits, type PriceUnit, toMoney } from "../lib/shared";
 import { findSlotAvailabilityIssue } from "../lib/availability";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
+import { serverError } from "../lib/errors";
 
 const router = Router();
 type Mode = "free" | "rent" | "auction";
@@ -197,7 +198,7 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
             await client.query(
                 `INSERT INTO reward_transactions (user_id, type, amount, reason, related_booking_id, related_spot_id)
                  VALUES ($1,'spend',$2,'booking_with_points',$3,$4)`,
-                    [req.userId, total_points, booking.id, parking_spot_id]
+                [req.userId, total_points, booking.id, parking_spot_id]
             );
             await client.query(
                 `UPDATE users
@@ -224,7 +225,7 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
         return res.status(201).json({ ok: true, booking });
     } catch (e) {
         await client.query("ROLLBACK");
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to create booking right now");
     } finally {
         client.release();
     }
@@ -268,7 +269,7 @@ router.get("/spot/:id", async (req, res) => {
         }
         return res.json({ ok: true, bookings: r.rows });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load bookings right now");
     }
 });
 
@@ -317,7 +318,7 @@ router.get("/me", requireAuth, async (req: AuthRequest, res) => {
 
         return res.json({ ok: true, bookings: r.rows });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load your bookings right now");
     }
 });
 
@@ -327,23 +328,55 @@ router.patch("/:id/cancel", requireAuth, async (req: AuthRequest, res) => {
     const bookingId = parsedParams.data.id;
 
     try {
+        const bookingR = await pool.query(
+            `SELECT b.*,
+                    pay.status AS payment_status,
+                    pay.updated_at AS payment_updated_at
+             FROM bookings b
+             LEFT JOIN LATERAL (
+                 SELECT p.status, p.updated_at
+                 FROM payments p
+                 WHERE p.booking_id = b.id
+                 ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC, p.id DESC
+                 LIMIT 1
+             ) pay ON TRUE
+             WHERE b.id = $1
+               AND b.driver_user_id = $2`,
+            [bookingId, req.userId]
+        );
+
+        if (!bookingR.rowCount) {
+            return res.status(404).json({ ok: false, error: "Booking not found" });
+        }
+
+        const booking = bookingR.rows[0];
+        if (booking.status !== "pending") {
+            return res.status(400).json({ ok: false, error: "Only pending bookings can be cancelled" });
+        }
+        const activePendingPayment =
+            booking.payment_status === "pending" &&
+            booking.payment_updated_at &&
+            new Date(booking.payment_updated_at).getTime() >= Date.now() - PENDING_BOOKING_HOLD_MINUTES * 60 * 1000;
+        if (booking.payment_status === "succeeded" || activePendingPayment) {
+            return res.status(409).json({
+                ok: false,
+                error: "Booking cannot be cancelled after payment has started or after it has been paid.",
+            });
+        }
+
         const r = await pool.query(
             `UPDATE bookings
              SET status = 'cancelled', updated_at = now()
              WHERE id = $1
                AND driver_user_id = $2
                AND status = 'pending'
-                 RETURNING *`,
+             RETURNING *`,
             [bookingId, req.userId]
         );
 
-        if (!r.rowCount) {
-            return res.status(404).json({ ok: false, error: "Booking not found (or not yours, or not pending)" });
-        }
-
         return res.json({ ok: true, booking: r.rows[0] });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to cancel booking right now");
     }
 });
 
@@ -365,7 +398,7 @@ router.get("/owner", requireAuth, async (req: AuthRequest, res) => {
 
         return res.json({ ok: true, bookings: r.rows });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load owner bookings right now");
     }
 });
 
@@ -430,7 +463,7 @@ router.get("/:id", requireAuth, async (req: AuthRequest, res) => {
 
         return res.json({ ok: true, booking: r.rows[0] });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load booking right now");
     }
 });
 

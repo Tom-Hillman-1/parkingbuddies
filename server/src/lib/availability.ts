@@ -12,6 +12,7 @@ const londonDateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    hourCycle: "h23",
 });
 
 function parseTimeToMinutes(hhmm: string) {
@@ -21,17 +22,46 @@ function parseTimeToMinutes(hhmm: string) {
     return h * 60 + m;
 }
 
-function parseYmdTimeUtc(ymd: string, hhmm: string) {
-    return new Date(`${ymd}T${hhmm}:00Z`);
+function londonDateTimeParts(date: Date) {
+    const parts = londonDateTimeFormatter.formatToParts(date);
+    return {
+        year: Number(parts.find((part) => part.type === "year")?.value ?? 0),
+        month: Number(parts.find((part) => part.type === "month")?.value ?? 1),
+        day: Number(parts.find((part) => part.type === "day")?.value ?? 1),
+        hour: Number(parts.find((part) => part.type === "hour")?.value ?? 0),
+        minute: Number(parts.find((part) => part.type === "minute")?.value ?? 0),
+    };
+}
+
+export function parseLondonDateTime(ymd: string, hhmm: string) {
+    const [rawYear, rawMonth, rawDay] = ymd.split("-").map(Number);
+    const [rawHour, rawMinute] = hhmm.split(":").map(Number);
+    const year = rawYear ?? 0;
+    const month = rawMonth ?? 1;
+    const day = rawDay ?? 1;
+    const hour = rawHour ?? 0;
+    const minute = rawMinute ?? 0;
+    const desiredUtcMs = Date.UTC(year, month - 1, day, hour, minute);
+    let guess = new Date(desiredUtcMs);
+
+    for (let i = 0; i < 3; i += 1) {
+        const parts = londonDateTimeParts(guess);
+        const actualLocalMs = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
+        const offsetMs = desiredUtcMs - actualLocalMs;
+        if (offsetMs === 0) break;
+        guess = new Date(guess.getTime() + offsetMs);
+    }
+
+    return guess;
 }
 
 function londonDateTimeKey(date: Date) {
-    const parts = londonDateTimeFormatter.formatToParts(date);
-    const year = parts.find((part) => part.type === "year")?.value ?? "0000";
-    const month = parts.find((part) => part.type === "month")?.value ?? "01";
-    const day = parts.find((part) => part.type === "day")?.value ?? "01";
-    const hour = parts.find((part) => part.type === "hour")?.value ?? "00";
-    const minute = parts.find((part) => part.type === "minute")?.value ?? "00";
+    const parts = londonDateTimeParts(date);
+    const year = String(parts.year).padStart(4, "0");
+    const month = String(parts.month).padStart(2, "0");
+    const day = String(parts.day).padStart(2, "0");
+    const hour = String(parts.hour).padStart(2, "0");
+    const minute = String(parts.minute).padStart(2, "0");
     return `${year}-${month}-${day}T${hour}:${minute}`;
 }
 
@@ -59,8 +89,8 @@ function buildAvailabilityWindows(spot: any, maxDaysForward = 30): AvailabilityW
     const windows: AvailabilityWindow[] = [];
     for (const window of a.windows) {
         if (!isWindowSlot(window)) continue;
-        const start = parseYmdTimeUtc(window.date_from, window.start);
-        const end = parseYmdTimeUtc(window.date_to, window.end);
+        const start = parseLondonDateTime(window.date_from, window.start);
+        const end = parseLondonDateTime(window.date_to, window.end);
         if (!(start < end)) continue;
         if (end <= now || start >= maxEnd) continue;
         windows.push({

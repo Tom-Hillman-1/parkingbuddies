@@ -44,7 +44,7 @@ type SettingsResponse = { name: string; email: string };
 type SettingsQueryData = { name: string; email: string; pointsBalance: number; createdAt: string };
 
 export default function SettingsPage() {
-    const { token, logout, user, refreshMe } = useAuth();
+    const { token, logout, user, refreshMe, replaceToken } = useAuth();
     const navigate = useNavigate();
 
     const [profileMsg, setProfileMsg] = useState<string | null>(null);
@@ -192,11 +192,12 @@ export default function SettingsPage() {
         setPasswordMsg(null);
 
         try {
-            await apiPatch(
+            const response = await apiPatch<{ token: string }>(
                 "/settings/password",
                 { currentPassword: values.currentPassword, newPassword: values.newPassword },
                 token
             );
+            replaceToken(response.token);
             setPasswordMsg("Password changed successfully.");
             passwordForm.reset({ currentPassword: "", newPassword: "" });
         } catch (error: unknown) {

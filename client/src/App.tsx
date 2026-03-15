@@ -110,7 +110,7 @@ export default function App() {
                 <p className="site-footer-text">
                     ParkingBuddies project © {new Date().getFullYear()}. All rights reserved.{" "}
                     <Link to="/about#contact-bottom" className="site-footer-link">
-                         Contact us.
+                        Contact us.
                     </Link>
                 </p>
             </footer>

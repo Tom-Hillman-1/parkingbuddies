@@ -12,6 +12,8 @@ import {
     PROFILE_COMPLETION_REWARD_POINTS,
 } from "../lib/shared";
 import { parseWithSchema } from "../lib/validation";
+import { serverError } from "../lib/errors";
+import { issueAuthToken } from "../lib/tokens";
 
 const router = Router();
 const profileBodySchema = z.object({
@@ -37,7 +39,7 @@ router.get("/", requireAuth, async (req: AuthRequest, res) => {
         }
         return res.json({ ok: true, settings: r.rows[0] });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load settings right now");
     }
 });
 
@@ -75,6 +77,26 @@ router.patch("/profile", requireAuth, async (req: AuthRequest, res) => {
     const client = await pool.connect();
     try {
         await client.query("BEGIN");
+        const currentUserR = await client.query(
+            `SELECT name, email
+             FROM users
+             WHERE id = $1
+             FOR UPDATE`,
+            [req.userId]
+        );
+        if (!currentUserR.rowCount) {
+            await client.query("ROLLBACK");
+            return res.status(404).json({ ok: false, error: "User not found" });
+        }
+
+        const currentUser = currentUserR.rows[0];
+        const nextName = name !== undefined ? normalizeName(name) : currentUser.name;
+        const nextEmail = email !== undefined ? normalizeEmail(email) : currentUser.email;
+        const shouldAwardProfileReward =
+            name !== undefined &&
+            email !== undefined &&
+            (nextName !== currentUser.name || nextEmail !== currentUser.email);
+
         const r = await client.query(
             `UPDATE users
        SET ${updates.join(", ")}, updated_at = now()
@@ -106,7 +128,7 @@ router.patch("/profile", requireAuth, async (req: AuthRequest, res) => {
              LIMIT 1`,
             [req.userId]
         );
-        if (!rewardR.rowCount) {
+        if (!rewardR.rowCount && shouldAwardProfileReward) {
             await client.query(
                 `UPDATE users
                  SET points_balance = points_balance + $1, updated_at = now()
@@ -128,7 +150,7 @@ router.patch("/profile", requireAuth, async (req: AuthRequest, res) => {
         if (String(e).includes("duplicate key value") || String(e).includes("users_email_key")) {
             return res.status(409).json({ ok: false, error: "Email already in use" });
         }
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to update profile right now");
     } finally {
         client.release();
     }
@@ -168,11 +190,26 @@ router.patch("/password", requireAuth, async (req: AuthRequest, res) => {
 
         const newHash = await bcrypt.hash(newPassword, 10);
 
-        await pool.query(`UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2`, [newHash, req.userId]);
+        await pool.query(
+            `UPDATE users
+             SET password_hash = $1,
+                 token_version = token_version + 1,
+                 updated_at = now()
+             WHERE id = $2`,
+            [newHash, req.userId]
+        );
 
-        return res.json({ ok: true });
+        const updatedUserR = await pool.query(`SELECT token_version FROM users WHERE id = $1`, [req.userId]);
+        if (!updatedUserR.rowCount) {
+            return res.status(404).json({ ok: false, error: "User not found" });
+        }
+
+        return res.json({
+            ok: true,
+            token: issueAuthToken(req.userId!, Number(updatedUserR.rows[0].token_version ?? 0)),
+        });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to update password right now");
     }
 });
 

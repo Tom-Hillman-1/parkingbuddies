@@ -12,7 +12,6 @@ import {
     ValueIcon,
 } from "@radix-ui/react-icons";
 import Lottie from "lottie-react";
-import { Button, ListBox, ListBoxItem, Popover, Select, SelectValue } from "react-aria-components";
 import { Link } from "react-router-dom";
 import SpotsMap from "../components/SpotsMap";
 import { AppDisclosure } from "../components/ui/AppDisclosure";
@@ -154,34 +153,22 @@ function HomeDurationSelect({
     disabled?: boolean;
 }) {
     return (
-        <Select
-            aria-label="Duration"
-            selectedKey={String(value)}
-            onSelectionChange={(key) => onChange(Number(key))}
-            isDisabled={disabled}
-            className="homeFilterSelect"
-        >
-            <Button className="homeFilterSelectButton">
-                <SelectValue className="homeFilterSelectValue" />
-                <ChevronDownIcon className="homeFilterSelectIcon" aria-hidden="true" />
-            </Button>
-            <Popover className="homeFilterSelectPopover" placement="bottom start" offset={8}>
-                <ListBox className="homeFilterSelectList">
-                    {HOME_DURATION_OPTIONS.map((option) => (
-                        <ListBoxItem
-                            key={`home-duration-${option.value}`}
-                            id={String(option.value)}
-                            textValue={option.label}
-                            className={({ isFocused, isSelected }) =>
-                                `homeFilterSelectOption${isFocused ? " is-focused" : ""}${isSelected ? " is-selected" : ""}`
-                            }
-                        >
-                            {option.label}
-                        </ListBoxItem>
-                    ))}
-                </ListBox>
-            </Popover>
-        </Select>
+        <div className={`homeFilterSelect${disabled ? " is-disabled" : ""}`}>
+            <select
+                aria-label="Duration"
+                value={String(value)}
+                onChange={(event) => onChange(Number(event.target.value))}
+                disabled={disabled}
+                className="homeFilterSelectInput"
+            >
+                {HOME_DURATION_OPTIONS.map((option) => (
+                    <option key={`home-duration-${option.value}`} value={option.value}>
+                        {option.label}
+                    </option>
+                ))}
+            </select>
+            <ChevronDownIcon className="homeFilterSelectIcon" aria-hidden="true" />
+        </div>
     );
 }
 

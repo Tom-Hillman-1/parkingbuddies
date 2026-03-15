@@ -8,6 +8,7 @@ import { findSlotAvailabilityIssue, remainingMinutes } from "../lib/availability
 import { calcAuctionUnits, type PriceUnit, toMoney } from "../lib/shared";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
+import { serverError } from "../lib/errors";
 
 const router = Router();
 const PENDING_BOOKING_HOLD_MINUTES = 30;
@@ -37,14 +38,6 @@ const bidActionBodySchema = z.object({
 const bidIdParamsSchema = z.object({
     bidId: z.string().uuid("bidId must be a valid bid ID"),
 });
-
-function isValidDurationMinutes(minutes: number) {
-    if (!Number.isFinite(minutes) || minutes <= 0) return false;
-    if (minutes <= 12 * 60) return minutes % 15 === 0;
-    if (minutes <= 72 * 60) return minutes % 60 === 0;
-    if (minutes <= 30 * 24 * 60) return minutes % (24 * 60) === 0;
-    return false;
-}
 
 const AUCTION_SPOT_MUTATION_SELECT =
     `SELECT id, owner_user_id, mode, price_unit, auction_start_price_gbp, allow_points, points_cost, availability_json, capacity_total ` +
@@ -136,7 +129,7 @@ router.get("/owner/bids", requireAuth, async (req: AuthRequest, res) => {
 
         return res.json({ ok: true, bids: r.rows });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load owner bids right now");
     }
 });
 
@@ -153,7 +146,7 @@ router.get("/me/pending", requireAuth, async (req: AuthRequest, res) => {
         );
         return res.json({ ok: true, bids: r.rows });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load your pending bids right now");
     }
 });
 
@@ -241,7 +234,7 @@ router.get("/bids/:bidId", requireAuth, async (req: AuthRequest, res) => {
             },
         });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load bid details right now");
     }
 });
 
@@ -332,7 +325,7 @@ router.get("/:spotId", async (req, res) => {
 
         return res.json({ ok: true, auction });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load auction details right now");
     }
 });
 
@@ -402,7 +395,7 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
         const end = requestedEnd;
         const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
         const maxEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-        if (end > maxEnd || !isValidDurationMinutes(minutes)) {
+        if (!Number.isFinite(minutes) || minutes <= 0 || end > maxEnd) {
             return rollbackWith(400, "Selected slot exceeds the allowed booking window.", payMethod === "money");
         }
 
@@ -502,7 +495,7 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
         if (payMethod === "money") {
             await cancelPaymentIntentSilently(paymentIntentIdValue);
         }
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to place bid right now");
     } finally {
         client.release();
     }
@@ -707,7 +700,7 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
         await client.query("COMMIT");
     } catch (e) {
         await client.query("ROLLBACK");
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to accept bid right now");
     } finally {
         client.release();
     }
@@ -825,7 +818,7 @@ router.post("/:spotId/reject", requireAuth, async (req: AuthRequest, res) => {
         await client.query("COMMIT");
     } catch (e) {
         await client.query("ROLLBACK");
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to reject bid right now");
     } finally {
         client.release();
     }

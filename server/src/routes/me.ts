@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
+import { serverError } from "../lib/errors";
 
 const router = Router();
 
@@ -50,7 +51,7 @@ router.get("/", requireAuth, async (req: AuthRequest, res) => {
 
         return res.json({ ok: true, user: r.rows[0] });
     } catch (e) {
-        return res.status(500).json({ ok: false, error: String(e) });
+        return serverError(res, e, "Unable to load account details right now");
     }
 });
 
