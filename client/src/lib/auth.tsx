@@ -107,14 +107,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 refreshMe().catch(clearAuthState);
             }
         };
-        const interval = window.setInterval(() => {
-            refreshMe().catch(clearAuthState);
-        }, 30000);
 
         window.addEventListener("focus", onFocus);
         document.addEventListener("visibilitychange", onVisibility);
         return () => {
-            window.clearInterval(interval);
             window.removeEventListener("focus", onFocus);
             document.removeEventListener("visibilitychange", onVisibility);
         };

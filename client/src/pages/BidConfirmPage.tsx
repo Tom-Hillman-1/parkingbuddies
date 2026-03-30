@@ -1,11 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { loadStripe } from "@stripe/stripe-js";
-import { Elements, CardElement, useElements, useStripe } from "@stripe/react-stripe-js";
+import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { apiGet, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ReceiptCard, ReceiptRow } from "../components/ReceiptCard";
+import { buildStripeElementsOptions } from "../lib/stripeElements";
 import {
     calcAuctionMoneyTotal,
     calcAuctionPointsTotal,
@@ -17,13 +18,122 @@ import {
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string);
 type SpotSummary = { id: string; title: string; address_text: string; price_unit?: PriceUnit };
+type StripeIntentDetails = { client_secret: string; payment_intent_id: string };
 
 function useQueryValue(key: string, fallback = "") {
     const [search] = useSearchParams();
     return search.get(key) ?? fallback;
 }
 
+function buildIntentKey(spotId: string, start: string, end: string, amountGbp: number) {
+    const normalizedStart = start.replace(/[^0-9A-Za-z]/g, "");
+    const normalizedEnd = end.replace(/[^0-9A-Za-z]/g, "");
+    const amount = Math.round(amountGbp * 100);
+    return `bid_${spotId}_${normalizedStart}_${normalizedEnd}_${amount}`;
+}
+
 function BidCardForm({
+    spotId,
+    paymentIntentId,
+    clientSecret,
+    start,
+    end,
+    token,
+    onBack,
+    onDone,
+    onError,
+}: {
+    spotId: string;
+    paymentIntentId: string;
+    clientSecret: string;
+    start: string;
+    end: string;
+    token: string;
+    onBack: string;
+    onDone: (bidId: string) => void;
+    onError: (msg: string) => void;
+}) {
+    const stripe = useStripe();
+    const elements = useElements();
+    const [busy, setBusy] = useState(false);
+
+    async function confirm() {
+        setBusy(true);
+        onError("");
+        let bidSubmitted = false;
+        try {
+            if (!stripe || !elements) {
+                onError("Secure authorization form is not ready yet.");
+                return;
+            }
+
+            const { error: submitError } = await elements.submit();
+            if (submitError) {
+                onError(submitError.message ?? "Please complete your payment details.");
+                return;
+            }
+
+            const result = await stripe.confirmPayment({
+                elements,
+                clientSecret,
+                redirect: "if_required",
+            });
+            if (result.error) {
+                onError(result.error.message ?? "Card authorization failed");
+                setBusy(false);
+                return;
+            }
+
+            const response = await apiPost<{ bid_id: string }>(
+                `/auctions/${spotId}/bid`,
+                {
+                    payment_intent_id: paymentIntentId,
+                    start_time: start,
+                    end_time: end,
+                    pay_method: "money",
+                },
+                token
+            );
+            bidSubmitted = true;
+            onDone(response.bid_id);
+        } catch (error: unknown) {
+            if (!bidSubmitted) {
+                try {
+                    await apiPost("/payments/auction-intent/cancel", { payment_intent_id: paymentIntentId }, token);
+                } catch {
+                    // Best-effort cleanup only.
+                }
+            }
+            onError(readErrorMessage(error, "Authorization failed"));
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    return (
+        <div className="card" style={{ padding: 16, marginTop: 12 }}>
+            <div className="h3">Secure card authorization</div>
+            <div className="tiny muted" style={{ marginTop: 4 }}>
+                Enter your details in Stripe's secure payment form. The amount is only charged if the owner accepts your bid.
+            </div>
+            <div style={{ padding: 10, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, marginTop: 10 }}>
+                <PaymentElement />
+            </div>
+            <div className="rowInline" style={{ marginTop: 12 }}>
+                <button
+                    onClick={confirm}
+                    disabled={busy}
+                    className="btn btn-primary"
+                >
+                    {busy ? "Authorizing..." : "Confirm & authorize"}
+                </button>
+                <Link to={onBack} className="btn">Back to listing</Link>
+            </div>
+        </div>
+    );
+}
+
+function BidPaymentSection({
     amountGbp,
     spotId,
     start,
@@ -42,119 +152,56 @@ function BidCardForm({
     onDone: (bidId: string) => void;
     onError: (msg: string) => void;
 }) {
-    const stripe = useStripe();
-    const elements = useElements();
-    const [busy, setBusy] = useState(false);
+    const [intent, setIntent] = useState<StripeIntentDetails | null>(null);
+    const intentKey = useMemo(() => buildIntentKey(spotId, start, end, amountGbp), [amountGbp, end, spotId, start]);
 
-    function buildIntentKey() {
-        const normalizedStart = start.replace(/[^0-9A-Za-z]/g, "");
-        const normalizedEnd = end.replace(/[^0-9A-Za-z]/g, "");
-        const amount = Math.round(amountGbp * 100);
-        return `bid_${spotId}_${normalizedStart}_${normalizedEnd}_${amount}_${Date.now()}`;
-    }
-
-    async function submitDemoAuthorization() {
-        const response = await apiPost<{ bid_id: string }>(
-            `/auctions/${spotId}/bid`,
-            {
-                amount_gbp: amountGbp,
-                start_time: start,
-                end_time: end,
-                pay_method: "money",
-                demo_authorization: true,
-            },
-            token
-        );
-        onDone(response.bid_id);
-    }
-
-    async function confirm() {
+    useEffect(() => {
         if (!Number.isFinite(amountGbp) || amountGbp <= 0) {
-            onError("Enter a valid money amount before authorizing.");
+            setIntent(null);
             return;
         }
-        setBusy(true);
-        onError("");
-        let paymentIntentId: string | null = null;
-        let bidSubmitted = false;
-        try {
-            if (!stripe || !elements) {
-                await submitDemoAuthorization();
-                bidSubmitted = true;
-                return;
-            }
-            const intent = await apiPost<{ client_secret: string; payment_intent_id: string }>(
-                "/payments/auction-intent",
-                {
-                    spot_id: spotId,
-                    amount_gbp: amountGbp,
-                    idempotency_key: buildIntentKey(),
-                },
-                token
-            );
-            paymentIntentId = intent.payment_intent_id;
-            const card = elements.getElement(CardElement);
-            if (!card) {
-                await submitDemoAuthorization();
-                bidSubmitted = true;
-                return;
-            }
-            const result = await stripe.confirmCardPayment(intent.client_secret, {
-                payment_method: { card },
-            });
-            if (result.error) {
-                onError(result.error.message ?? "Card authorization failed");
-                setBusy(false);
-                return;
-            }
 
-            const response = await apiPost<{ bid_id: string }>(
-                `/auctions/${spotId}/bid`,
-                {
-                    amount_gbp: amountGbp,
-                    payment_intent_id: paymentIntentId,
-                    start_time: start,
-                    end_time: end,
-                    pay_method: "money",
-                },
-                token
-            );
-            bidSubmitted = true;
-            onDone(response.bid_id);
-        } catch (error: unknown) {
-            if (paymentIntentId && !bidSubmitted) {
-                try {
-                    await apiPost("/payments/auction-intent/cancel", { payment_intent_id: paymentIntentId }, token);
-                } catch {
-                    // Best-effort cleanup only.
-                }
-            }
-            onError(readErrorMessage(error, "Authorization failed"));
-        } finally {
-            setBusy(false);
-        }
-    }
+        let active = true;
+        setIntent(null);
+        onError("");
+
+        apiPost<StripeIntentDetails>(
+            "/payments/auction-intent",
+            {
+                spot_id: spotId,
+                amount_gbp: amountGbp,
+                idempotency_key: intentKey,
+            },
+            token
+        )
+            .then((response) => {
+                if (active) setIntent(response);
+            })
+            .catch((error: unknown) => {
+                if (active) onError(readErrorMessage(error, "Unable to prepare secure authorization."));
+            });
+
+        return () => {
+            active = false;
+        };
+    }, [amountGbp, intentKey, onError, spotId, token]);
+
+    if (!intent) return null;
 
     return (
-        <div className="card" style={{ padding: 16, marginTop: 12 }}>
-            <div className="h3">Card authorization</div>
-            <div className="tiny muted" style={{ marginTop: 4 }}>
-                This reserves the amount. You're only charged if the owner accepts your bid.
-            </div>
-            <div style={{ padding: 10, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, marginTop: 10 }}>
-                <CardElement options={{ hidePostalCode: true }} />
-            </div>
-            <div className="rowInline" style={{ marginTop: 12 }}>
-                <button
-                    onClick={confirm}
-                    disabled={busy}
-                    className="btn btn-primary"
-                >
-                    {busy ? "Authorizing..." : "Confirm & authorize"}
-                </button>
-                <Link to={onBack} className="btn">Back to listing</Link>
-            </div>
-        </div>
+        <Elements stripe={stripePromise} options={buildStripeElementsOptions(intent.client_secret)}>
+            <BidCardForm
+                spotId={spotId}
+                paymentIntentId={intent.payment_intent_id}
+                clientSecret={intent.client_secret}
+                start={start}
+                end={end}
+                token={token}
+                onBack={onBack}
+                onDone={onDone}
+                onError={onError}
+            />
+        </Elements>
     );
 }
 
@@ -258,18 +305,16 @@ export default function BidConfirmPage() {
             </ReceiptCard>
 
             {pay === "money" ? (
-                <Elements stripe={stripePromise} options={{}}>
-                    <BidCardForm
-                        amountGbp={totalMoney}
-                        spotId={spotId}
-                        start={start}
-                        end={end}
-                        token={token}
-                        onBack={`/spots/${spotId}`}
-                        onDone={(bidId) => navigate(`/bids/${bidId}`)}
-                        onError={(m) => setErr(m)}
-                    />
-                </Elements>
+                <BidPaymentSection
+                    amountGbp={totalMoney}
+                    spotId={spotId}
+                    start={start}
+                    end={end}
+                    token={token}
+                    onBack={`/spots/${spotId}`}
+                    onDone={(bidId) => navigate(`/bids/${bidId}`)}
+                    onError={(m) => setErr(m)}
+                />
             ) : (
                 <div className="card formSection" style={{ marginTop: 12 }}>
                     <div className="h3">Confirm points bid</div>

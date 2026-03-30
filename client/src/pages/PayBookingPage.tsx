@@ -3,11 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, useParams } from "react-router-dom";
 import Lottie from "lottie-react";
 import { loadStripe } from "@stripe/stripe-js";
-import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
+import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { apiGet, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import AppPageState from "../components/AppPageState";
 import { ReceiptCard, ReceiptDivider, ReceiptRow } from "../components/ReceiptCard";
+import { buildStripeElementsOptions } from "../lib/stripeElements";
 import loadingAnimation from "../assets/loading.json";
 import { formatDateRangeLocal, formatDateTimeLocal, toFiniteNumber } from "./pagesShared";
 
@@ -35,6 +36,11 @@ type StripeReceiptDetails = {
     amount_received_gbp?: number;
     payment_intent_id?: string;
     charge_id?: string | null;
+};
+
+type StripeIntentDetails = {
+    client_secret: string;
+    payment_intent_id: string;
 };
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string);
@@ -66,11 +72,13 @@ async function waitForStripeReceiptUrl(bookingId: string, token: string, attempt
 function BookingCardForm({
     booking,
     token,
+    clientSecret,
     onError,
     onProcessingChange,
 }: {
     booking: Booking;
     token: string;
+    clientSecret: string;
     onError: (message: string | null) => void;
     onProcessingChange: (value: boolean) => void;
 }) {
@@ -80,13 +88,13 @@ function BookingCardForm({
 
     async function confirmPayment() {
         if (!stripe || !elements) {
-            onError("Card form is not ready yet.");
+            onError("Secure payment form is not ready yet.");
             return;
         }
 
-        const card = elements.getElement(CardElement);
-        if (!card) {
-            onError("Card form is not available.");
+        const { error: submitError } = await elements.submit();
+        if (submitError) {
+            onError(submitError.message ?? "Please complete your payment details.");
             return;
         }
 
@@ -95,14 +103,10 @@ function BookingCardForm({
         onError(null);
 
         try {
-            const intent = await apiPost<{ client_secret: string; payment_intent_id: string }>(
-                "/payments/booking-intent",
-                { booking_id: booking.id },
-                token
-            );
-
-            const result = await stripe.confirmCardPayment(intent.client_secret, {
-                payment_method: { card },
+            const result = await stripe.confirmPayment({
+                elements,
+                clientSecret,
+                redirect: "if_required",
             });
             if (result.error) {
                 onError(result.error.message ?? "Card payment failed.");
@@ -127,12 +131,12 @@ function BookingCardForm({
 
     return (
         <div className="card formSection" style={{ marginTop: 14, marginBottom: 14 }}>
-            <div className="h3">Pay by card</div>
+            <div className="h3">Secure card payment</div>
             <div className="muted" style={{ marginTop: 6 }}>
-                Enter your card details below. Once payment succeeds, you will be sent straight to the Stripe receipt.
+                Enter your details in Stripe's secure payment form. Once payment succeeds, you will be sent straight to the Stripe receipt.
             </div>
             <div style={{ padding: 12, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, marginTop: 12 }}>
-                <CardElement options={{ hidePostalCode: true }} />
+                <PaymentElement />
             </div>
             <div className="rowInline" style={{ marginTop: 12 }}>
                 <button className="btn btn-primary" onClick={confirmPayment} disabled={busy}>
@@ -140,6 +144,52 @@ function BookingCardForm({
                 </button>
             </div>
         </div>
+    );
+}
+
+function BookingPaymentSection({
+    booking,
+    token,
+    onError,
+    onProcessingChange,
+}: {
+    booking: Booking;
+    token: string;
+    onError: (message: string | null) => void;
+    onProcessingChange: (value: boolean) => void;
+}) {
+    const [intent, setIntent] = useState<StripeIntentDetails | null>(null);
+
+    useEffect(() => {
+        let active = true;
+        setIntent(null);
+        onError(null);
+
+        apiPost<StripeIntentDetails>("/payments/booking-intent", { booking_id: booking.id }, token)
+            .then((response) => {
+                if (active) setIntent(response);
+            })
+            .catch((error: unknown) => {
+                if (active) onError(readErrorMessage(error, "Unable to prepare secure payment."));
+            });
+
+        return () => {
+            active = false;
+        };
+    }, [booking.id, onError, token]);
+
+    if (!intent) return null;
+
+    return (
+        <Elements stripe={stripePromise} options={buildStripeElementsOptions(intent.client_secret)}>
+            <BookingCardForm
+                booking={booking}
+                token={token}
+                clientSecret={intent.client_secret}
+                onError={onError}
+                onProcessingChange={onProcessingChange}
+            />
+        </Elements>
     );
 }
 
@@ -217,7 +267,6 @@ export default function PayBookingPage() {
     if (!token) return <Navigate to="/login" replace />;
 
     const loadErr = bookingQuery.error ? readErrorMessage(bookingQuery.error, "Could not load payment details.") : null;
-    const loading = bookingQuery.isLoading;
     const receipt = receiptQuery.data ?? null;
 
     const hasStripeReceipt = Boolean(receipt?.receipt_url);
@@ -280,7 +329,7 @@ export default function PayBookingPage() {
             )}
             {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
 
-            {!loading && !loadErr && booking && (
+            {!loadErr && booking && (
                 <>
                     <ReceiptCard
                         kicker="PARKINGBUDDIES"
@@ -331,14 +380,12 @@ export default function PayBookingPage() {
                     </ReceiptCard>
 
                     {requiresPayment && (
-                        <Elements stripe={stripePromise} options={{}}>
-                            <BookingCardForm
-                                booking={booking}
-                                token={token}
-                                onError={setErr}
-                                onProcessingChange={setProcessingPayment}
-                            />
-                        </Elements>
+                        <BookingPaymentSection
+                            booking={booking}
+                            token={token}
+                            onError={setErr}
+                            onProcessingChange={setProcessingPayment}
+                        />
                     )}
 
                 </>

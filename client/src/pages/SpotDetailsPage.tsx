@@ -128,7 +128,6 @@ export default function SpotDetailsPage() {
                 return null as AuctionInfo | null;
             }
         },
-        refetchInterval: 10000,
         refetchOnWindowFocus: false,
     });
     const auctionInfo = auctionQuery.data ?? null;
