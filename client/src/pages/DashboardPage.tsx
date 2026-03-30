@@ -1,12 +1,13 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tab, TabList, TabPanel, Tabs } from "react-aria-components";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { AppButton } from "../components/ui/AppForm";
 import { AppDisclosure } from "../components/ui/AppDisclosure";
 import { apiGet, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth, useStripeConnect } from "../lib/auth";
+import { summarizeNotifications } from "../lib/notifications";
 import {
     calcAuctionPointsTotal,
     calcAuctionUnitsForRange,
@@ -132,6 +133,7 @@ function DashboardDisclosureCard({
     tone,
     count,
     countClassName = "badge",
+    notificationCount,
     isLast,
     children,
 }: {
@@ -140,6 +142,7 @@ function DashboardDisclosureCard({
     tone: SectionTone;
     count: ReactNode;
     countClassName?: string;
+    notificationCount?: number;
     isLast?: boolean;
     children: ReactNode;
 }) {
@@ -164,6 +167,7 @@ function DashboardDisclosureCard({
                             {">"}
                         </span>
                     </div>
+                    {notificationCount ? <span className="dashboardNotifyBubble dashboardNotifyBubble--card">+{notificationCount}</span> : null}
                 </div>
             )}
         >
@@ -289,6 +293,7 @@ const pendingBidAmountLabel = (bid: AuctionBid) =>
 
 export default function DashboardPage() {
     const { token } = useAuth();
+    const queryClient = useQueryClient();
     const [searchParams] = useSearchParams();
 
     const [err, setErr] = useState<string | null>(null);
@@ -367,6 +372,25 @@ export default function DashboardPage() {
 
     const pendingOwnerBids = useMemo(() => auctionBids.filter((bid) => String(bid.status ?? "").toLowerCase() === "pending"), [auctionBids]);
     const confirmedOwnerBookings = useMemo(() => ownerBookings.filter((booking) => String(booking.status ?? "").toLowerCase() === "confirmed"), [ownerBookings]);
+    const notificationSummary = useMemo(
+        () =>
+            summarizeNotifications({
+                bookings,
+                myListings,
+                auctionBids,
+                myAuctionBids,
+                connect,
+            }),
+        [bookings, myListings, auctionBids, myAuctionBids, connect]
+    );
+    const notificationCountById = useMemo(
+        () => new Map(notificationSummary.items.map((item) => [item.id, item.count])),
+        [notificationSummary.items]
+    );
+    const bookingPaymentNotificationCount = notificationCountById.get("booking-payments") ?? 0;
+    const myPendingBidsNotificationCount = notificationCountById.get("my-pending-bids") ?? 0;
+    const ownerPendingBidsNotificationCount = notificationCountById.get("owner-pending-bids") ?? 0;
+    const payoutSetupNotificationCount = notificationCountById.get("stripe-payouts") ?? 0;
 
     const driverUpcoming = useMemo(() => {
         const now = Date.now();
@@ -444,11 +468,43 @@ export default function DashboardPage() {
             await action(token);
             setMsg(successMessage);
             await dashboardQuery.refetch();
+            await queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
         } catch (error: unknown) {
             setErr(readErrorMessage(error, fallbackError));
         } finally {
             setBusyId(null);
         }
+    };
+
+    const renderDriverBookingActions = (booking: Booking, extraAction?: ReactNode) => {
+        const canOpenStripeReceipt = booking.pay_method === "money" && isMoneyBookingSettled(booking);
+        const actionButtons = [
+            <Link key="local" to={`/pay/${booking.id}`} className="btn btn-primary dashboardSlotActionBtn">
+                Local receipt
+            </Link>,
+            canOpenStripeReceipt ? (
+                <button
+                    key="stripe"
+                    className="btn dashboardSlotActionBtn"
+                    onClick={() => openPaymentReceipt(booking.id)}
+                    disabled={receiptLoadingId === booking.id}
+                >
+                    {receiptLoadingId === booking.id ? "Loading..." : "Stripe receipt"}
+                </button>
+            ) : null,
+            extraAction ?? null,
+        ].filter(Boolean);
+
+        if (actionButtons.length >= 3) {
+            return (
+                <div className="dashboardSlotActionGrid">
+                    {actionButtons.slice(0, 2)}
+                    <div className="dashboardSlotActionGridWide">{actionButtons[2]}</div>
+                </div>
+            );
+        }
+
+        return <>{actionButtons}</>;
     };
 
     const acceptBid = async (spotId: string, bidId: string) => {
@@ -466,6 +522,7 @@ export default function DashboardPage() {
     const handleRefreshConnectStatus = async () => {
         const result = await refreshConnectStatus();
         if (!result.ok && result.error) setErr(result.error);
+        await queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
     };
 
     const handleBeginConnectOnboarding = async (mode: "stripe" | "demo" = "stripe") => {
@@ -477,6 +534,7 @@ export default function DashboardPage() {
             return;
         }
         if (result.ok && result.message) setMsg(result.message);
+        await queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
     };
 
     const handleOpenConnectDashboard = async () => {
@@ -564,7 +622,14 @@ export default function DashboardPage() {
                                 `appTab dashboardTab dashboardTab--${section.tone}${isSelected ? " is-active" : ""}`.trim()
                             }
                         >
-                            {section.title}
+                            <span className="dashboardTabInner">
+                                <span>{section.title}</span>
+                            </span>
+                            {notificationSummary.bySection[section.key] > 0 && (
+                                <span className="dashboardNotifyBubble dashboardNotifyBubble--tab">
+                                    +{notificationSummary.bySection[section.key]}
+                                </span>
+                            )}
                         </Tab>
                     ))}
                 </TabList>
@@ -577,6 +642,7 @@ export default function DashboardPage() {
                                 subtitle="Your bookings as a driver."
                                 count={bookings.length}
                                 countClassName="badge badge--cool"
+                                notificationCount={bookingPaymentNotificationCount}
                             >
                                 <DashboardCollection isEmpty={sortedMyBookings.length === 0} emptyText="No bookings yet." className="dashboardScrollRow">
                                     {sortedMyBookings.map((booking) => {
@@ -602,16 +668,7 @@ export default function DashboardPage() {
                                                         info={booking.owner_contact_info}
                                                     />
                                                 }
-                                                actions={
-                                                    booking.pay_method === "money" ? (
-                                                        <>
-                                                            <button className="btn btn-primary dashboardSlotActionBtn" onClick={() => openPaymentReceipt(booking.id)} disabled={receiptLoadingId === booking.id}>
-                                                                {receiptLoadingId === booking.id ? "Loading..." : "Receipt"}
-                                                            </button>
-                                                            <Link to={`/pay/${booking.id}`} className="btn dashboardSlotActionBtn">Confirmation</Link>
-                                                        </>
-                                                    ) : null
-                                                }
+                                                actions={renderDriverBookingActions(booking)}
                                                 errorText={paymentReceiptErrors[booking.id]}
                                             />
                                         );
@@ -625,6 +682,7 @@ export default function DashboardPage() {
                                 subtitle="Pending bids waiting for owner approval."
                                 count={myAuctionBids.length}
                                 countClassName="badge badge--warm"
+                                notificationCount={myPendingBidsNotificationCount}
                             >
                                 <DashboardCollection isEmpty={sortedMyAuctionBids.length === 0} emptyText="No pending bids." className="dashboardScrollRow">
                                     {sortedMyAuctionBids.map((bid) => {
@@ -666,7 +724,11 @@ export default function DashboardPage() {
                                                 amount={bookingAmountLabel(booking)}
                                                 badges={renderBadgeRow([{ label: "Upcoming", className: "badge badge--cool" }])}
                                                 time={slotTime(booking.start_time, booking.end_time)}
-                                                actions={<Link to={`/spots/${booking.parking_spot_id}`} className="btn">View listing</Link>}
+                                                actions={renderDriverBookingActions(
+                                                    booking,
+                                                    <Link key="listing" to={`/spots/${booking.parking_spot_id}`} className="btn">View listing</Link>
+                                                )}
+                                                errorText={paymentReceiptErrors[booking.id]}
                                             />
                                         );
                                     })}
@@ -757,6 +819,7 @@ export default function DashboardPage() {
                                 subtitle="Approve or reject offers on your listings."
                                 count={pendingOwnerBids.length}
                                 countClassName="badge badge--warm"
+                                notificationCount={ownerPendingBidsNotificationCount}
                             >
                                 <DashboardCollection isEmpty={pendingOwnerBids.length === 0} emptyText="No bids yet." className="dashboardScrollRow">
                                     {pendingOwnerBids.map((bid) => {
@@ -896,9 +959,9 @@ export default function DashboardPage() {
                                                     {isOutgoing ? (
                                                         <>
                                                             <button className="dashboardTxLink" onClick={() => openPaymentReceipt(payment.booking_id)} disabled={receiptLoadingId === payment.booking_id}>
-                                                                {receiptLoadingId === payment.booking_id ? "Loading..." : "Receipt >"}
+                                                                {receiptLoadingId === payment.booking_id ? "Loading..." : "Stripe receipt"}
                                                             </button>
-                                                            <Link to={`/pay/${payment.booking_id}`} className="dashboardTxLink">Confirmation {">"}</Link>
+                                                            <Link to={`/pay/${payment.booking_id}`} className="dashboardTxLink">Local receipt</Link>
                                                         </>
                                                     ) : (
                                                         <button className="dashboardTxLink" onClick={handleOpenConnectDashboard} disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}>
@@ -922,6 +985,7 @@ export default function DashboardPage() {
                                 subtitle={connect?.demo_bypass ? "Demo payouts are simulated. No Stripe onboarding required." : "Connect Stripe to withdraw your earnings."}
                                 count={connectLabel}
                                 countClassName={connectBadgeClass}
+                                notificationCount={payoutSetupNotificationCount}
                                 isLast
                             >
                                 <div ref={payoutsRef} className="stack">

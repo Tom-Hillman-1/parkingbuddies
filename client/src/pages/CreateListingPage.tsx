@@ -27,11 +27,12 @@ import {
     DEFAULT_SLOT_START,
     formatYmdLabel,
     hasAvailabilityOverlap,
+    CREATE_FLOW_COPY,
+    LISTING_MODEL_OPTIONS,
     LONDON_VIEWBOX,
     MIN_AUCTION_START_PRICE_GBP,
     MIN_POINTS_COST,
     modeLabel,
-    MODEL_CHOICES,
     normalizeMode,
     normalizePriceUnit,
     normalizeWindow,
@@ -40,7 +41,6 @@ import {
     SheetActions,
     SPACE_CHOICES,
     STEP_COUNT,
-    STEP_META,
     toAvailabilityPayload,
     Tooltip,
     validateAvailabilityWindows,
@@ -1063,7 +1063,7 @@ export default function CreateListingPage() {
     }
 
     const flowStep = activeStep as FlowStep;
-    const stepMeta = STEP_META[flowStep];
+    const stepMeta = CREATE_FLOW_COPY[flowStep];
 
     return (
         <div className="container createWizardPage">
@@ -1090,7 +1090,7 @@ export default function CreateListingPage() {
                                     orientation="horizontal"
                                     value={mode}
                                     onChange={setMode}
-                                    options={MODEL_CHOICES.map((choice) => ({
+                                    options={LISTING_MODEL_OPTIONS.map((choice) => ({
                                         id: choice.mode,
                                         className: `wizardTile--${choice.tone}`,
                                         content: (

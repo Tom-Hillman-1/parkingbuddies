@@ -29,6 +29,7 @@ function BidCardForm({
     start,
     end,
     token,
+    onBack,
     onDone,
     onError,
 }: {
@@ -37,7 +38,8 @@ function BidCardForm({
     start: string;
     end: string;
     token: string;
-    onDone: () => void;
+    onBack: string;
+    onDone: (bidId: string) => void;
     onError: (msg: string) => void;
 }) {
     const stripe = useStripe();
@@ -52,7 +54,7 @@ function BidCardForm({
     }
 
     async function submitDemoAuthorization() {
-        await apiPost(
+        const response = await apiPost<{ bid_id: string }>(
             `/auctions/${spotId}/bid`,
             {
                 amount_gbp: amountGbp,
@@ -63,7 +65,7 @@ function BidCardForm({
             },
             token
         );
-        onDone();
+        onDone(response.bid_id);
     }
 
     async function confirm() {
@@ -106,7 +108,7 @@ function BidCardForm({
                 return;
             }
 
-            await apiPost(
+            const response = await apiPost<{ bid_id: string }>(
                 `/auctions/${spotId}/bid`,
                 {
                     amount_gbp: amountGbp,
@@ -118,8 +120,7 @@ function BidCardForm({
                 token
             );
             bidSubmitted = true;
-
-            onDone();
+            onDone(response.bid_id);
         } catch (error: unknown) {
             if (paymentIntentId && !bidSubmitted) {
                 try {
@@ -143,14 +144,16 @@ function BidCardForm({
             <div style={{ padding: 10, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, marginTop: 10 }}>
                 <CardElement options={{ hidePostalCode: true }} />
             </div>
-            <button
-                onClick={confirm}
-                disabled={busy}
-                className="btn btn-primary"
-                style={{ marginTop: 12 }}
-            >
-                {busy ? "Authorizing..." : "Confirm & authorize"}
-            </button>
+            <div className="rowInline" style={{ marginTop: 12 }}>
+                <button
+                    onClick={confirm}
+                    disabled={busy}
+                    className="btn btn-primary"
+                >
+                    {busy ? "Authorizing..." : "Confirm & authorize"}
+                </button>
+                <Link to={onBack} className="btn">Back to listing</Link>
+            </div>
         </div>
     );
 }
@@ -207,7 +210,7 @@ export default function BidConfirmPage() {
         setBusy(true);
         setErr(null);
         try {
-            await apiPost(
+            const response = await apiPost<{ bid_id: string }>(
                 `/auctions/${spotId}/bid`,
                 {
                     amount_points: pts,
@@ -217,7 +220,7 @@ export default function BidConfirmPage() {
                 },
                 token
             );
-            navigate("/dashboard?tab=myAuctionBids");
+            navigate(`/bids/${response.bid_id}`);
         } catch (error: unknown) {
             setErr(readErrorMessage(error, "Bid failed"));
         } finally {
@@ -243,7 +246,6 @@ export default function BidConfirmPage() {
                 kicker="PARKINGBUDDIES"
                 title="Bid receipt"
                 subtitle="Pending owner approval"
-                actions={<Link to={`/spots/${spotId}`} className="btn">Back to listing</Link>}
             >
                 <ReceiptRow label="Listing" value={spot?.title ?? "Auction listing"} />
                 <ReceiptRow label="Address" value={spot?.address_text ?? "Address on file"} />
@@ -263,7 +265,8 @@ export default function BidConfirmPage() {
                         start={start}
                         end={end}
                         token={token}
-                        onDone={() => navigate("/dashboard?tab=myAuctionBids")}
+                        onBack={`/spots/${spotId}`}
+                        onDone={(bidId) => navigate(`/bids/${bidId}`)}
                         onError={(m) => setErr(m)}
                     />
                 </Elements>

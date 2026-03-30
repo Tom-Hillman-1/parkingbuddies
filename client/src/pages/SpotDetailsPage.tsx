@@ -212,7 +212,7 @@ export default function SpotDetailsPage() {
     const listingInactive = !!spot && !spot.is_active;
 
     const slotStatus = useMemo(() => {
-        if (!hasSelectedSlot) return { ok: false, label: "Choose a slot to continue." };
+        if (!hasSelectedSlot) return { ok: false, label: "" };
         if (listingInactive) return { ok: false, label: "This listing is no longer active." };
         if (!slotRangeValid) return { ok: false, label: "Pick a valid slot." };
         if (!startsInFuture) return { ok: false, label: "Start time must be in the future." };
@@ -252,8 +252,14 @@ export default function SpotDetailsPage() {
     const bidTotalPoints = useMemo(() => {
         return calcAuctionPointsTotal(bidPointsPerHour, bidUnits);
     }, [bidPointsPerHour, bidUnits]);
+    const auctionMoneyStartLabel =
+        auctionMinPerUnit > 0 ? `Starting bid: ${formatGbp(auctionMinPerUnit)} / ${listingUnit}` : null;
+    const auctionPointsStartPerUnit = toFiniteNumber(spot?.points_cost);
+    const auctionPointsStartLabel =
+        auctionPointsStartPerUnit > 0 ? `Starting bid: ${auctionPointsStartPerUnit} pts / ${listingUnit}` : null;
 
     const userPoints = toFiniteNumber(user?.points_balance);
+    const pointsBookingInsufficient = payMethod === "points" && pointsMinTotal > 0 && userPoints < pointsMinTotal;
     const bidPointsInsufficient = bidPayMethod === "points" && bidTotalPoints > 0 && userPoints < bidTotalPoints;
 
     const auctionSoldOut = !!auctionInfo?.sold_out;
@@ -340,6 +346,17 @@ export default function SpotDetailsPage() {
         if (!slotStatus.ok) return setActionMsg(slotStatus.label);
         if (payMethod === "money" && !canUseMoneyBooking) return setActionMsg("This listing accepts points only.");
         if (payMethod === "points" && pointsMinTotal <= 0) return setActionMsg("Points pricing is not available for this slot.");
+        if (pointsBookingInsufficient) return setActionMsg(`You need ${pointsMinTotal} pts, you have ${userPoints}.`);
+
+        if (payMethod === "points") {
+            const params = new URLSearchParams({
+                spotId: spot.id,
+                start: startAt.toISOString(),
+                end: endAt.toISOString(),
+            });
+            navigate(`/bookings/confirm?${params.toString()}`);
+            return;
+        }
 
         setBusy(true);
         setActionMsg(null);
@@ -351,8 +368,6 @@ export default function SpotDetailsPage() {
                 end_time: endAt.toISOString(),
                 pay_method: payMethod,
             };
-
-            if (payMethod === "points") body.points_amount = pointsMinTotal;
 
             const r = await apiPost<{ booking: SpotBooking }>("/bookings", body, token);
             const booking = r.booking;
@@ -431,6 +446,14 @@ export default function SpotDetailsPage() {
                 : `${formatGbp(listingPrice)} / ${listingUnit}`;
 
     const pendingBids = auctionInfo?.pending_bids ?? [];
+    const estimatedBookingTotalLabel =
+        spot.mode === "free"
+            ? "Free"
+            : payMethod === "points"
+                ? pointsMinTotal > 0
+                    ? `${pointsMinTotal} pts`
+                    : "-"
+                : formatGbp(estimatedTotal);
 
     return (
         <div className="container">
@@ -507,22 +530,18 @@ export default function SpotDetailsPage() {
                             disabled={busy || bidBusy || listingInactive}
                         />
 
-                        <div className="rowInline" style={{ justifyContent: "flex-end", marginTop: 8 }}>
-                            <button
-                                type="button"
-                                className="btn"
-                                onClick={resetCalendarSelection}
-                                disabled={busy || bidBusy || listingInactive}
-                                style={{ padding: "6px 12px", fontSize: 12 }}
-                            >
-                                Reset
-                            </button>
-                        </div>
-
                         <div className="slotRangeSummary">
-                            <div className="slotRangeSummaryHead">
-                                <span className="tiny muted">Selected slot</span>
+                            <div className="slotRangeSummaryHead" style={{ justifyContent: "space-between", alignItems: "center" }}>
                                 <span className="badge">{hasSelectedSlot ? "Ready to book" : "No slot selected yet"}</span>
+                                <button
+                                    type="button"
+                                    className="btn"
+                                    onClick={resetCalendarSelection}
+                                    disabled={busy || bidBusy || listingInactive}
+                                    style={{ padding: "6px 12px", fontSize: 12 }}
+                                >
+                                    Reset
+                                </button>
                             </div>
 
                             {hasSelectedSlot ? (
@@ -545,27 +564,28 @@ export default function SpotDetailsPage() {
                                         {formatDateTimeCompact(startAt.toISOString())} {" -> "} {formatDateTimeCompact(endAt.toISOString())}
                                     </div>
                                 </>
-                            ) : (
-                                <div className="slotRangeEmpty">Choose your dates, then set the exact start and end times.</div>
-                            )}
+                            ) : null}
                         </div>
 
-                        <div className={`slotStatus ${slotStatus.ok ? "slotStatus--ok" : "slotStatus--bad"}`}>
-                            {slotStatus.label}
-                        </div>
+                        {slotStatus.label && (
+                            <div className={`slotStatus ${slotStatus.ok ? "slotStatus--ok" : "slotStatus--bad"}`}>
+                                {slotStatus.label}
+                            </div>
+                        )}
                     </div>
 
                     {spot.mode === "auction" ? (
                         <div className="card spotSimpleAction">
                             <div className="h3">Place a bid</div>
-                            <p className="tiny muted">Bids are treated as offers. Owners review and approve them manually.</p>
+                            <p className="tiny muted" style={{ margin: "4px 0 12px" }}>
+                                Bids are treated as offers. Owners review and approve them manually.
+                            </p>
 
                             {!token && (
                                 <div className="spotAlert">
                                     Please <Link to="/login">log in</Link> to bid.
                                 </div>
                             )}
-                            {isOwner && <div className="spotAlert">You are the owner of this listing.</div>}
                             {listingInactive && <div className="spotAlert">This listing is no longer active for new bids.</div>}
 
                             <AppRadioCards
@@ -584,8 +604,11 @@ export default function SpotDetailsPage() {
                             />
 
                             {bidPayMethod === "money" ? (
-                                <label>
-                                    <span>Bid per {listingUnit} (GBP)</span>
+                                <label style={{ display: "grid", gap: 6 }}>
+                                    <div className="tiny muted">
+                                        Your bid per {listingUnit} (GBP)
+                                        {auctionMoneyStartLabel && <span> · Minimum {formatGbp(auctionMinPerUnit)} / {listingUnit}</span>}
+                                    </div>
                                     <input
                                         className="input"
                                         type="number"
@@ -596,11 +619,16 @@ export default function SpotDetailsPage() {
                                         placeholder="e.g. 8"
                                         disabled={auctionClosed || bidBusy || listingInactive}
                                     />
-                                    <div className="tiny muted">Estimated total: {bidTotalMoney > 0 ? formatGbp(bidTotalMoney) : "-"}</div>
+                                    <div className="tiny muted">
+                                        Estimated total: {bidTotalMoney > 0 ? formatGbp(bidTotalMoney) : "-"}
+                                    </div>
                                 </label>
                             ) : (
-                                <label>
-                                    <span>Bid per {listingUnit} (points)</span>
+                                <label style={{ display: "grid", gap: 6 }}>
+                                    <div className="tiny muted">
+                                        Your bid per {listingUnit} (points)
+                                        {auctionPointsStartLabel && <span> · Minimum {auctionPointsStartPerUnit} pts / {listingUnit}</span>}
+                                    </div>
                                     <input
                                         className="input"
                                         type="number"
@@ -611,7 +639,9 @@ export default function SpotDetailsPage() {
                                         placeholder={`Points per ${listingUnit}`}
                                         disabled={auctionClosed || bidBusy || listingInactive}
                                     />
-                                    <div className="tiny muted">Estimated total: {bidTotalPoints > 0 ? `${bidTotalPoints} pts` : "-"}</div>
+                                    <div className="tiny muted">
+                                        Estimated total: {bidTotalPoints > 0 ? `${bidTotalPoints} pts` : "-"}
+                                    </div>
                                     {bidPointsInsufficient && (
                                         <div className="tiny" style={{ color: "#a23636", marginTop: 4 }}>
                                             Not enough points ({userPoints} available).
@@ -630,6 +660,7 @@ export default function SpotDetailsPage() {
                                 </button>
                                 {bidMsg && <span className="tiny muted">{bidMsg}</span>}
                             </div>
+                            {isOwner && <div className="spotAlert">You are the owner of this listing.</div>}
                         </div>
                     ) : (
                         <div className="card spotSimpleAction">
@@ -645,8 +676,13 @@ export default function SpotDetailsPage() {
 
                             <div className="spotSimpleInlineMeta">
                                 <span className="tiny muted">Estimated total</span>
-                                <span className="badge">{spot.mode === "free" ? "Free" : formatGbp(estimatedTotal)}</span>
+                                <span className="badge">{estimatedBookingTotalLabel}</span>
                             </div>
+                            {pointsBookingInsufficient && (
+                                <div className="tiny" style={{ color: "#a23636", marginTop: 6 }}>
+                                    Not enough points ({userPoints} available).
+                                </div>
+                            )}
 
                             <AppRadioCards
                                 ariaLabel="Booking payment method"
@@ -672,7 +708,7 @@ export default function SpotDetailsPage() {
                                     {busy
                                         ? "Booking..."
                                         : payMethod === "points"
-                                          ? "Confirm points booking"
+                                          ? "Review points booking"
                                           : isFreeBooking
                                             ? "Confirm free booking"
                                             : "Continue to payment"}
@@ -724,4 +760,3 @@ export default function SpotDetailsPage() {
         </div>
     );
 }
-

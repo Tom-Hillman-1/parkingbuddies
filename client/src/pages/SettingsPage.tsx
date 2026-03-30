@@ -1,13 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { AppButton, AppField, AppInput } from "../components/ui/AppForm";
 import { apiGet, apiPatch, readErrorMessage } from "../lib/api";
 import { useAuth, useStripeConnect } from "../lib/auth";
 import type { User } from "../types";
+import {
+    getPasswordStrength,
+    isValidPassword,
+    PASSWORD_REQUIREMENTS_TEXT,
+    PASSWORD_REQUIREMENT_LABELS,
+} from "../../../shared/domain/password";
 
 const profileSchema = z.object({
     name: z.string().trim(),
@@ -20,13 +26,13 @@ const profileSchema = z.object({
 
 const passwordSchema = z.object({
     currentPassword: z.string().trim().min(1, "Enter your current password."),
-    newPassword: z.string().trim().min(8, "New password must be at least 8 characters."),
+    newPassword: z.string().trim().min(8, `New ${PASSWORD_REQUIREMENTS_TEXT.charAt(0).toLowerCase()}${PASSWORD_REQUIREMENTS_TEXT.slice(1)}`),
 }).superRefine((value, ctx) => {
-    if (!/[A-Za-z]/.test(value.newPassword) || !/[0-9]/.test(value.newPassword)) {
+    if (!isValidPassword(value.newPassword)) {
         ctx.addIssue({
             code: "custom",
             path: ["newPassword"],
-            message: "New password must include at least one letter and one number.",
+            message: `New ${PASSWORD_REQUIREMENTS_TEXT.charAt(0).toLowerCase()}${PASSWORD_REQUIREMENTS_TEXT.slice(1)}`,
         });
     }
     if (value.newPassword === value.currentPassword) {
@@ -71,6 +77,14 @@ export default function SettingsPage() {
         resolver: zodResolver(passwordSchema),
         defaultValues: { currentPassword: "", newPassword: "" },
     });
+    const newPasswordValue = useWatch({ control: passwordForm.control, name: "newPassword", defaultValue: "" });
+    const passwordStrength = useMemo(() => getPasswordStrength(newPasswordValue), [newPasswordValue]);
+    const passwordRequirementChecks = [
+        { met: passwordStrength.checks.minLength, label: PASSWORD_REQUIREMENT_LABELS.minLength },
+        { met: passwordStrength.checks.hasUppercase, label: PASSWORD_REQUIREMENT_LABELS.hasUppercase },
+        { met: passwordStrength.checks.hasLowercase, label: PASSWORD_REQUIREMENT_LABELS.hasLowercase },
+        { met: passwordStrength.checks.hasNumber, label: PASSWORD_REQUIREMENT_LABELS.hasNumber },
+    ];
 
     const settingsQuery = useQuery<SettingsQueryData>({
         queryKey: ["settings-page", token],
@@ -207,7 +221,7 @@ export default function SettingsPage() {
                 return;
             }
             if (/must be at least 8 characters/i.test(raw)) {
-                setPasswordErr("New password must be at least 8 characters and include at least one letter and one number.");
+                setPasswordErr(`New ${PASSWORD_REQUIREMENTS_TEXT.charAt(0).toLowerCase()}${PASSWORD_REQUIREMENTS_TEXT.slice(1)}`);
                 return;
             }
             if (/different from/i.test(raw)) {
@@ -265,7 +279,31 @@ export default function SettingsPage() {
                             </AppField>
                             <AppField
                                 label="New password"
-                                description="Minimum 8 characters with at least one letter and one number."
+                                description={
+                                    <>
+                                        <div className="tiny muted" style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                                            {passwordRequirementChecks.map((item) => (
+                                                <span
+                                                    key={item.label}
+                                                    style={{
+                                                        color: item.met ? "rgba(59,186,156,0.95)" : "rgba(122,138,164,0.95)",
+                                                    }}
+                                                >
+                                                    {item.met ? "✓" : "○"} {item.label}
+                                                </span>
+                                            ))}
+                                        </div>
+                                        <div className="strengthBar" aria-hidden>
+                                            <div
+                                                className="strengthFill"
+                                                style={{ width: passwordStrength.width, background: passwordStrength.color }}
+                                            />
+                                        </div>
+                                        <div className="tiny muted" style={{ marginTop: 6 }}>
+                                            Strength: {passwordStrength.label}
+                                        </div>
+                                    </>
+                                }
                                 error={passwordForm.formState.errors.newPassword?.message}
                             >
                                 <div className="authInputRow settingsPasswordFieldRow">

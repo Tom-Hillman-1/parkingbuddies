@@ -8,10 +8,17 @@ import { findSlotAvailabilityIssue } from "../lib/availability";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
 import { serverError } from "../lib/errors";
+import { simpleRateLimit } from "../lib/rateLimit";
 
 const router = Router();
 type Mode = "free" | "rent" | "auction";
 const PENDING_BOOKING_HOLD_MINUTES = 30;
+const bookingCreateRateLimit = simpleRateLimit({
+    windowMs: 60 * 1000,
+    max: 12,
+    message: "Too many booking attempts. Please wait a moment and try again.",
+    keyPrefix: "bookings_create",
+});
 
 const bookingCreateBodySchema = z.object({
     parking_spot_id: z.string().uuid("parking_spot_id must be a valid listing ID"),
@@ -46,7 +53,7 @@ async function rollbackWithError(client: PoolClient, res: Response, status: numb
     return res.status(status).json({ ok: false, error });
 }
 
-router.post("/", requireAuth, async (req: AuthRequest, res) => {
+router.post("/", requireAuth, bookingCreateRateLimit, async (req: AuthRequest, res) => {
     const parsedBody = parseWithSchema(bookingCreateBodySchema, req.body ?? {}, res, "booking");
     if (!parsedBody.ok) return;
     const { parking_spot_id, start_time, end_time, pay_method } = parsedBody.data;
@@ -61,6 +68,9 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
     if (!(requestedStart < requestedEnd)) {
         return res.status(400).json({ ok: false, error: "start_time must be before end_time" });
     }
+    if (requestedStart < new Date()) {
+        return res.status(400).json({ ok: false, error: "start_time must be in the future" });
+    }
 
     const method = pay_method === "points" ? "points" : "money";
 
@@ -68,6 +78,9 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
     try {
         await expireStalePendingBookings();
         await client.query("BEGIN");
+        // Serialize direct booking attempts per listing so the availability
+        // check and insert cannot race each other under concurrent load.
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [parking_spot_id]);
         const spotR = await client.query(
             `SELECT
                  id,

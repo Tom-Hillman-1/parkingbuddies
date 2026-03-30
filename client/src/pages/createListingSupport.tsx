@@ -12,9 +12,12 @@ import {
     timeToMinutes as minutes,
     toLocalDateInput,
 } from "./pagesShared";
+import { derivedPointsCostFromMoney, MIN_POINTS_COST, type PriceUnit } from "../../../shared/domain/pricing";
+
+export { MIN_POINTS_COST };
+export type { PriceUnit };
 
 export type Mode = "free" | "rent" | "auction";
-export type PriceUnit = "hour" | "day" | "week";
 export type WizardStep = 1 | 2 | 3 | 4 | 5 | 6;
 export type FlowStep = Exclude<WizardStep, 1>;
 export type SpaceChoice = "1" | "2" | "3plus";
@@ -63,8 +66,6 @@ export const STEP_COUNT = 6;
 export const DEFAULT_CENTER: [number, number] = [51.5074, -0.1278];
 export const LONDON_VIEWBOX = "-0.5103,51.6919,0.3340,51.2868";
 export const MIN_AUCTION_START_PRICE_GBP = 0.1;
-export const MIN_POINTS_COST = 1;
-export const POINTS_PER_GBP = 10;
 export const DEFAULT_AUCTION_START_PRICE = String(MIN_AUCTION_START_PRICE_GBP);
 export const DEFAULT_POINTS_COST = String(MIN_POINTS_COST);
 export const DEFAULT_AVAILABILITY_START = "00:00";
@@ -78,13 +79,13 @@ export const SPACE_CHOICES: Array<{ id: SpaceChoice; label: string; value: numbe
     { id: "3plus", label: "3+ spaces", value: 4 },
 ];
 
-export const MODEL_CHOICES: Array<{ mode: Mode; title: string; copy: string; tone: Tone; help: string }> = [
+export const LISTING_MODEL_OPTIONS: Array<{ mode: Mode; title: string; copy: string; tone: Tone; help: string }> = [
     { mode: "rent", title: "Rent", copy: "Fixed pricing for instant bookings.", tone: "blue", help: "Drivers can book instantly at the rate you set." },
     { mode: "auction", title: "Auction", copy: "Drivers submit offers. You get to approve.", tone: "lilac", help: "Drivers send offers and you decide which bid to accept." },
     { mode: "free", title: "Free", copy: "No payment required for this listing.", tone: "mint", help: "Bookings are free to drivers and no payment is collected." },
 ];
 
-export const STEP_META: Record<FlowStep, { panelTitle: string; panelCopy: string; panelTone: Tone; title: string; subtitle: string }> = {
+export const CREATE_FLOW_COPY: Record<FlowStep, { panelTitle: string; panelCopy: string; panelTone: Tone; title: string; subtitle: string }> = {
     2: { panelTitle: "Basics", panelCopy: "Set the core details so drivers quickly understand your space.", panelTone: "blue", title: "Listing information", subtitle: "Keep this short, clear, and practical." },
     3: { panelTitle: "Pricing", panelCopy: "Choose a simple pricing setup that matches your listing model.", panelTone: "mint", title: "Pricing", subtitle: "Set how drivers pay for this listing." },
     4: { panelTitle: "Availability", panelCopy: "Add one or more date/time slots to describe when the listing is available.", panelTone: "lilac", title: "Availability", subtitle: "Pick two dates, then add a slot for that range." },
@@ -100,9 +101,7 @@ export const PRICE_UNIT_HELP: Record<PriceUnit, string> = {
 };
 
 export function derivePointsCostFromGbp(value: unknown) {
-    const price = Number(value ?? 0);
-    if (!Number.isFinite(price) || price <= 0) return 0;
-    return Math.max(1, Math.round(price * POINTS_PER_GBP));
+    return derivedPointsCostFromMoney(value);
 }
 
 export function parseCoordinates(lat: string, lng: string) {
@@ -461,6 +460,8 @@ function buildAvailabilityDayLabels(windows: AvailabilityWindow[]) {
     const labels = new Map<string, string>();
 
     for (const window of windows) {
+        // The month view gets one tiny line of helper text, so we keep the
+        // last saved slot for a day instead of trying to squeeze everything in.
         for (let dayKey = window.from; dayKey <= window.to; ) {
             labels.set(dayKey, formatAvailabilityLabelForDay(window, dayKey));
             const nextDay = parseYmd(dayKey);

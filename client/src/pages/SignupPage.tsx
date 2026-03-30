@@ -6,6 +6,12 @@ import { Link, useNavigate } from "react-router-dom";
 import { AppButton, AppField, AppInput } from "../components/ui/AppForm";
 import { useAuth } from "../lib/auth";
 import { SUPPORT_EMAIL } from "./pagesShared";
+import {
+    getPasswordStrength,
+    isValidPassword,
+    PASSWORD_REQUIREMENTS_TEXT,
+    PASSWORD_REQUIREMENT_LABELS,
+} from "../../../shared/domain/password";
 
 const signupSchema = z.object({
     name: z.string().trim().min(2, "Name must be at least 2 characters.").refine((value) => /[A-Za-z]/.test(value), {
@@ -14,9 +20,9 @@ const signupSchema = z.object({
     email: z.string().trim().email("Enter a valid email."),
     password: z
         .string()
-        .min(8, "Password must be at least 8 characters.")
-        .refine((value) => /[A-Za-z]/.test(value) && /[0-9]/.test(value), {
-            message: "Password must include at least one letter and one number.",
+        .min(8, PASSWORD_REQUIREMENTS_TEXT)
+        .refine((value) => isValidPassword(value), {
+            message: PASSWORD_REQUIREMENTS_TEXT,
         }),
     confirmPassword: z.string().min(1, "Confirm your password."),
     agree: z.boolean().refine((value) => value, { message: "Please accept the terms to continue." }),
@@ -50,19 +56,13 @@ export default function SignupPage() {
     });
 
     const password = useWatch({ control: form.control, name: "password", defaultValue: "" });
-    const strength = useMemo(() => {
-        let score = 0;
-        if (password.length >= 8) score += 1;
-        if (/[A-Z]/.test(password)) score += 1;
-        if (/[0-9]/.test(password)) score += 1;
-        if (/[^A-Za-z0-9]/.test(password)) score += 1;
-        return score;
-    }, [password]);
-
-    const strengthLabel = ["Weak", "Okay", "Good", "Strong", "Great"][strength] ?? "Weak";
-    const strengthWidth = `${Math.min(100, (strength / 4) * 100)}%`;
-    const strengthColor =
-        strength <= 1 ? "rgba(243,107,127,0.9)" : strength === 2 ? "rgba(255,200,87,0.9)" : "rgba(59,186,156,0.9)";
+    const strength = useMemo(() => getPasswordStrength(password), [password]);
+    const requirementChecks = [
+        { met: strength.checks.minLength, label: PASSWORD_REQUIREMENT_LABELS.minLength },
+        { met: strength.checks.hasUppercase, label: PASSWORD_REQUIREMENT_LABELS.hasUppercase },
+        { met: strength.checks.hasLowercase, label: PASSWORD_REQUIREMENT_LABELS.hasLowercase },
+        { met: strength.checks.hasNumber, label: PASSWORD_REQUIREMENT_LABELS.hasNumber },
+    ];
 
     const onSubmit = form.handleSubmit(async (values) => {
         setMsg(null);
@@ -113,11 +113,24 @@ export default function SignupPage() {
                             label="Password"
                             description={
                                 <>
-                                    <div className="authNote">Minimum 8 characters. Mix letters and numbers for best results.</div>
-                                    <div className="strengthBar" aria-hidden>
-                                        <div className="strengthFill" style={{ width: strengthWidth, background: strengthColor }} />
+                                    <div className="tiny muted" style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                                        {requirementChecks.map((item) => (
+                                            <span
+                                                key={item.label}
+                                                style={{
+                                                    color: item.met ? "rgba(59,186,156,0.95)" : "rgba(122,138,164,0.95)",
+                                                }}
+                                            >
+                                                {item.met ? "✓" : "○"} {item.label}
+                                            </span>
+                                        ))}
                                     </div>
-                                    <div className="tiny muted">Strength: {strengthLabel}</div>
+                                    <div className="strengthBar" aria-hidden>
+                                        <div className="strengthFill" style={{ width: strength.width, background: strength.color }} />
+                                    </div>
+                                    <div className="tiny muted" style={{ marginTop: 6 }}>
+                                        Strength: {strength.label}
+                                    </div>
                                 </>
                             }
                             error={form.formState.errors.password?.message}

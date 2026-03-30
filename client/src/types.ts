@@ -66,7 +66,7 @@ export type Booking = {
     pay_method: "money" | "points";
 
     total_price_gbp: number;
-    total_points_cost?: number | null;
+    total_points?: number | null;
     owner_contact_email?: string | null;
     owner_contact_phone?: string | null;
     owner_contact_info?: string | null;

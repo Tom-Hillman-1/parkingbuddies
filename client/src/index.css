@@ -487,6 +487,7 @@ label > span:first-child {
 }
 
 .nav-user {
+    position: relative;
     display: inline-flex;
     align-items: center;
     gap: 0.48rem;
@@ -497,9 +498,51 @@ label > span:first-child {
     padding: 0.42rem 0.7rem;
 }
 
+.nav-user-main {
+    display: grid;
+    min-width: 0;
+}
+
 .nav-user-name {
     font-size: 0.83rem;
     color: #34435a;
+}
+
+.nav-user-alertBadge,
+.dashboardNotifyBubble {
+    color: #c53b4d;
+    font-size: 0.67rem;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    line-height: 1;
+}
+
+.nav-user-alertBadge {
+    position: absolute;
+    top: -7px;
+    right: -8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    height: 20px;
+    border-radius: 11px;
+    padding: 0 0.38rem;
+    background: #fff;
+    box-shadow: 0 0 0 1px rgba(226, 86, 110, 0.18), 0 8px 18px rgba(217, 63, 86, 0.16);
+}
+
+.dashboardNotifyBubble {
+    position: absolute;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 19px;
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 0 0 1px rgba(226, 86, 110, 0.18), 0 8px 18px rgba(217, 63, 86, 0.12);
+    padding: 0 0.36rem;
 }
 
 .nav-user-points {
@@ -1648,14 +1691,14 @@ label > span:first-child {
 }
 
 .map-popup__body {
-    min-width: 276px;
+    min-width: 220px;
     display: grid;
     gap: 0.52rem;
 }
 
 .map-popup__image {
     width: 100%;
-    height: 176px;
+    height: 112px;
     object-fit: cover;
     border-radius: 12px;
     box-shadow: 0 5px 14px rgba(17, 21, 28, 0.18);
@@ -1780,6 +1823,28 @@ label > span:first-child {
     height: 8px;
     border-radius: 50%;
     background: var(--tone, var(--brand));
+}
+
+.dashboardTabInner {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.dashboardNotifyBubble--tab {
+    top: -8px;
+    right: -10px;
+}
+
+.dashboardNotifyBubble--card {
+    top: -7px;
+    right: -6px;
+}
+
+.dashboardDisclosureHeader,
+.dashboardTab {
+    position: relative;
+    overflow: visible;
 }
 
 .sectionHeader--driver,

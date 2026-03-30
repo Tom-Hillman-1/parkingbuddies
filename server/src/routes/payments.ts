@@ -10,20 +10,45 @@ import { moneyBookingRewardPoints, moneyHostingRewardPoints, toMoney } from "../
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
 import { serverError } from "../lib/errors";
+import { simpleRateLimit } from "../lib/rateLimit";
 
 const router = Router();
 
 const STRIPE_CONNECT_COUNTRY = process.env.STRIPE_CONNECT_COUNTRY ?? "GB";
-const DEMO_PAYOUTS_ENABLED = ["1", "true", "yes", "on"].includes(
+const DEMO_PAYOUTS_ENABLED = process.env.NODE_ENV !== "production" && ["1", "true", "yes", "on"].includes(
     String(process.env.DEMO_BYPASS_CONNECT ?? "").toLowerCase()
 );
 const DEMO_CONNECT_ACCOUNT_PREFIX = "acct_demo_";
+const connectActionRateLimit = simpleRateLimit({
+    windowMs: 5 * 60 * 1000,
+    max: 8,
+    message: "Too many Stripe account actions. Please wait a moment and try again.",
+    keyPrefix: "payments_connect",
+});
+const bookingIntentRateLimit = simpleRateLimit({
+    windowMs: 60 * 1000,
+    max: 8,
+    message: "Too many payment attempts. Please wait a moment and try again.",
+    keyPrefix: "payments_booking_intent",
+});
+const auctionIntentRateLimit = simpleRateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    message: "Too many card authorization attempts. Please wait a moment and try again.",
+    keyPrefix: "payments_auction_intent",
+});
+const receiptLookupRateLimit = simpleRateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    message: "Too many receipt lookups. Please wait a moment and try again.",
+    keyPrefix: "payments_receipt",
+});
 
 const connectOnboardBodySchema = z.object({
     mode: z.enum(["stripe", "demo"]).optional(),
 });
 
-const checkoutSessionBodySchema = z.object({
+const bookingIntentBodySchema = z.object({
     booking_id: z.string().uuid("booking_id must be a valid booking ID"),
 });
 
@@ -39,10 +64,6 @@ const cancelAuctionIntentBodySchema = z.object({
 
 const bookingReceiptParamsSchema = z.object({
     bookingId: z.string().uuid("bookingId must be a valid booking ID"),
-});
-
-const bookingReceiptQuerySchema = z.object({
-    session_id: z.string().trim().min(1).optional(),
 });
 
 type UserConnectRow = {
@@ -123,7 +144,57 @@ function asNonEmptyString(value: unknown): string | null {
     return typeof value === "string" && value.trim() ? value : null;
 }
 
+function getDemoReceiptDetails(providerRef: string): StripeReceiptDetails | null {
+    const paidReceipts: Record<string, StripeReceiptDetails> = {
+        pi_demo_paid_001: {
+            payment_intent_id: "pi_demo_paid_001",
+            payment_intent_status: "succeeded",
+            charge_id: "ch_demo_paid_001",
+            receipt_url: null,
+            receipt_email: "driver@demo.com",
+            amount_received_gbp: 11.0,
+        },
+        ch_demo_paid_001: {
+            payment_intent_id: "pi_demo_paid_001",
+            payment_intent_status: "succeeded",
+            charge_id: "ch_demo_paid_001",
+            receipt_url: null,
+            receipt_email: "driver@demo.com",
+            amount_received_gbp: 11.0,
+        },
+        pi_demo_paid_002: {
+            payment_intent_id: "pi_demo_paid_002",
+            payment_intent_status: "succeeded",
+            charge_id: "ch_demo_paid_002",
+            receipt_url: null,
+            receipt_email: "driver@demo.com",
+            amount_received_gbp: 84.0,
+        },
+        ch_demo_paid_002: {
+            payment_intent_id: "pi_demo_paid_002",
+            payment_intent_status: "succeeded",
+            charge_id: "ch_demo_paid_002",
+            receipt_url: null,
+            receipt_email: "driver@demo.com",
+            amount_received_gbp: 84.0,
+        },
+        pi_demo_pending_001: {
+            payment_intent_id: "pi_demo_pending_001",
+            payment_intent_status: "processing",
+            charge_id: null,
+            receipt_url: null,
+            receipt_email: "driver@demo.com",
+            amount_received_gbp: 0,
+        },
+    };
+
+    return paidReceipts[providerRef] ?? null;
+}
+
 async function getStripeReceiptDetails(paymentIntentId: string): Promise<StripeReceiptDetails> {
+    const demoReceipt = getDemoReceiptDetails(paymentIntentId);
+    if (demoReceipt) return demoReceipt;
+
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
         expand: ["latest_charge"],
     });
@@ -435,7 +506,7 @@ async function syncBookingPaymentFromReceipt(
     }
 }
 
-router.post("/connect/onboard", requireAuth, async (req: AuthRequest, res) => {
+router.post("/connect/onboard", requireAuth, connectActionRateLimit, async (req: AuthRequest, res) => {
     const userId = requireUserId(req, res);
     if (!userId) return;
     const parsedBody = parseWithSchema(connectOnboardBodySchema, req.body ?? {}, res, "connect_onboard");
@@ -548,7 +619,7 @@ router.get("/connect/status", requireAuth, async (req: AuthRequest, res) => {
     }
 });
 
-router.post("/connect/dashboard-link", requireAuth, async (req: AuthRequest, res) => {
+router.post("/connect/dashboard-link", requireAuth, connectActionRateLimit, async (req: AuthRequest, res) => {
     const userId = requireUserId(req, res);
     if (!userId) return;
 
@@ -585,8 +656,8 @@ router.post("/connect/dashboard-link", requireAuth, async (req: AuthRequest, res
     }
 });
 
-router.post("/checkout-session", requireAuth, async (req: AuthRequest, res) => {
-    const parsedBody = parseWithSchema(checkoutSessionBodySchema, req.body ?? {}, res, "checkout_session");
+router.post("/booking-intent", requireAuth, bookingIntentRateLimit, async (req: AuthRequest, res) => {
+    const parsedBody = parseWithSchema(bookingIntentBodySchema, req.body ?? {}, res, "booking_intent");
     if (!parsedBody.ok) return;
     const { booking_id } = parsedBody.data;
 
@@ -632,12 +703,15 @@ router.post("/checkout-session", requireAuth, async (req: AuthRequest, res) => {
         const { ownerAccountUsable, ownerConnectStatus } = ownerConnect;
 
         const amountPence = Math.round(amountGbp * 100);
-        const baseUrl = frontendBaseUrl();
         const title = booking.spot_title ?? "Parking booking";
         const address = booking.spot_address ?? "Address on file";
         const when = booking.start_time && booking.end_time ? `${booking.start_time} -> ${booking.end_time}` : "Time on file";
 
-        const paymentIntentData: Stripe.Checkout.SessionCreateParams.PaymentIntentData = {
+        const paymentIntentPayload: Stripe.PaymentIntentCreateParams = {
+            amount: amountPence,
+            currency: "gbp",
+            payment_method_types: ["card"],
+            receipt_email: typeof booking.driver_email === "string" ? booking.driver_email.trim().toLowerCase() : undefined,
             metadata: {
                 booking_id,
                 user_id: req.userId ?? "",
@@ -649,68 +723,68 @@ router.post("/checkout-session", requireAuth, async (req: AuthRequest, res) => {
             description: `Booking ${booking_id} | ${title} | ${address} | ${when}`,
         };
         if (ownerAccountUsable && !ownerConnectStatus.demo_bypass) {
-            paymentIntentData.transfer_data = { destination: ownerAccountUsable };
-            paymentIntentData.on_behalf_of = ownerAccountUsable;
+            paymentIntentPayload.transfer_data = { destination: ownerAccountUsable };
+            paymentIntentPayload.on_behalf_of = ownerAccountUsable;
         }
 
-        const session = await stripe.checkout.sessions.create(
-            {
-                mode: "payment",
-                payment_method_types: ["card"],
-                success_url: `${baseUrl}/pay/${booking_id}?success=1&session_id={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${baseUrl}/pay/${booking_id}?canceled=1`,
-                customer_email: typeof booking.driver_email === "string" ? booking.driver_email.trim().toLowerCase() : undefined,
-                line_items: [
-                    {
-                        quantity: 1,
-                        price_data: {
-                            currency: "gbp",
-                            unit_amount: amountPence,
-                            product_data: {
-                                name: title,
-                                description: `Location: ${address}\nWhen: ${when}\nBooking: ${booking_id}`,
-                            },
-                        },
-                    },
-                ],
-                payment_intent_data: paymentIntentData,
-            },
-            {
-                idempotencyKey: `checkout_session_${booking_id}`,
-            }
-        );
+        const intent = await stripe.paymentIntents.create(paymentIntentPayload, {
+            idempotencyKey: `booking_intent_${booking_id}`,
+        });
 
-        const paymentIntentId =
-            typeof session.payment_intent === "string" ? session.payment_intent : null;
+        const client = await pool.connect();
+        try {
+            await client.query("BEGIN");
 
-        if (paymentIntentId) {
-            const client = await pool.connect();
-            try {
-                await client.query("BEGIN");
-                await upsertLatestPaymentRow(client, booking_id, paymentIntentId, amountGbp, "pending");
-                await client.query("COMMIT");
-            } catch (e) {
+            const payableBookingR = await client.query(
+                `SELECT id, status, pay_method
+                 FROM bookings
+                 WHERE id = $1
+                   AND driver_user_id = $2
+                 FOR UPDATE`,
+                [booking_id, req.userId]
+            );
+
+            const payableBooking = payableBookingR.rows[0];
+            if (!payableBooking || payableBooking.pay_method !== "money" || payableBooking.status !== "pending") {
                 await client.query("ROLLBACK");
-                throw e;
-            } finally {
-                client.release();
+                try {
+                    await stripe.paymentIntents.cancel(intent.id);
+                } catch {
+                }
+                return res.status(409).json({ ok: false, error: "Booking is no longer payable" });
             }
-            await pool.query(
+
+            await upsertLatestPaymentRow(client, booking_id, intent.id, amountGbp, "pending");
+            await client.query(
                 `UPDATE bookings
                  SET payment_provider_ref = $1,
                      updated_at = now()
                  WHERE id = $2`,
-                [paymentIntentId, booking_id]
+                [intent.id, booking_id]
             );
+            await client.query("COMMIT");
+        } catch (e) {
+            await client.query("ROLLBACK");
+            try {
+                await stripe.paymentIntents.cancel(intent.id);
+            } catch {
+            }
+            throw e;
+        } finally {
+            client.release();
         }
 
-        return res.json({ ok: true, url: session.url });
+        return res.json({
+            ok: true,
+            client_secret: intent.client_secret,
+            payment_intent_id: intent.id,
+        });
     } catch (e) {
-        return serverError(res, e, "Unable to start checkout right now");
+        return serverError(res, e, "Unable to start payment right now");
     }
 });
 
-router.post("/auction-intent", requireAuth, async (req: AuthRequest, res) => {
+router.post("/auction-intent", requireAuth, auctionIntentRateLimit, async (req: AuthRequest, res) => {
     const parsedBody = parseWithSchema(auctionIntentBodySchema, req.body ?? {}, res, "auction_intent");
     if (!parsedBody.ok) return;
     const { spot_id, amount_gbp, idempotency_key } = parsedBody.data;
@@ -780,7 +854,7 @@ router.post("/auction-intent", requireAuth, async (req: AuthRequest, res) => {
     }
 });
 
-router.post("/auction-intent/cancel", requireAuth, async (req: AuthRequest, res) => {
+router.post("/auction-intent/cancel", requireAuth, auctionIntentRateLimit, async (req: AuthRequest, res) => {
     const userId = requireUserId(req, res);
     if (!userId) return;
     const parsedBody = parseWithSchema(cancelAuctionIntentBodySchema, req.body ?? {}, res, "auction_intent_cancel");
@@ -815,13 +889,10 @@ router.post("/auction-intent/cancel", requireAuth, async (req: AuthRequest, res)
     }
 });
 
-router.get("/booking/:bookingId/receipt", requireAuth, async (req: AuthRequest, res) => {
+router.get("/booking/:bookingId/receipt", requireAuth, receiptLookupRateLimit, async (req: AuthRequest, res) => {
     const parsedParams = parseWithSchema(bookingReceiptParamsSchema, req.params ?? {}, res, "booking_receipt");
     if (!parsedParams.ok) return;
-    const parsedQuery = parseWithSchema(bookingReceiptQuerySchema, req.query ?? {}, res, "booking_receipt");
-    if (!parsedQuery.ok) return;
     const bookingId = parsedParams.data.bookingId;
-    const sessionId = parsedQuery.data.session_id ?? null;
 
     try {
         const bookingR = await pool.query(
@@ -853,35 +924,14 @@ router.get("/booking/:bookingId/receipt", requireAuth, async (req: AuthRequest, 
             providerRef = asNonEmptyString(bookingR.rows[0].payment_provider_ref);
         }
 
-        if (!providerRef && sessionId) {
-            const session = await stripe.checkout.sessions.retrieve(sessionId, {
-                expand: ["payment_intent"],
-            });
-            const sessionBookingId = asNonEmptyString(session.metadata?.booking_id);
-            if (sessionBookingId && sessionBookingId !== bookingId) {
-                return res.status(403).json({ ok: false, error: "Session does not belong to this booking" });
-            }
-            const intent = session.payment_intent;
-            const paymentIntentId =
-                asNonEmptyString(typeof intent === "string" ? intent : intent && typeof intent === "object" ? intent.id : null);
-            if (paymentIntentId) {
-                const intentObject =
-                    typeof intent === "object" && intent && "metadata" in intent
-                        ? (intent as Stripe.PaymentIntent)
-                        : await stripe.paymentIntents.retrieve(paymentIntentId);
-                const metadataBookingId = asNonEmptyString(intentObject.metadata?.booking_id);
-                if (metadataBookingId && metadataBookingId !== bookingId) {
-                    return res.status(403).json({ ok: false, error: "Payment intent does not belong to this booking" });
-                }
-                providerRef = paymentIntentId;
-            }
-        }
-
         if (!providerRef) {
             return res.status(404).json({ ok: false, error: "No Stripe payment reference found" });
         }
 
         const receipt = await getStripeReceiptDetails(providerRef);
+        if (!receipt.receipt_url && receipt.payment_intent_id.startsWith("pi_demo_")) {
+            receipt.receipt_url = `${frontendBaseUrl()}/pay/${bookingId}`;
+        }
         const normalizedPaymentStatus = normalizeStripePaymentStatus(receipt.payment_intent_status);
         await syncBookingPaymentFromReceipt(
             bookingId,

@@ -82,7 +82,10 @@ export default function LoginPage() {
                             />
                         </AppField>
 
-                        <AppField label="Password" error={form.formState.errors.password?.message}>
+                        <AppField
+                            label="Password"
+                            error={form.formState.errors.password?.message}
+                        >
                             <div className="authInputRow">
                                 <AppInput
                                     type={showPass ? "text" : "password"}

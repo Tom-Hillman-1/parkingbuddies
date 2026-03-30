@@ -5,7 +5,7 @@ This setup is for a fresh machine with no local PostgreSQL. You only need Docker
 
 1) Open a terminal
 - On Windows: open PowerShell or Windows Terminal.
-- All commands below assume you are in the repo root (`C:\Projects\ParkingBuddies`).
+- All commands below assume you are in the repo root for your local clone.
 
 2) Install dependencies
 - Server:
@@ -38,3 +38,31 @@ Demo accounts
 Notes
 - If PowerShell blocks npm scripts, use `npm.cmd` (as shown).
 - To stop the Docker DB: `docker compose down`
+
+Deployment notes
+- A Render blueprint file is included at `render.yaml` if you want to create the frontend and API from the same repo.
+- The frontend and backend deploy separately.
+- Frontend build:
+  - `cd client`
+  - `npm run build`
+- Backend build:
+  - `cd server`
+  - `npm run build`
+- Backend start command:
+  - `npm run migrate:up && npm run start`
+
+Minimum production environment variables
+- Backend:
+  - `DATABASE_URL`
+  - `JWT_SECRET`
+  - `STRIPE_SECRET_KEY`
+  - `STRIPE_WEBHOOK_SECRET`
+  - `FRONTEND_URL`
+  - optional: `SUPPORT_EMAIL`, `CORS_ORIGINS`
+- Frontend:
+  - `VITE_API_URL`
+  - `VITE_STRIPE_PUBLISHABLE_KEY`
+
+Production safeguards
+- `DEMO_BYPASS_CONNECT` must stay `false` in production.
+- The API now fails fast in production if no frontend origin is configured.

@@ -16,6 +16,7 @@ const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const AboutPage = lazy(() => import("./pages/AboutPage"));
 const CreateListingPage = lazy(() => import("./pages/CreateListingPage"));
 const PayBookingPage = lazy(() => import("./pages/PayBookingPage"));
+const BookingConfirmPage = lazy(() => import("./pages/BookingConfirmPage"));
 const BidReceiptPage = lazy(() => import("./pages/BidReceiptPage"));
 const BidConfirmPage = lazy(() => import("./pages/BidConfirmPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
@@ -40,6 +41,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                                 <Route path="*" element={<Navigate to="/" replace />} />
                                 <Route path="/create-listing" element={<CreateListingPage />} />
                                 <Route path="/pay/:bookingId" element={<PayBookingPage />} />
+                                <Route path="/bookings/confirm" element={<BookingConfirmPage />} />
                                 <Route path="/bids/:bidId" element={<BidReceiptPage />} />
                                 <Route path="/bids/confirm" element={<BidConfirmPage />} />
                                 <Route path="/settings" element={<SettingsPage />} />

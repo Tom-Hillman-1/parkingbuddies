@@ -8,6 +8,7 @@ import {
     isValidPassword,
     normalizeEmail,
     normalizeName,
+    PASSWORD_REQUIREMENTS_TEXT,
     SIGNUP_REWARD_POINTS,
 } from "../lib/shared";
 import { parseWithSchema } from "../lib/validation";
@@ -53,7 +54,7 @@ router.post("/signup", authRateLimit, async (req, res) => {
     if (!isValidPassword(password)) {
         return res.status(400).json({
             ok: false,
-            error: "Password must be at least 8 characters and include at least 1 letter and 1 number",
+            error: PASSWORD_REQUIREMENTS_TEXT,
         });
     }
 

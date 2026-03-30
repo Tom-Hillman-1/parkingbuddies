@@ -1,7 +1,7 @@
 ﻿import { useEffect, useRef } from "react";
 import type { Marker as LeafletMarker } from "leaflet";
 import L from "leaflet";
-import { MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents, ZoomControl } from "react-leaflet";
 import { Link } from "react-router-dom";
 
 export type MapSpot = {
@@ -119,6 +119,7 @@ export default function SpotsMap({
             <MapContainer center={[center.lat, center.lng]} zoom={13} className="leafletMap" zoomControl={false}>
                 <Recenter center={center} />
                 <MapPickerEvents onMapPick={onMapPick} />
+                <ZoomControl position="topright" />
 
                 <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'

@@ -227,13 +227,13 @@ function toWindowSlot(raw: unknown): WindowSlot | null {
     };
 }
 
-function getWindowSlots(spot: AvailabilitySpot) {
+function readSavedSlots(spot: AvailabilitySpot) {
     const windows = spot.availability_json?.windows;
     if (!Array.isArray(windows)) return [] as WindowSlot[];
     return windows.map((window) => toWindowSlot(window)).filter((window): window is WindowSlot => Boolean(window));
 }
 
-function windowMatchesDay(window: WindowSlot, day: Date) {
+function slotCoversDay(window: WindowSlot, day: Date) {
     const key = toLocalDateInput(startOfDay(day));
     return key >= window.date_from && key <= window.date_to;
 }
@@ -250,7 +250,7 @@ function getWindowDayState(window: WindowSlot, dayKey: string): WindowDayState |
 
 function hasWindowDayState(spot: AvailabilitySpot, day: Date, state: WindowDayState) {
     const key = toLocalDateInput(startOfDay(day));
-    return getWindowSlots(spot).some((window) => getWindowDayState(window, key) === state);
+    return readSavedSlots(spot).some((window) => getWindowDayState(window, key) === state);
 }
 
 function isWindowRangeAllowed(window: WindowSlot, start: Date, end: Date) {
@@ -269,8 +269,8 @@ function isDaySelectable(spot: AvailabilitySpot, day: Date) {
     const dayStart = startOfDay(day);
     if (dayStart < startOfDay(new Date())) return false;
 
-    const windows = getWindowSlots(spot);
-    return windows.some((window) => windowMatchesDay(window, dayStart));
+    const windows = readSavedSlots(spot);
+    return windows.some((window) => slotCoversDay(window, dayStart));
 }
 
 export function getAutoStartForDate(spot: AvailabilitySpot | null, ymd: string) {
@@ -284,8 +284,8 @@ export function getAutoStartForDate(spot: AvailabilitySpot | null, ymd: string) 
         return fallback;
     }
 
-    const windows = getWindowSlots(spot)
-        .filter((slot) => windowMatchesDay(slot, base))
+    const windows = readSavedSlots(spot)
+        .filter((slot) => slotCoversDay(slot, base))
         .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
     if (windows.length > 0) {
         const start = setTime(base, windows[0].start);
@@ -297,7 +297,7 @@ export function getAutoStartForDate(spot: AvailabilitySpot | null, ymd: string) 
 }
 
 export function formatAvailability(spot: AvailabilitySpot) {
-    const windows = getWindowSlots(spot);
+    const windows = readSavedSlots(spot);
     if (windows.length > 0) {
         if (windows.length === 1) {
             const window = windows[0];
@@ -312,7 +312,7 @@ export function formatAvailability(spot: AvailabilitySpot) {
 export function isSlotAllowed(spot: AvailabilitySpot, start: Date, end: Date) {
     if (!(start < end)) return false;
 
-    const windows = getWindowSlots(spot);
+    const windows = readSavedSlots(spot);
     return windows.some((window) => isWindowRangeAllowed(window, start, end));
 }
 
@@ -341,7 +341,9 @@ function SlotDayButton({
 function buildSlotDayLabels(spot: AvailabilitySpot) {
     const labels = new Map<string, string>();
 
-    for (const window of getWindowSlots(spot)) {
+    // The listing stores availability as date windows, so the picker expands
+    // them here into day-level hints for the calendar grid.
+    for (const window of readSavedSlots(spot)) {
         const start = parseYmd(window.date_from);
         const end = parseYmd(window.date_to);
         if (!start || !end) continue;

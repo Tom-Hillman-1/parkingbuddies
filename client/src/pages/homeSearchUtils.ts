@@ -15,11 +15,21 @@ export type HomeSearchState = {
     durationMinutes: number;
 };
 
-export function buildSearchWindow(search: HomeSearchState) {
+function getChosenDay(search: HomeSearchState) {
     if (!search.date) return null;
-    const day = parseYmd(search.date);
+    return parseYmd(search.date);
+}
+
+function getSearchStart(day: Date, search: HomeSearchState) {
+    // Search uses the same time-normalising helpers as the booking screen so
+    // "09:00" means the same thing in both places.
+    return setTime(day, normalizeTimeInput(search.startTime));
+}
+
+export function buildSearchWindow(search: HomeSearchState) {
+    const day = getChosenDay(search);
     if (!day) return null;
-    const start = setTime(day, normalizeTimeInput(search.startTime));
+    const start = getSearchStart(day, search);
     const end = addMinutes(start, search.durationMinutes);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || !(start < end)) return null;
     return { start, end };
@@ -27,8 +37,8 @@ export function buildSearchWindow(search: HomeSearchState) {
 
 export function formatSearchWindowSummary(search: HomeSearchState) {
     if (!search.date) return "Any time";
-    const day = parseYmd(search.date);
-    const start = setTime(day ?? new Date(), normalizeTimeInput(search.startTime));
+    const day = getChosenDay(search);
+    const start = getSearchStart(day ?? new Date(), search);
     const dayLabel = day ? formatDateDisplay(day) : search.date;
     const timeLabel = formatTimeDisplay(start);
 

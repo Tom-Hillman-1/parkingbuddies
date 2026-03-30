@@ -9,13 +9,26 @@ import { calcAuctionUnits, type PriceUnit, toMoney } from "../lib/shared";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
 import { serverError } from "../lib/errors";
+import { simpleRateLimit } from "../lib/rateLimit";
 
 const router = Router();
 const PENDING_BOOKING_HOLD_MINUTES = 30;
-const DEMO_MONEY_AUTH_ENABLED = ["1", "true", "yes", "on"].includes(
+const DEMO_MONEY_AUTH_ENABLED = process.env.NODE_ENV !== "production" && ["1", "true", "yes", "on"].includes(
     String(process.env.DEMO_BYPASS_CONNECT ?? "").toLowerCase()
 );
 const DEMO_AUCTION_AUTH_PREFIX = "demo_auction_auth_";
+const bidSubmitRateLimit = simpleRateLimit({
+    windowMs: 60 * 1000,
+    max: 12,
+    message: "Too many bid attempts. Please wait a moment and try again.",
+    keyPrefix: "auctions_bid",
+});
+const ownerBidActionRateLimit = simpleRateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    message: "Too many bid actions. Please wait a moment and try again.",
+    keyPrefix: "auctions_owner_action",
+});
 
 const spotIdParamsSchema = z.object({
     spotId: z.string().uuid("spotId must be a valid listing ID"),
@@ -41,7 +54,7 @@ const bidIdParamsSchema = z.object({
 
 const AUCTION_SPOT_MUTATION_SELECT =
     `SELECT id, owner_user_id, mode, price_unit, auction_start_price_gbp, allow_points, points_cost, availability_json, capacity_total ` +
-    `FROM parking_spots WHERE id = $1`;
+    `FROM parking_spots WHERE id = $1 AND is_active = true`;
 
 function normalizeAuctionUnit(rawUnit: unknown): PriceUnit {
     return rawUnit === "day" || rawUnit === "week" ? rawUnit : "hour";
@@ -51,11 +64,23 @@ function isDemoAuctionAuthorizationId(value: unknown) {
     return typeof value === "string" && value.startsWith(DEMO_AUCTION_AUTH_PREFIX);
 }
 
-async function cancelPaymentIntentSilently(paymentIntentId: string | null | undefined) {
-    if (!paymentIntentId || isDemoAuctionAuthorizationId(paymentIntentId)) return;
+async function cancelPaymentIntentIfPossible(
+    paymentIntentId: string | null | undefined,
+    context: { bidId?: string; spotId?: string } = {}
+) {
+    if (!paymentIntentId || isDemoAuctionAuthorizationId(paymentIntentId)) {
+        return { canceled: false, skipped: true };
+    }
     try {
         await stripe.paymentIntents.cancel(paymentIntentId);
-    } catch {
+        return { canceled: true, skipped: false };
+    } catch (error) {
+        console.error("Failed to cancel auction payment intent", {
+            paymentIntentId,
+            ...context,
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return { canceled: false, skipped: false };
     }
 }
 
@@ -247,7 +272,8 @@ router.get("/:spotId", async (req, res) => {
         const spotR = await pool.query(
             `SELECT id, owner_user_id, mode, auction_end, auction_start_price_gbp, availability_json, capacity_total
              FROM parking_spots
-             WHERE id = $1`,
+             WHERE id = $1
+               AND is_active = true`,
             [spotId]
         );
         if (!spotR.rowCount) {
@@ -305,8 +331,13 @@ router.get("/:spotId", async (req, res) => {
         if (header && header.startsWith("Bearer ") && secret) {
             try {
                 const token = header.slice("Bearer ".length).trim();
-                const payload = jwt.verify(token, secret) as { userId: string };
-                if (payload.userId === spot.owner_user_id) {
+                const payload = jwt.verify(token, secret) as { userId: string; tokenVersion?: number };
+                if (payload.userId === spot.owner_user_id && typeof payload.tokenVersion === "number") {
+                    const ownerR = await pool.query(`SELECT token_version FROM users WHERE id = $1`, [payload.userId]);
+                    const currentTokenVersion = ownerR.rowCount ? Number(ownerR.rows[0]?.token_version ?? -1) : -1;
+                    if (currentTokenVersion !== payload.tokenVersion) {
+                        throw new Error("Invalid or expired token");
+                    }
                     const bidsR = await pool.query(
                         `SELECT b.id, b.amount_gbp, b.amount_points, b.pay_method, b.status, b.start_time, b.end_time, b.created_at, u.name AS bidder_name, u.email AS bidder_email
                          FROM auction_bids b
@@ -329,7 +360,7 @@ router.get("/:spotId", async (req, res) => {
     }
 });
 
-router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
+router.post("/:spotId/bid", requireAuth, bidSubmitRateLimit, async (req: AuthRequest, res) => {
     const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "auction_bid");
     if (!parsedParams.ok) return;
     const parsedBody = parseWithSchema(createBidBodySchema, req.body ?? {}, res, "auction_bid");
@@ -371,7 +402,7 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
     const rollbackWith = async (status: number, error: string, cancelIntent = false) => {
         await client.query("ROLLBACK");
         if (cancelIntent) {
-            await cancelPaymentIntentSilently(paymentIntentIdValue);
+            await cancelPaymentIntentIfPossible(paymentIntentIdValue, { spotId });
         }
         return res.status(status).json({ ok: false, error });
     };
@@ -493,7 +524,8 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
     } catch (e) {
         await client.query("ROLLBACK");
         if (payMethod === "money") {
-            await cancelPaymentIntentSilently(paymentIntentIdValue);
+            const cancelContext = bidId ? { spotId, bidId } : { spotId };
+            await cancelPaymentIntentIfPossible(paymentIntentIdValue, cancelContext);
         }
         return serverError(res, e, "Unable to place bid right now");
     } finally {
@@ -503,7 +535,7 @@ router.post("/:spotId/bid", requireAuth, async (req: AuthRequest, res) => {
     return res.json({ ok: true, bid_id: bidId });
 });
 
-router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
+router.post("/:spotId/accept", requireAuth, ownerBidActionRateLimit, async (req: AuthRequest, res) => {
     const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "auction_accept");
     if (!parsedParams.ok) return;
     const parsedBody = parseWithSchema(bidActionBodySchema, req.body ?? {}, res, "auction_accept");
@@ -716,7 +748,7 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
                 }
                 return res.status(400).json({
                     ok: false,
-                    error: `Card capture failed after acceptance: ${String(captureError)}`,
+                    error: "Card capture failed after acceptance. Please try again.",
                 });
             }
         }
@@ -747,7 +779,7 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
             }
             return res.status(500).json({
                 ok: false,
-                error: `Booking finalization failed after capture: ${String(finalizeError)}`,
+                error: "Booking finalization failed after capture. Please contact support.",
             });
         } finally {
             finalizeClient.release();
@@ -757,7 +789,7 @@ router.post("/:spotId/accept", requireAuth, async (req: AuthRequest, res) => {
     return res.json({ ok: true, auction: { accepted_bid_id: bidId, booking_id: acceptedBookingId } });
 });
 
-router.post("/:spotId/reject", requireAuth, async (req: AuthRequest, res) => {
+router.post("/:spotId/reject", requireAuth, ownerBidActionRateLimit, async (req: AuthRequest, res) => {
     const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "auction_reject");
     if (!parsedParams.ok) return;
     const parsedBody = parseWithSchema(bidActionBodySchema, req.body ?? {}, res, "auction_reject");
@@ -824,7 +856,14 @@ router.post("/:spotId/reject", requireAuth, async (req: AuthRequest, res) => {
     }
 
     if (paymentIntentToCancel) {
-        await cancelPaymentIntentSilently(paymentIntentToCancel);
+        const cancelResult = await cancelPaymentIntentIfPossible(paymentIntentToCancel, { spotId, bidId });
+        if (!cancelResult.canceled && !cancelResult.skipped) {
+            return res.json({
+                ok: true,
+                rejected_bid_id: bidId,
+                authorization_release_pending: true,
+            });
+        }
     }
     return res.json({ ok: true, rejected_bid_id: bidId });
 });

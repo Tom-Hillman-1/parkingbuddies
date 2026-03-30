@@ -5,7 +5,7 @@ dotenv.config();
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
-    throw new Error("DATABASE_URL is missing. Add it to server/.env");
+    throw new Error("Missing DATABASE_URL environment variable.");
 }
 
 export const pool = new Pool({ connectionString });

@@ -13,6 +13,7 @@ import { Link, useLocation } from "react-router-dom";
 import { AppDisclosure } from "../components/ui/AppDisclosure";
 import { AppButton, AppField, AppInput, AppSelect, AppTextarea } from "../components/ui/AppForm";
 import { SUPPORT_EMAIL } from "./pagesShared";
+import { apiPost, readErrorMessage } from "../lib/api";
 
 type ShowcaseCard = {
     id: string;
@@ -332,6 +333,7 @@ export default function AboutPage() {
     const [email, setEmail] = useState("");
     const [topic, setTopic] = useState("General question");
     const [message, setMessage] = useState("");
+    const [company, setCompany] = useState("");
     const [sending, setSending] = useState(false);
     const [sent, setSent] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -426,31 +428,22 @@ export default function AboutPage() {
         setSent(false);
         setError(null);
 
-        const formData = new FormData();
-        formData.append("name", name.trim());
-        formData.append("email", email.trim());
-        formData.append("topic", topic);
-        formData.append("message", message.trim());
-        formData.append("_subject", `ParkingBuddies help request: ${topic}`);
-        formData.append("_captcha", "false");
-        formData.append("_template", "table");
-
         try {
-            const res = await fetch(`https://formsubmit.co/ajax/${SUPPORT_EMAIL}`, {
-                method: "POST",
-                headers: { Accept: "application/json" },
-                body: formData,
+            await apiPost("/support/contact", {
+                name: name.trim(),
+                email: email.trim(),
+                topic,
+                message: message.trim(),
+                company,
             });
-
-            if (!res.ok) throw new Error("Could not send your message right now.");
-
             setSent(true);
             setName("");
             setEmail("");
             setTopic("General question");
             setMessage("");
-        } catch {
-            setError("Message failed to send. Please try again or use direct email.");
+            setCompany("");
+        } catch (submitError) {
+            setError(readErrorMessage(submitError, "Message failed to send. Please try again or use direct email."));
         } finally {
             setSending(false);
         }
@@ -460,9 +453,9 @@ export default function AboutPage() {
         <div ref={rootRef} className="container aboutPremium">
             <header className="aboutPremiumHero aboutReveal">
                 <p className="aboutPremiumKicker">About ParkingBuddies</p>
-                <h1 className="aboutPremiumTitle">Project set to solve real world parking problems</h1>
+                <h1 className="aboutPremiumTitle">Built to make everyday parking less frustrating</h1>
                 <p className="aboutPremiumSub">
-                    Built as part of a dissertation project, ParkingBuddies is a community-driven platform that uses a points-based system, allowing users to earn and redeem points without involving real-money payments. It also gives space owners clear, flexible control over approvals, pricing, and availability.
+                    Built as part of a dissertation project, ParkingBuddies is a community-driven platform with direct bookings, manual auction approvals, Stripe payments, and a points system layered on top. It gives space owners flexible control over pricing, availability, and how each booking is handled.
 
                 </p>
                 <div className="aboutPremiumActions">
@@ -668,6 +661,18 @@ export default function AboutPage() {
                 </div>
 
                 <form className="aboutPremiumForm" onSubmit={submitHelp} noValidate>
+                    <div style={{ position: "absolute", left: "-9999px", width: 1, height: 1, overflow: "hidden" }} aria-hidden="true">
+                        <label htmlFor="support-company">Company</label>
+                        <input
+                            id="support-company"
+                            name="company"
+                            tabIndex={-1}
+                            autoComplete="off"
+                            value={company}
+                            onChange={(e) => setCompany(e.target.value)}
+                        />
+                    </div>
+
                     <div className="aboutPremiumFormRow">
                         <AppField label="Full name">
                             <AppInput

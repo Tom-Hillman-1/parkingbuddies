@@ -6,6 +6,10 @@ dist/
 build/
 out/
 *.tsbuildinfo
+server/src/**/*.js
+server/src/**/*.js.map
+server/src/**/*.d.ts
+server/src/**/*.d.ts.map
 
 # Environment variables
 .env
@@ -32,3 +36,7 @@ coverage/
 # Temp
 .tmp/
 temp/
+
+# Local project artifacts
+FINAL_REPORT_export.docx
+zap.yaml

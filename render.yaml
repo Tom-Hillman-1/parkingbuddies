@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: parkingbuddies-api
+    runtime: node
+    rootDir: server
+    buildCommand: npm install && npm run build
+    preDeployCommand: npm run migrate:up
+    startCommand: npm run start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: CLIENT_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: SUPPORT_EMAIL
+        value: parkingbuddiesproject@gmail.com
+      - key: STRIPE_CONNECT_COUNTRY
+        value: GB
+      - key: DEMO_BYPASS_CONNECT
+        value: "false"
+
+  - type: web
+    name: parkingbuddies-web
+    runtime: static
+    rootDir: client
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        sync: false
+      - key: VITE_STRIPE_PUBLISHABLE_KEY
+        sync: false

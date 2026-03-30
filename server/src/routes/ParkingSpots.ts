@@ -6,20 +6,24 @@ import { availabilityDateRange, isWindowSlot, parseLondonDateTime, remainingMinu
 import {
     LISTING_PUBLISH_REWARD_POINTS,
     MAX_LISTING_PUBLISH_REWARDS,
+    MIN_POINTS_COST,
+    toMoney,
+    type PriceUnit,
 } from "../lib/shared";
 import { parseWithSchema } from "../lib/validation";
 import { serverError } from "../lib/errors";
 import { simpleRateLimit } from "../lib/rateLimit";
+import { listingPayloadSchema, pointsPricingIssue, type ListingAvailability as AvailabilityJson, type ListingPayload, type Mode, type ParkingType } from "../lib/listingSchemas";
 
 const router = Router();
 
 const MIN_AUCTION_START_PRICE_GBP = 0.1;
-const MIN_POINTS_COST = 1;
-const DEMO_PAYOUTS_ENABLED = ["1", "true", "yes", "on"].includes(
+const DEMO_PAYOUTS_ENABLED = process.env.NODE_ENV !== "production" && ["1", "true", "yes", "on"].includes(
     String(process.env.DEMO_BYPASS_CONNECT ?? "").toLowerCase()
 );
 const DEMO_CONNECT_ACCOUNT_PREFIX = "acct_demo_";
 const NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org";
+const NOMINATIM_TIMEOUT_MS = 6000;
 const NOMINATIM_HEADERS = {
     "Accept-Language": "en-GB,en;q=0.9",
     "User-Agent": "ParkingBuddies/1.0",
@@ -30,7 +34,29 @@ const geocodeRateLimit = simpleRateLimit({
     message: "Too many address lookups. Please wait a moment and try again.",
     keyPrefix: "geocode",
 });
-const listingBodySchema = z.record(z.string(), z.unknown());
+const PUBLIC_SPOT_SELECT = `
+    id,
+    owner_user_id,
+    title,
+    description,
+    mode,
+    price_gbp,
+    price_unit,
+    allow_points,
+    points_cost,
+    address_text,
+    lat,
+    lng,
+    image_url,
+    availability_json,
+    auction_end,
+    auction_start_price_gbp,
+    parking_type,
+    capacity_total,
+    is_active,
+    created_at,
+    updated_at
+`;
 const spotIdParamsSchema = z.object({
     id: z.string().uuid("id must be a valid listing ID"),
 });
@@ -44,32 +70,6 @@ const geocodeReverseQuerySchema = z.object({
     lat: z.coerce.number().min(-90).max(90),
     lng: z.coerce.number().min(-180).max(180),
 });
-
-type PriceUnit = "hour" | "day" | "week";
-type Mode = "free" | "rent" | "auction";
-type ParkingType = "private" | "public";
-type ParkingKind =
-    | "street"
-    | "parking_lot"
-    | "garage"
-    | "closed_parking"
-    | "driveway"
-    | "underground"
-    | "carport"
-    | "multi_storey"
-    | "ev_charging";
-
-type AvailabilityJson = {
-    type: "window_slots";
-    windows: Array<{
-        mode: "continuous";
-        date_from: string;
-        date_to: string;
-        start: string;
-        end: string;
-    }>;
-    parking_kind?: ParkingKind;
-};
 
 type NormalizedListingInput = {
     title: string;
@@ -98,76 +98,8 @@ type PreparedListingMutation = Omit<NormalizedListingInput, "priceNum" | "points
     auction_start_price_gbp: number | null;
 };
 
-function isNonEmptyString(x: unknown, minLen = 1): x is string {
-    return typeof x === "string" && x.trim().length >= minLen;
-}
-
-function isBool(x: unknown): x is boolean {
-    return typeof x === "boolean";
-}
-
-function isNumber(x: unknown): x is number {
-    return typeof x === "number" && Number.isFinite(x);
-}
-
 function isDateYYYYMMDD(x: unknown): x is string {
     return typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x);
-}
-
-function parseMode(x: unknown): Mode | null {
-    if (x === "free" || x === "rent" || x === "auction") return x;
-    return null;
-}
-
-function parseParkingType(x: unknown): ParkingType | null {
-    if (x === "private" || x === "public") return x;
-    return null;
-}
-
-function parseParkingKind(x: unknown): ParkingKind | null {
-    if (
-        x === "street" ||
-        x === "parking_lot" ||
-        x === "garage" ||
-        x === "closed_parking" ||
-        x === "driveway" ||
-        x === "underground" ||
-        x === "carport" ||
-        x === "multi_storey" ||
-        x === "ev_charging"
-    ) {
-        return x;
-    }
-    if (x === "covered_parking") return "closed_parking";
-    return null;
-}
-
-function parsePriceUnit(x: unknown): PriceUnit | null {
-    if (x === "hour" || x === "day" || x === "week") return x;
-    return null;
-}
-
-function safeMoney(x: unknown) {
-    const n = Number(x ?? 0);
-    return Number.isFinite(n) && n >= 0 ? n : 0;
-}
-
-function safeInt(x: unknown) {
-    const n = Number(x ?? 0);
-    return Number.isFinite(n) ? Math.floor(n) : 0;
-}
-
-function optionalTrimmedText(x: unknown, maxLength = 240) {
-    if (typeof x !== "string") return null;
-    const trimmed = x.trim();
-    if (!trimmed) return null;
-    return trimmed.slice(0, maxLength);
-}
-
-function stripPrivateOwnerContact(spot: any) {
-    if (!spot || typeof spot !== "object") return spot;
-    const { owner_contact_email, owner_contact_phone, owner_contact_info, ...publicSpot } = spot;
-    return publicSpot;
 }
 
 function isDemoConnectAccountId(accountId: string | null | undefined) {
@@ -194,100 +126,69 @@ function listingNeedsMoneyPayout(data: PreparedListingMutation) {
 function auctionEndFromAvailability(availability: AvailabilityJson) {
     if (!Array.isArray(availability.windows) || availability.windows.length === 0) return null;
     const lastDate = availability.windows
-        .map((window) => (isDateYYYYMMDD(window.date_to) ? window.date_to : null))
-        .filter((value): value is string => Boolean(value))
+        .map((window: AvailabilityJson["windows"][number]) => (isDateYYYYMMDD(window.date_to) ? window.date_to : null))
+        .filter((value: string | null): value is string => Boolean(value))
         .sort()
         .at(-1);
     if (!lastDate) return null;
     return new Date(parseLondonDateTime(lastDate, "23:59").getTime() + 59 * 1000 + 999).toISOString();
 }
 
-function buildAvailabilityJson(body: any): { ok: true; availability: AvailabilityJson } | { ok: false; error: string } {
-    const a = body?.availability;
-    const parking_kind = parseParkingKind(body?.parking_kind ?? a?.parking_kind) ?? undefined;
+function buildAvailabilityJson(body: ListingPayload): { ok: true; availability: AvailabilityJson } {
+    const parking_kind = body.parking_kind ?? body.availability.parking_kind;
     const kindField = parking_kind ? { parking_kind } : {};
-    if (a?.type !== "window_slots" || !Array.isArray(a.windows) || a.windows.length === 0) {
-        return { ok: false, error: "availability.windows must be a non-empty array" };
-    }
 
-    const windows = [];
-    for (const rawWindow of a.windows) {
-        if (!isWindowSlot(rawWindow)) {
-            return { ok: false, error: "Each availability window needs valid dates and times" };
-        }
-        windows.push({
+    const windows = body.availability.windows
+        .filter((rawWindow: ListingPayload["availability"]["windows"][number]) => isWindowSlot(rawWindow))
+        .map((rawWindow: ListingPayload["availability"]["windows"][number]) => ({
             mode: "continuous" as const,
             date_from: rawWindow.date_from,
             date_to: rawWindow.date_to,
             start: rawWindow.start,
             end: rawWindow.end,
-        });
-    }
+        }));
 
     return { ok: true, availability: { type: "window_slots", windows, ...kindField } };
 }
 
 function normalizeListingInput(
-    body: any,
+    body: ListingPayload,
 ): { ok: true; data: NormalizedListingInput } | { ok: false; error: string } {
-    const titleRaw = body?.title;
-    const descriptionRaw = body?.description;
-    const mode = parseMode(body?.mode);
-    const addressRaw = body?.address_text;
-    const lat = body?.lat;
-    const lng = body?.lng;
-
-    if (!isNonEmptyString(titleRaw, 3) || !isNonEmptyString(descriptionRaw, 5) || !mode) {
-        return { ok: false, error: "Missing or invalid title/description/mode" };
-    }
-    if (!isNonEmptyString(addressRaw, 5) || !isNumber(lat) || !isNumber(lng)) {
-        return { ok: false, error: "Missing or invalid address/lat/lng" };
-    }
-
-    const parking_type = parseParkingType(body?.parking_type) ?? "private";
-    const capacity_total = safeInt(body?.capacity_total || 1);
-    if (parking_type === "public" && capacity_total <= 0) {
-        return { ok: false, error: "capacity_total must be > 0 for public parking" };
-    }
-
-    const allow_points = isBool(body?.allow_points) ? body.allow_points : false;
-    const points_cost = safeInt(body?.points_cost);
-    if (allow_points && mode !== "rent" && mode !== "auction") {
+    const allow_points = body.allow_points;
+    const points_cost = body.points_cost;
+    if (allow_points && body.mode !== "rent" && body.mode !== "auction") {
         return { ok: false, error: "Points can only be enabled for rent or auction listings" };
     }
-    if (allow_points && points_cost < MIN_POINTS_COST) {
-        return { ok: false, error: "points_cost must be >= 1 when allow_points is true" };
+    const pricingIssue = pointsPricingIssue(allow_points, points_cost);
+    if (pricingIssue) {
+        return { ok: false, error: pricingIssue };
     }
-
-    const owner_contact_email = optionalTrimmedText(body?.owner_contact_email, 160);
-    const owner_contact_phone = optionalTrimmedText(body?.owner_contact_phone, 60);
-    const owner_contact_info = optionalTrimmedText(body?.owner_contact_info, 500);
 
     return {
         ok: true,
         data: {
-            title: titleRaw.trim(),
-            description: descriptionRaw.trim(),
-            mode,
-            address_text: addressRaw.trim(),
-            lat,
-            lng,
-            parking_type,
-            capacity_total,
-            image_url: body?.image_url ?? null,
-            unit: parsePriceUnit(body?.price_unit) ?? "hour",
-            priceNum: safeMoney(body?.price_gbp),
+            title: body.title,
+            description: body.description,
+            mode: body.mode,
+            address_text: body.address_text,
+            lat: body.lat,
+            lng: body.lng,
+            parking_type: body.parking_type,
+            capacity_total: body.capacity_total,
+            image_url: body.image_url,
+            unit: body.price_unit,
+            priceNum: toMoney(body.price_gbp),
             allow_points,
             points_cost,
-            owner_contact_email,
-            owner_contact_phone,
-            owner_contact_info,
+            owner_contact_email: body.owner_contact_email,
+            owner_contact_phone: body.owner_contact_phone,
+            owner_contact_info: body.owner_contact_info,
         },
     };
 }
 
 function resolveListingPricing(
-    body: any,
+    body: ListingPayload,
     mode: Mode,
     availability: AvailabilityJson,
     initialPriceNum: number,
@@ -300,7 +201,7 @@ function resolveListingPricing(
     let auction_start_price_gbp: number | null = null;
 
     if (mode === "auction") {
-        const ap = safeMoney(body?.auction_start_price_gbp);
+        const ap = toMoney(body.auction_start_price_gbp);
         const hasMoneyPricing = ap >= MIN_AUCTION_START_PRICE_GBP;
         if (!hasMoneyPricing && !allowPoints) {
             return { ok: false, error: "Auction listings need money pricing or points enabled" };
@@ -332,7 +233,7 @@ function resolveListingPricing(
 }
 
 function prepareListingMutation(
-    body: any
+    body: ListingPayload
 ): { ok: true; data: PreparedListingMutation } | { ok: false; error: string } {
     const parsedInput = normalizeListingInput(body);
     if (!parsedInput.ok) {
@@ -340,9 +241,6 @@ function prepareListingMutation(
     }
 
     const availabilityResult = buildAvailabilityJson(body);
-    if (!availabilityResult.ok) {
-        return availabilityResult;
-    }
 
     const pricingResult = resolveListingPricing(
         body,
@@ -391,8 +289,21 @@ function listingMutationCoreValues(data: PreparedListingMutation) {
     ];
 }
 
+async function fetchNominatim(path: "search" | "reverse", params: URLSearchParams) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), NOMINATIM_TIMEOUT_MS);
+    try {
+        return await fetch(`${NOMINATIM_BASE_URL}/${path}?${params.toString()}`, {
+            headers: NOMINATIM_HEADERS,
+            signal: controller.signal,
+        });
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 router.post("/", requireAuth, async (req: AuthRequest, res) => {
-    const parsedBody = parseWithSchema(listingBodySchema, req.body ?? {}, res, "listing_create");
+    const parsedBody = parseWithSchema(listingPayloadSchema, req.body ?? {}, res, "listing_create");
     if (!parsedBody.ok) return;
     const body = parsedBody.data;
     const prepared = prepareListingMutation(body);
@@ -492,7 +403,7 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
 router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
     const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "listing_update");
     if (!parsedParams.ok) return;
-    const parsedBody = parseWithSchema(listingBodySchema, req.body ?? {}, res, "listing_update");
+    const parsedBody = parseWithSchema(listingPayloadSchema, req.body ?? {}, res, "listing_update");
     if (!parsedBody.ok) return;
     const body = parsedBody.data;
     const spotId = parsedParams.data.id;
@@ -588,7 +499,7 @@ router.delete("/:id", requireAuth, async (req: AuthRequest, res) => {
 router.get("/", async (_req, res) => {
     try {
         const r = await pool.query(
-            `SELECT *
+            `SELECT ${PUBLIC_SPOT_SELECT}
        FROM parking_spots
        WHERE is_active = true
        ORDER BY created_at DESC`
@@ -609,7 +520,7 @@ router.get("/", async (_req, res) => {
 
             for (const b of bidsR.rows) {
                 const spotId = b.parking_spot_id as string;
-                const amt = safeMoney(b.amount_gbp);
+                const amt = toMoney(b.amount_gbp);
                 if (b.status === "pending") {
                     const prev = highestPending.get(spotId) ?? 0;
                     if (amt > prev) highestPending.set(spotId, amt);
@@ -631,7 +542,7 @@ router.get("/", async (_req, res) => {
             }
         }
 
-        return res.json({ ok: true, parking_spots: spots.map(stripPrivateOwnerContact) });
+        return res.json({ ok: true, parking_spots: spots });
     } catch (e) {
         return serverError(res, e, "Unable to load listings right now");
     }
@@ -656,9 +567,7 @@ router.get("/geocode/search", geocodeRateLimit, async (req, res) => {
             q: rawQuery,
         });
 
-        const response = await fetch(`${NOMINATIM_BASE_URL}/search?${params.toString()}`, {
-            headers: NOMINATIM_HEADERS,
-        });
+        const response = await fetchNominatim("search", params);
         if (!response.ok) {
             return res.status(502).json({ ok: false, error: `Address search provider error (${response.status})` });
         }
@@ -701,9 +610,7 @@ router.get("/geocode/reverse", geocodeRateLimit, async (req, res) => {
             zoom: "18",
         });
 
-        const response = await fetch(`${NOMINATIM_BASE_URL}/reverse?${params.toString()}`, {
-            headers: NOMINATIM_HEADERS,
-        });
+        const response = await fetchNominatim("reverse", params);
         if (!response.ok) {
             return res.status(502).json({ ok: false, error: `Address lookup provider error (${response.status})` });
         }
@@ -754,9 +661,10 @@ router.get("/:id", async (req, res) => {
     if (!parsedParams.ok) return;
     try {
         const r = await pool.query(
-            `SELECT *
+            `SELECT ${PUBLIC_SPOT_SELECT}
        FROM parking_spots
-       WHERE id = $1`,
+       WHERE id = $1
+         AND is_active = true`,
             [parsedParams.data.id]
         );
 
@@ -764,7 +672,7 @@ router.get("/:id", async (req, res) => {
             return res.status(404).json({ ok: false, error: "Parking spot not found" });
         }
 
-        return res.json({ ok: true, parking_spot: stripPrivateOwnerContact(r.rows[0]) });
+        return res.json({ ok: true, parking_spot: r.rows[0] });
     } catch (e) {
         return serverError(res, e, "Unable to load listing right now");
     }

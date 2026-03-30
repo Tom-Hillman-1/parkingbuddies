@@ -1,35 +1,42 @@
-export type PriceUnit = "hour" | "day" | "week";
 export const SUPPORT_EMAIL = "parkingbuddiesproject@gmail.com";
 const DISPLAY_LOCALE = "en-GB";
-const DATE_FORMATTER = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+const YMD_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const dateStamp = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
 });
-const TIME_FORMATTER = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+const timeStamp = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
 });
-const GBP_FORMATTER = new Intl.NumberFormat(DISPLAY_LOCALE, {
+const moneyStamp = new Intl.NumberFormat(DISPLAY_LOCALE, {
     style: "currency",
     currency: "GBP",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
 });
-const MONTH_YEAR_FORMATTER = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+const monthTitleStamp = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
     month: "long",
     year: "numeric",
 });
-const MONTH_SHORT_FORMATTER = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+const monthChipStamp = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
     month: "short",
 });
 
-export function toFiniteNumber(value: unknown, fallback = 0) {
-    const numeric = Number(value ?? fallback);
-    return Number.isFinite(numeric) ? numeric : fallback;
-}
-
+export {
+    calcAuctionMoneyTotal,
+    calcAuctionPointsTotal,
+    calcAuctionUnitsForRange,
+    calcRangeMinutes,
+    calcUnitsForMinutes,
+    derivedPointsCostFromMoney,
+    MIN_POINTS_COST,
+    POINTS_PER_GBP,
+    toFiniteNumber,
+    type PriceUnit,
+} from "../../../shared/domain/pricing";
 export function isTimeHHMM(value: string) {
     return /^\d{2}:\d{2}$/.test(value);
 }
@@ -48,7 +55,9 @@ export function toLocalDateInput(date: Date) {
 }
 
 export function parseYmd(value: string) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    // Treat YYYY-MM-DD values as local dates. Using new Date("2026-03-30")
+    // shifts the day in some time zones, which gets messy fast in booking UIs.
+    if (!YMD_PATTERN.test(value)) return null;
     const [yearRaw, monthRaw, dayRaw] = value.split("-");
     const year = Number(yearRaw);
     const month = Number(monthRaw);
@@ -66,57 +75,16 @@ export function capitalizeLabel(value: string, fallback = "Unknown") {
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
-export function calcUnitsForMinutes(
-    minutes: number,
-    unit: PriceUnit,
-    hourlyMode: "booking" | "auction" = "booking"
-) {
-    if (!Number.isFinite(minutes) || minutes <= 0) return 0;
-    if (unit === "hour") {
-        const roundedMinutes =
-            hourlyMode === "booking"
-                ? Math.max(5, Math.ceil(minutes / 5) * 5)
-                : Math.max(60, Math.ceil(minutes / 60) * 60);
-        return roundedMinutes / 60;
-    }
-    if (unit === "day") return Math.max(1, Math.ceil(minutes / (24 * 60)));
-    return Math.max(1, Math.ceil(minutes / (7 * 24 * 60)));
-}
-
-export function calcRangeMinutes(start?: Date | string | null, end?: Date | string | null) {
-    if (!start || !end) return 0;
-    const startDate = start instanceof Date ? start : new Date(start);
-    const endDate = end instanceof Date ? end : new Date(end);
-    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate <= startDate) return 0;
-    return Math.round((endDate.getTime() - startDate.getTime()) / 60000);
-}
-
-export function calcAuctionUnitsForRange(start?: Date | string | null, end?: Date | string | null, unit: PriceUnit = "hour") {
-    return calcUnitsForMinutes(calcRangeMinutes(start, end), unit, "auction");
-}
-
-export function calcAuctionMoneyTotal(amountPerUnit: unknown, units: number) {
-    const amount = toFiniteNumber(amountPerUnit);
-    if (amount <= 0 || !Number.isFinite(units) || units <= 0) return 0;
-    return Math.round(amount * units * 100) / 100;
-}
-
-export function calcAuctionPointsTotal(amountPerUnit: unknown, units: number) {
-    const amount = toFiniteNumber(amountPerUnit);
-    if (amount <= 0 || !Number.isFinite(units) || units <= 0) return 0;
-    return Math.ceil(amount * units);
-}
-
-export function formatGbp(value: unknown, fallback = GBP_FORMATTER.format(0)) {
+export function formatGbp(value: unknown, fallback = moneyStamp.format(0)) {
     const amount = Number(value);
-    return Number.isFinite(amount) ? GBP_FORMATTER.format(amount) : fallback;
+    return Number.isFinite(amount) ? moneyStamp.format(amount) : fallback;
 }
 
 export function formatDateTimeCompact(value?: string | null, fallback = "-") {
     if (!value) return fallback;
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
-    return `${DATE_FORMATTER.format(date)} ${TIME_FORMATTER.format(date)}`;
+    return `${dateStamp.format(date)} ${timeStamp.format(date)}`;
 }
 
 export function formatDateDisplay(value?: Date | string | null, fallback = "-") {
@@ -124,26 +92,26 @@ export function formatDateDisplay(value?: Date | string | null, fallback = "-") 
     const date =
         value instanceof Date
             ? value
-            : /^\d{4}-\d{2}-\d{2}$/.test(value)
+            : YMD_PATTERN.test(value)
                 ? parseYmd(value)
                 : new Date(value);
     if (!date || Number.isNaN(date.getTime())) return typeof value === "string" ? value : fallback;
-    return DATE_FORMATTER.format(date);
+    return dateStamp.format(date);
 }
 
 export function formatTimeDisplay(value?: Date | string | null, fallback = "-") {
     if (!value) return fallback;
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return typeof value === "string" ? value : fallback;
-    return TIME_FORMATTER.format(date);
+    return timeStamp.format(date);
 }
 
 export function formatMonthYearLabel(value: Date) {
-    return MONTH_YEAR_FORMATTER.format(value);
+    return monthTitleStamp.format(value);
 }
 
 export function formatMonthShortLabel(value: Date) {
-    return MONTH_SHORT_FORMATTER.format(value);
+    return monthChipStamp.format(value);
 }
 
 export function formatDateTimeLocal(value?: string | null, fallback = "Time on file") {

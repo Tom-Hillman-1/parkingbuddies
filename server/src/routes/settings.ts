@@ -9,6 +9,7 @@ import {
     isValidPassword,
     normalizeEmail,
     normalizeName,
+    PASSWORD_REQUIREMENTS_TEXT,
     PROFILE_COMPLETION_REWARD_POINTS,
 } from "../lib/shared";
 import { parseWithSchema } from "../lib/validation";
@@ -92,10 +93,11 @@ router.patch("/profile", requireAuth, async (req: AuthRequest, res) => {
         const currentUser = currentUserR.rows[0];
         const nextName = name !== undefined ? normalizeName(name) : currentUser.name;
         const nextEmail = email !== undefined ? normalizeEmail(email) : currentUser.email;
-        const shouldAwardProfileReward =
-            name !== undefined &&
-            email !== undefined &&
-            (nextName !== currentUser.name || nextEmail !== currentUser.email);
+        const profileCompleteBeforeUpdate =
+            isValidName(normalizeName(currentUser.name ?? "")) &&
+            isValidEmail(normalizeEmail(currentUser.email ?? ""));
+        const profileCompleteAfterUpdate = isValidName(nextName) && isValidEmail(nextEmail);
+        const shouldAwardProfileReward = !profileCompleteBeforeUpdate && profileCompleteAfterUpdate;
 
         const r = await client.query(
             `UPDATE users
@@ -168,7 +170,7 @@ router.patch("/password", requireAuth, async (req: AuthRequest, res) => {
     if (!isValidPassword(newPassword)) {
         return res.status(400).json({
             ok: false,
-            error: "New password must be at least 8 characters and include at least 1 letter and 1 number",
+            error: `New ${PASSWORD_REQUIREMENTS_TEXT.charAt(0).toLowerCase()}${PASSWORD_REQUIREMENTS_TEXT.slice(1)}`,
         });
     }
 

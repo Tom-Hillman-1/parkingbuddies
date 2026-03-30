@@ -4,13 +4,16 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Use the client and server package scripts for checks.\""
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Tom-Hillman-1/parkingbuddies.project"
+    "url": "https://github.com/Tom-Hillman-1/parkingbuddies"
   },
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "vite": "^8.0.0"
   }
