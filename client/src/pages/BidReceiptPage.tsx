@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import AppPageState from "../components/AppPageState";
 import { apiGet } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { ReceiptCard, ReceiptRow } from "../components/ReceiptCard";
+import { ReceiptCard, ReceiptDivider, ReceiptRow } from "../components/ReceiptCard";
 import {
     calcAuctionPointsTotal,
     calcAuctionUnitsForRange,
-    formatDateTimeCompact,
+    formatDateRangeLocal,
+    formatDateTimeLocal,
     formatGbp,
     type PriceUnit,
 } from "./pagesShared";
@@ -26,7 +28,14 @@ type BidReceipt = {
     end_time?: string;
     spot_title?: string;
     spot_address?: string;
+    owner_contact_email?: string | null;
+    owner_contact_phone?: string | null;
+    owner_contact_info?: string | null;
 };
+
+function renderMutedReceiptCopy(text: string) {
+    return <span className="tiny muted">{text}</span>;
+}
 
 export default function BidReceiptPage() {
     const { bidId } = useParams();
@@ -94,44 +103,74 @@ export default function BidReceiptPage() {
         return calcAuctionPointsTotal(bid?.amount_points, units);
     }, [bid?.start_time, bid?.end_time, bid?.amount_points, bid?.price_unit]);
 
-    const windowText =
-        bid?.start_time && bid?.end_time
-            ? `${formatDateTimeCompact(bid.start_time)} -> ${formatDateTimeCompact(bid.end_time)}`
-            : "-";
+    const acceptedBid = String(bid?.status ?? "").toLowerCase() === "accepted";
+    const windowText = formatDateRangeLocal(bid?.start_time, bid?.end_time);
+    const placedAt = formatDateTimeLocal(bid?.created_at);
+    const ownerContactEmail = String(bid?.owner_contact_email ?? "").trim();
+    const ownerContactPhone = String(bid?.owner_contact_phone ?? "").trim();
+    const ownerContactInfo = String(bid?.owner_contact_info ?? "").trim();
+    const ownerContactPendingCopy = "Details will be shown once the bid is accepted.";
+
+    function getOwnerContactValue(value: string) {
+        if (!acceptedBid) {
+            return renderMutedReceiptCopy(ownerContactPendingCopy);
+        }
+        if (value) return value;
+        return renderMutedReceiptCopy("Not provided.");
+    }
+
+    const pageKicker = acceptedBid ? "BOOKING" : "BID";
+    const pageTitle = acceptedBid ? "Booking confirmed" : "Bid summary";
+    const pageSubtitle = acceptedBid
+        ? "Review the booking details created from your accepted bid."
+        : "Review your bid details while the latest owner decision is still on file.";
+    const summaryTitle = acceptedBid ? "Booking summary" : "Bid summary";
+    const summarySubtitle = acceptedBid
+        ? "Your accepted bid has been turned into a booking."
+        : `Bid confirmation #${id}`;
 
     return (
         <div className="container">
             <div className="pageHeader">
-                <div className="heroKicker">CONFIRMATION</div>
-                <div className="heroTitle">Auction bid receipt</div>
-                <div className="heroSub muted">Review your bid details and payment method.</div>
+                <div className="heroKicker">{pageKicker}</div>
+                <div className="heroTitle">{pageTitle}</div>
+                <div className="heroSub muted">{pageSubtitle}</div>
             </div>
 
-            {loading && <div className="card formSection">Preparing your receipt...</div>}
-            {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
+            {err && (
+                <AppPageState
+                    card
+                    title="This receipt is still circling the block."
+                    copy="The bid details did not load properly. Head back home and try again in a moment."
+                />
+            )}
 
             {!loading && !err && bid && (
                 <>
                     <ReceiptCard
                         kicker="PARKINGBUDDIES"
-                        title="Bid receipt"
-                        subtitle={`Confirmation #${id}`}
+                        title={summaryTitle}
+                        subtitle={summarySubtitle}
                     >
-                        <ReceiptRow label="Status" value={statusLabel} />
-                        <ReceiptRow label="Payment" value={paymentLabel} />
-                        <ReceiptRow label="Payment status" value={paymentStatusLabel} />
-                        <ReceiptRow label="Spot" value={bid.spot_title ?? "-"} />
-                        <ReceiptRow label="Address" value={bid.spot_address ?? "-"} />
-                        <ReceiptRow label="When" value={windowText} />
+                        <ReceiptRow label="Booking" value={bid.spot_title ?? "Auction listing"} />
+                        <ReceiptRow label="Location" value={bid.spot_address ?? "Address on file"} />
+                        <ReceiptRow label="Window" value={windowText} />
                         {bid.pay_method === "points" ? (
                             <>
                                 <ReceiptRow label="Bid rate" value={`${Number(bid.amount_points ?? 0)} pts / ${bid.price_unit ?? "hour"}`} />
                                 <ReceiptRow label="Total (estimated)" value={`${totalPoints} pts`} />
                             </>
                         ) : (
-                            <ReceiptRow label="Bid amount" value={formatGbp(bid.amount_gbp)} />
+                            <ReceiptRow label="Amount" value={formatGbp(bid.amount_gbp)} />
                         )}
-                        <ReceiptRow label="Placed" value={formatDateTimeCompact(bid.created_at)} />
+                        <ReceiptRow label="Status" value={statusLabel} />
+                        <ReceiptRow label="Payment" value={paymentLabel} />
+                        <ReceiptRow label="Payment status" value={paymentStatusLabel} />
+                        <ReceiptRow label="Booked at" value={placedAt} />
+                        <ReceiptDivider />
+                        <ReceiptRow label="Owner email" value={getOwnerContactValue(ownerContactEmail)} />
+                        <ReceiptRow label="Owner phone" value={getOwnerContactValue(ownerContactPhone)} />
+                        <ReceiptRow label="Arrival notes" value={getOwnerContactValue(ownerContactInfo)} />
                     </ReceiptCard>
 
                     <div className="card formSection" style={{ marginTop: 14 }}>

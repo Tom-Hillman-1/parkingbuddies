@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tab, TabList, TabPanel, Tabs } from "react-aria-components";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
+import AppPageState from "../components/AppPageState";
 import { AppButton } from "../components/ui/AppForm";
 import { AppDisclosure } from "../components/ui/AppDisclosure";
 import { apiGet, apiPost, readErrorMessage } from "../lib/api";
@@ -497,8 +498,9 @@ export default function DashboardPage() {
                     className="btn dashboardSlotActionBtn"
                     onClick={() => openPaymentReceipt(booking.id)}
                     disabled={receiptLoadingId === booking.id}
+                    aria-busy={receiptLoadingId === booking.id}
                 >
-                    {receiptLoadingId === booking.id ? "Loading..." : "Stripe receipt"}
+                    Stripe receipt
                 </button>
             ) : null,
             extraAction ?? null,
@@ -613,7 +615,14 @@ export default function DashboardPage() {
                 </aside>
             </div>
 
-            {(err ?? loadErr) && <div className="card formSection" style={{ color: "crimson" }}>{err ?? loadErr}</div>}
+            {loadErr && (
+                <AppPageState
+                    card
+                    title="Your dashboard is still finding a parking space."
+                    copy="The latest activity did not load properly. Head back home and try again in a moment."
+                />
+            )}
+            {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
             {msg && <div className="card formSection">{msg}</div>}
 
             <Tabs
@@ -967,8 +976,8 @@ export default function DashboardPage() {
                                                 <div className="dashboardTxLinks">
                                                     {isOutgoing ? (
                                                         <>
-                                                            <button className="dashboardTxLink" onClick={() => openPaymentReceipt(payment.booking_id)} disabled={receiptLoadingId === payment.booking_id}>
-                                                                {receiptLoadingId === payment.booking_id ? "Loading..." : "Stripe receipt"}
+                                                            <button className="dashboardTxLink" onClick={() => openPaymentReceipt(payment.booking_id)} disabled={receiptLoadingId === payment.booking_id} aria-busy={receiptLoadingId === payment.booking_id}>
+                                                                Stripe receipt
                                                             </button>
                                                             <Link to={`/pay/${payment.booking_id}`} className="dashboardTxLink">Local receipt</Link>
                                                         </>

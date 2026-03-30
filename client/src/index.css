@@ -2674,3 +2674,53 @@ label > span:first-child {
         scroll-behavior: auto !important;
     }
 }
+
+.appPageState {
+    min-height: min(48vh, 24rem);
+    display: grid;
+    place-items: center;
+    gap: 0.8rem;
+    text-align: center;
+    padding: 2rem 1rem;
+}
+
+.appPageState--card {
+    min-height: 13rem;
+    background: #fff;
+    border: 1px solid rgba(196, 211, 231, 0.6);
+    border-radius: 22px;
+    box-shadow: 0 18px 42px rgba(24, 43, 75, 0.08);
+}
+
+.appPageStateMark {
+    width: 4.25rem;
+    height: 4.25rem;
+    border-radius: 1.4rem;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(180deg, #eef6ff 0%, #f8fbff 100%);
+    box-shadow: 0 16px 34px rgba(34, 77, 139, 0.12);
+}
+
+.appPageStateMark img {
+    width: 2.1rem;
+    height: 2.1rem;
+    object-fit: contain;
+}
+
+.appPageStateTitle {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #163961;
+}
+
+.appPageStateCopy {
+    max-width: 32rem;
+    color: #5d718b;
+    line-height: 1.55;
+}
+
+.appPageStateActions {
+    display: flex;
+    justify-content: center;
+}

@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import { Link, Navigate, useNavigate } from "react-router-dom";
+import AppPageState from "../components/AppPageState";
 import { AppButton, AppField, AppInput } from "../components/ui/AppForm";
 import { apiGet, apiPatch, readErrorMessage } from "../lib/api";
 import { useAuth, useStripeConnect } from "../lib/auth";
@@ -244,7 +245,14 @@ export default function SettingsPage() {
                 <div className="heroSub muted">Update your profile and preferences.</div>
             </div>
 
-            {(payoutErr ?? loadErr) && <div className="card formSection" style={{ color: "crimson" }}>{payoutErr ?? loadErr}</div>}
+            {loadErr && (
+                <AppPageState
+                    card
+                    title="Settings are still parking."
+                    copy="Your account details did not load properly. Head back home and try again in a moment."
+                />
+            )}
+            {payoutErr && <div className="card formSection" style={{ color: "crimson" }}>{payoutErr}</div>}
             {payoutMsg && <div className="card formSection settingsSavedNotice">{payoutMsg}</div>}
 
             {!settingsQuery.isLoading && (

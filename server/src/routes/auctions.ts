@@ -194,6 +194,9 @@ router.get("/bids/:bidId", requireAuth, async (req: AuthRequest, res) => {
                     ps.title AS spot_title,
                     ps.address_text AS spot_address,
                     ps.price_unit AS price_unit,
+                    ps.owner_contact_email,
+                    ps.owner_contact_phone,
+                    ps.owner_contact_info,
                     ps.owner_user_id
              FROM auction_bids b
                       JOIN parking_spots ps ON ps.id = b.parking_spot_id
@@ -256,6 +259,9 @@ router.get("/bids/:bidId", requireAuth, async (req: AuthRequest, res) => {
                 price_unit: row.price_unit ?? "hour",
                 booking_id: bookingId,
                 payment_status: paymentStatus,
+                owner_contact_email: row.status === "accepted" ? row.owner_contact_email ?? null : null,
+                owner_contact_phone: row.status === "accepted" ? row.owner_contact_phone ?? null : null,
+                owner_contact_info: row.status === "accepted" ? row.owner_contact_info ?? null : null,
             },
         });
     } catch (e) {

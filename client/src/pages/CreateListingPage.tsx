@@ -1068,10 +1068,7 @@ export default function CreateListingPage() {
     return (
         <div className="container createWizardPage">
             {isEdit && editSnapshotQuery.isPending ? (
-                <div className="card formSection createFlowLocked">
-                    <div className="h3">Loading listing details...</div>
-                    <div className="muted">Pulling your saved information and availability settings.</div>
-                </div>
+                null
             ) : (
                 <form className="wizardFlow" onSubmit={(event) => event.preventDefault()}>
                     {activeStep === 1 && (

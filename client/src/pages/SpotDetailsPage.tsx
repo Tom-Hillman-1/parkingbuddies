@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import AppPageState from "../components/AppPageState";
 import SpotsMap from "../components/SpotsMap";
 import { AppRadioCards } from "../components/ui/AppChoiceControls";
 import { apiGet, apiPost, readErrorMessage } from "../lib/api";
@@ -433,9 +434,23 @@ export default function SpotDetailsPage() {
         }
     }
 
-    if (spotQuery.isPending) return <div style={{ padding: 24 }}>Loading listing...</div>;
-    if (spotQuery.isError) return <div style={{ padding: 24, color: "crimson" }}>{readErrorMessage(spotQuery.error, "Failed to load listing.")}</div>;
-    if (!spot) return <div style={{ padding: 24 }}>Listing not found.</div>;
+    if (spotQuery.isPending) return null;
+    if (spotQuery.isError) {
+        return (
+            <AppPageState
+                title="This listing took a wrong turn."
+                copy="It did not load properly just now. Head back home and try again in a moment."
+            />
+        );
+    }
+    if (!spot) {
+        return (
+            <AppPageState
+                title="This parking spot slipped off the map."
+                copy="It may have been removed or is no longer available to book."
+            />
+        );
+    }
 
     const modeLabel = capitalizeLabel(spot.mode);
     const priceLabel =

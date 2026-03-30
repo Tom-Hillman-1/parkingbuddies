@@ -22,14 +22,12 @@ const BidConfirmPage = lazy(() => import("./pages/BidConfirmPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 
 const queryClient = new QueryClient();
-const routeFallback = <div style={{ padding: 24 }}>Loading page...</div>;
-
 ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
         <QueryClientProvider client={queryClient}>
             <AuthProvider>
                 <BrowserRouter>
-                    <Suspense fallback={routeFallback}>
+                    <Suspense fallback={null}>
                         <Routes>
                             <Route element={<App />}>
                                 <Route path="/" element={<HomePage />} />

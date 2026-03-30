@@ -13,6 +13,7 @@ import {
 } from "@radix-ui/react-icons";
 import Lottie from "lottie-react";
 import { Link } from "react-router-dom";
+import AppPageState from "../components/AppPageState";
 import SpotsMap from "../components/SpotsMap";
 import { AppDisclosure } from "../components/ui/AppDisclosure";
 import { AppMultiToggleGroup, AppRadioCards } from "../components/ui/AppChoiceControls";
@@ -667,8 +668,14 @@ export default function HomePage() {
                     </form>
 
                     <div ref={spotsRef} className="result-grid" role="list" aria-label="Search results">
-                        {loading && <div className="card">Loading parking spots...</div>}
-                        {error && !loading && <div className="card">{error}</div>}
+                        {error && !loading && (
+                            <AppPageState
+                                card
+                                title="The map took a scenic route."
+                                copy="Those spots did not load properly. Head back home and try again in a moment."
+                                actionLabel={null}
+                            />
+                        )}
                         {!loading && !error && !visible.length && (
                             <div className="card">
                                 <h3 className="h3">No results</h3>

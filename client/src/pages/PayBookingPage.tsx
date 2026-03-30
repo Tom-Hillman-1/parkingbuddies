@@ -6,12 +6,14 @@ import { loadStripe } from "@stripe/stripe-js";
 import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
 import { apiGet, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import AppPageState from "../components/AppPageState";
 import { ReceiptCard, ReceiptDivider, ReceiptRow } from "../components/ReceiptCard";
 import loadingAnimation from "../assets/loading.json";
 import { formatDateRangeLocal, formatDateTimeLocal, toFiniteNumber } from "./pagesShared";
 
 type Booking = {
     id: string;
+    parking_spot_id?: string | null;
     status: "pending" | "confirmed" | "cancelled" | string;
     pay_method: "money" | "points" | string;
     total_price_gbp: number | string | null;
@@ -40,6 +42,10 @@ const POUND = String.fromCharCode(163);
 
 function sleep(ms: number) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function renderMutedReceiptCopy(text: string) {
+    return <span className="tiny muted">{text}</span>;
 }
 
 async function fetchBookingReceipt(bookingId: string, token: string) {
@@ -219,12 +225,21 @@ export default function PayBookingPage() {
     const bookingAddress = booking?.spot_address ?? "Address on file";
     const bookingWindow = booking ? formatDateRangeLocal(booking.start_time, booking.end_time) : "Time on file";
     const bookedAt = formatDateTimeLocal(booking?.created_at);
+    const listingPath = booking?.parking_spot_id ? `/spots/${booking.parking_spot_id}` : "/";
     const amountReceived = toFiniteNumber(receipt?.amount_received_gbp);
     const ownerContactEmail = String(booking?.owner_contact_email ?? "").trim();
     const ownerContactPhone = String(booking?.owner_contact_phone ?? "").trim();
     const ownerContactInfo = String(booking?.owner_contact_info ?? "").trim();
-    const hasOwnerContact = Boolean(ownerContactEmail || ownerContactPhone || ownerContactInfo);
     const contactLockedByPayment = booking?.pay_method === "money" && requiresPayment;
+    const ownerContactPendingCopy = "Details will be shown after payment is complete.";
+
+    function getOwnerContactValue(value: string) {
+        if (contactLockedByPayment) {
+            return renderMutedReceiptCopy(ownerContactPendingCopy);
+        }
+        if (value) return value;
+        return renderMutedReceiptCopy("Not provided.");
+    }
 
     const stripeSummary = hasStripeReceipt
         ? [
@@ -256,8 +271,14 @@ export default function PayBookingPage() {
                 <div className="heroSub muted">{pageSubtitle}</div>
             </div>
 
-            {loading && <div className="card formSection">Loading payment details...</div>}
-            {(err ?? loadErr) && <div className="card formSection" style={{ color: "crimson" }}>{err ?? loadErr}</div>}
+            {loadErr && (
+                <AppPageState
+                    card
+                    title="This checkout took a detour."
+                    copy="The booking details did not load properly. Head back home and try again in a moment."
+                />
+            )}
+            {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
 
             {!loading && !loadErr && booking && (
                 <>
@@ -280,17 +301,7 @@ export default function PayBookingPage() {
                         className="receiptCard--confirm payReceiptCard"
                         actions={
                             <>
-                                {!requiresPayment && booking.pay_method === "money" && hasStripeReceipt && (
-                                    <a
-                                        className="btn btn-primary"
-                                        href={receipt?.receipt_url ?? undefined}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                    >
-                                        Open Stripe receipt
-                                    </a>
-                                )}
-                                <Link to="/dashboard?tab=myBookings" className="btn btn-primary">Back to dashboard</Link>
+                                <Link to={listingPath} className="btn btn-primary">Return to listing</Link>
                                 <Link to="/about#contact-bottom" className="btn">Contact support</Link>
                             </>
                         }
@@ -313,6 +324,10 @@ export default function PayBookingPage() {
                                 ))}
                             </>
                         )}
+                        <ReceiptDivider />
+                        <ReceiptRow label="Owner email" value={getOwnerContactValue(ownerContactEmail)} />
+                        <ReceiptRow label="Owner phone" value={getOwnerContactValue(ownerContactPhone)} />
+                        <ReceiptRow label="Arrival notes" value={getOwnerContactValue(ownerContactInfo)} />
                     </ReceiptCard>
 
                     {requiresPayment && (
@@ -324,30 +339,6 @@ export default function PayBookingPage() {
                                 onProcessingChange={setProcessingPayment}
                             />
                         </Elements>
-                    )}
-
-                    {hasOwnerContact && (
-                        <div style={{ marginTop: 14 }}>
-                            <ReceiptCard
-                                kicker="HOST DETAILS"
-                                title="Owner contact"
-                                subtitle="Shared after your booking is placed."
-                                className="receiptCard--confirm"
-                            >
-                                {ownerContactEmail && <ReceiptRow label="Owner email" value={ownerContactEmail} />}
-                                {ownerContactPhone && <ReceiptRow label="Owner phone" value={ownerContactPhone} />}
-                                {ownerContactInfo && <ReceiptRow label="Arrival notes" value={ownerContactInfo} />}
-                            </ReceiptCard>
-                        </div>
-                    )}
-
-                    {contactLockedByPayment && (
-                        <div className="card formSection" style={{ marginTop: 14 }}>
-                            <div className="h3">Owner contact unlocks after payment</div>
-                            <div className="muted" style={{ marginTop: 6 }}>
-                                Private host details are shown once payment is fully completed.
-                            </div>
-                        </div>
                     )}
 
                 </>

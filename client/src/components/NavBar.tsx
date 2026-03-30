@@ -46,9 +46,7 @@ export default function NavBar() {
                     <NavLink to="/" className={linkClassName} onClick={closeMenu}>Home</NavLink>
                     <NavLink to="/about" className={linkClassName} onClick={closeMenu}>About</NavLink>
 
-                    {isLoading ? (
-                        <span className="badge">Loading...</span>
-                    ) : isSignedIn ? (
+                    {isLoading ? null : isSignedIn ? (
                         <>
                             <NavLink to="/dashboard" className={linkClassName} onClick={closeMenu}>Dashboard</NavLink>
                             <NavLink to="/create-listing" className={linkClassName} onClick={closeMenu}>Create listing</NavLink>
