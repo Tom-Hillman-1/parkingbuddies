@@ -1309,7 +1309,7 @@ label > span:first-child {
 }
 
 .homeDatePickerShell {
-    width: fit-content;
+    width: min(100%, 31rem);
     border: 1px solid #dde7f3;
     border-radius: 22px;
     background: linear-gradient(180deg, #fbfdff 0%, #f2f7ff 100%);
@@ -2540,8 +2540,36 @@ label > span:first-child {
         max-width: 18ch;
     }
 
-    .spot-head {
+    .homeDateDialog {
+        width: min(100%, 34rem);
+    }
+
+    .homeDateDialogBody {
+        justify-content: stretch;
+    }
+
+    .homeDatePickerShell {
+        padding: 0.9rem;
+    }
+
+    .homeDateDialogFooter {
         flex-direction: column;
+        align-items: stretch;
+    }
+
+    .homeDateDialogFooter > .rowInline:last-child {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        width: 100%;
+    }
+
+    .homeDateDialogFooter > .rowInline:last-child .btn,
+    .homeDateDialogSummary {
+        width: 100%;
+    }
+
+    .spot-head {
+        flex-direction: row;
         align-items: flex-start;
     }
 
@@ -2553,6 +2581,7 @@ label > span:first-child {
     .spot-price,
     .spot-price--stacked {
         max-width: 100%;
+        margin-left: auto;
     }
 
     .spot-divider {

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppCalendar } from "../components/ui/AppCalendar";
 import { AppDialog } from "../components/ui/AppDialog";
 import { AppButton } from "../components/ui/AppForm";
@@ -26,6 +26,12 @@ export function HomeDatePickerDialog({
         now.setHours(0, 0, 0, 0);
         return now;
     }, []);
+    const [visibleMonth, setVisibleMonth] = useState(() => selected ?? today);
+
+    useEffect(() => {
+        if (!open) return;
+        setVisibleMonth(selected ?? today);
+    }, [open, selected, today]);
 
     return (
         <AppDialog
@@ -43,7 +49,8 @@ export function HomeDatePickerDialog({
                         selected={selected}
                         onSelect={(day) => onSelectDate(day ? toLocalDateInput(day) : "")}
                         disabled={{ before: today }}
-                        month={selected ?? today}
+                        month={visibleMonth}
+                        onMonthChange={setVisibleMonth}
                         fixedWeeks={false}
                         showOutsideDays={false}
                         className="appCalendar--home"

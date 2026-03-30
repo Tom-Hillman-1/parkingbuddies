@@ -175,10 +175,15 @@
     padding: 0.72rem 0.8rem;
 }
 
+.slotDialogFooter {
+    justify-content: flex-end;
+}
+
 .spotInfoValue {
     color: #111827;
     font-weight: 700;
     margin-top: 0.22rem;
+    overflow-wrap: anywhere;
 }
 
 .spotAlert {
@@ -273,6 +278,16 @@
 @media (max-width: 720px) {
     .slotRangeGrid {
         grid-template-columns: 1fr;
+    }
+
+    .slotDialogFooter {
+        flex-direction: column-reverse;
+        align-items: stretch;
+    }
+
+    .slotDialogFooter .btn {
+        width: 100%;
+        justify-content: center;
     }
 }
 

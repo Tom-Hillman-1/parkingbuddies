@@ -184,7 +184,7 @@ export function SlotDialog({
                 <div className="slotDialogPreview">That range sits outside this listing&apos;s availability window.</div>
             )}
 
-            <div className="rowInline" style={{ justifyContent: "flex-end" }}>
+            <div className="rowInline slotDialogFooter">
                 <AppButton type="button" onClick={onClose}>
                     Cancel
                 </AppButton>

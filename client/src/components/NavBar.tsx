@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { EMPTY_NOTIFICATION_SUMMARY, useNotificationSummary } from "../lib/notifications";
+import { EMPTY_NOTIFICATION_SUMMARY, useNotificationSummary, useSeenNotificationSummary } from "../lib/notifications";
 import logoMark from "../assets/logo_logo_blue.png";
 
 const linkClassName = ({ isActive }: { isActive: boolean }) => `nav-link${isActive ? " active" : ""}`;
@@ -12,7 +12,7 @@ export default function NavBar() {
     const [open, setOpen] = useState(false);
     const isSignedIn = Boolean(user || token);
     const notificationQuery = useNotificationSummary(token);
-    const notificationSummary = notificationQuery.data ?? EMPTY_NOTIFICATION_SUMMARY;
+    const notificationSummary = useSeenNotificationSummary(notificationQuery.data ?? EMPTY_NOTIFICATION_SUMMARY);
     const accountName = user?.name ?? "Account";
     const closeMenu = () => setOpen(false);
     const handleLogout = () => {

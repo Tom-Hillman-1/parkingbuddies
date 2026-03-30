@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { ConnectStatus } from "./auth";
 import { apiGet } from "./api";
@@ -36,6 +37,11 @@ export type NotificationSummary = {
     items: NotificationItem[];
 };
 
+type SeenNotificationCounts = Record<string, number>;
+
+const NOTIFICATION_SEEN_STORAGE_KEY = "parkingbuddies.notification-seen";
+const NOTIFICATION_SEEN_EVENT = "parkingbuddies:notification-seen";
+
 export const EMPTY_NOTIFICATION_SUMMARY: NotificationSummary = {
     total: 0,
     bySection: {
@@ -45,6 +51,105 @@ export const EMPTY_NOTIFICATION_SUMMARY: NotificationSummary = {
     },
     items: [],
 };
+
+function readSeenNotificationCounts(): SeenNotificationCounts {
+    if (typeof window === "undefined") return {};
+
+    try {
+        const raw = window.localStorage.getItem(NOTIFICATION_SEEN_STORAGE_KEY);
+        if (!raw) return {};
+
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") return {};
+
+        return Object.fromEntries(
+            Object.entries(parsed)
+                .filter(([, value]) => Number.isFinite(value))
+                .map(([key, value]) => [key, Math.max(0, Number(value))])
+        );
+    } catch {
+        return {};
+    }
+}
+
+function writeSeenNotificationCounts(next: SeenNotificationCounts) {
+    if (typeof window === "undefined") return;
+
+    try {
+        window.localStorage.setItem(NOTIFICATION_SEEN_STORAGE_KEY, JSON.stringify(next));
+        window.dispatchEvent(new Event(NOTIFICATION_SEEN_EVENT));
+    } catch {
+        // Ignore storage failures. Notifications still work; they just won't persist.
+    }
+}
+
+function applySeenNotificationCounts(summary: NotificationSummary, seenCounts: SeenNotificationCounts): NotificationSummary {
+    if (!summary.items.length) return summary;
+
+    const items = summary.items
+        .map((item) => {
+            const seenCount = Math.max(0, seenCounts[item.id] ?? 0);
+            const count = Math.max(0, item.count - seenCount);
+            return count > 0 ? { ...item, count } : null;
+        })
+        .filter((item): item is NotificationItem => Boolean(item));
+
+    const bySection: Record<NotificationSection, number> = {
+        manageBookings: 0,
+        manageListings: 0,
+        transactions: 0,
+    };
+
+    for (const item of items) {
+        bySection[item.section] += item.count;
+    }
+
+    return {
+        total: bySection.manageBookings + bySection.manageListings + bySection.transactions,
+        bySection,
+        items,
+    };
+}
+
+export function markNotificationsSeen(items: NotificationItem[]) {
+    if (!items.length) return;
+
+    const seenCounts = readSeenNotificationCounts();
+    let changed = false;
+
+    for (const item of items) {
+        const seenCount = Math.max(0, seenCounts[item.id] ?? 0);
+        if (item.count > seenCount) {
+            seenCounts[item.id] = item.count;
+            changed = true;
+        }
+    }
+
+    if (changed) writeSeenNotificationCounts(seenCounts);
+}
+
+export function useSeenNotificationSummary(summary: NotificationSummary) {
+    const [seenVersion, setSeenVersion] = useState(0);
+
+    useEffect(() => {
+        if (typeof window === "undefined") return undefined;
+
+        const refreshSeenCounts = () => setSeenVersion((current) => current + 1);
+
+        window.addEventListener(NOTIFICATION_SEEN_EVENT, refreshSeenCounts);
+        window.addEventListener("storage", refreshSeenCounts);
+
+        return () => {
+            window.removeEventListener(NOTIFICATION_SEEN_EVENT, refreshSeenCounts);
+            window.removeEventListener("storage", refreshSeenCounts);
+        };
+    }, []);
+
+    return useMemo(
+        () => applySeenNotificationCounts(summary, readSeenNotificationCounts()),
+        [summary, seenVersion]
+    );
+}
 
 function isPendingBid(bid: AuctionBid) {
     return String(bid.status ?? "").toLowerCase() === "pending";

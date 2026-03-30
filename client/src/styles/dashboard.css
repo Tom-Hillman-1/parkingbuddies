@@ -154,6 +154,12 @@
     margin-bottom: 0.8rem;
 }
 
+.dashboardModern .dashboardEmptyState {
+    color: #8b95a5;
+    font-size: 0.74rem;
+    line-height: 1.4;
+}
+
 .dashboardModern .dashboardTab {
     border: 0;
     min-height: 36px;
@@ -906,4 +912,58 @@
         max-width: 320px;
     }
 
+}
+
+@media (max-width: 720px) {
+    .dashboardModern .dashboardTabList {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        width: 100%;
+        gap: 0.32rem;
+        border-radius: 22px;
+        padding: 0.32rem;
+    }
+
+    .dashboardModern .dashboardTab {
+        width: 100%;
+        min-width: 0;
+        min-height: 42px;
+        padding: 0.45rem 0.55rem;
+        text-align: center;
+    }
+
+    .dashboardModern .dashboardTabInner {
+        justify-content: center;
+    }
+
+    .dashboardModern .dashboardNotifyBubble--tab {
+        top: -7px;
+        right: -7px;
+    }
+
+    .dashboardModern .dashboardStripeStatusRow {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        align-items: start;
+    }
+
+    .dashboardModern .dashboardStripeStatusRow .badge {
+        justify-self: flex-start;
+    }
+
+    .dashboardModern .dashboardStripeActions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.6rem;
+    }
+
+    .dashboardModern .dashboardStripeActions .btn {
+        width: 100%;
+        min-width: 0;
+        justify-content: center;
+        white-space: normal;
+        text-align: center;
+        line-height: 1.25;
+        padding-inline: 0.8rem;
+    }
 }
