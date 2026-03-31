@@ -27,7 +27,7 @@ import {
     type HomeSearchState,
 } from "./homeSearchUtils";
 import { HomeDatePickerDialog, HomeTimePickerDialog } from "./homeSearchSupport";
-import { listingFeatureLabel } from "./createListingSupport";
+import { listingFeatureLabel, listingFeatureTone } from "./createListingSupport";
 import {
     isSlotAllowed as isSpotSlotAllowed,
     nextWholeQuarterHour,
@@ -728,7 +728,7 @@ export default function HomePage() {
                                             {features.length > 0 && (
                                                 <div className="spot-features">
                                                     {features.map((feature) => (
-                                                        <span key={feature} className="spot-feature">
+                                                        <span key={feature} className={`spot-feature spot-feature--${listingFeatureTone(feature)}`}>
                                                             {listingFeatureLabel(feature)}
                                                         </span>
                                                     ))}

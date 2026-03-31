@@ -70,9 +70,11 @@
 }
 
 .spotOwnerTools {
-    margin-top: 0.52rem;
+    margin-top: 0.62rem;
+    padding: 0.08rem 0.18rem 0;
     display: grid;
     gap: 0.5rem;
+    justify-items: start;
 }
 
 .spotOwnerFlag {
@@ -87,6 +89,12 @@
 
 .spotOwnerActions {
     gap: 0.54rem;
+    justify-content: flex-start;
+}
+
+.spotOwnerActions .btn {
+    width: fit-content;
+    min-width: 0;
 }
 
 .spotSimpleAction {
@@ -101,6 +109,10 @@
     align-items: center;
     justify-content: flex-start;
     gap: 0.65rem;
+}
+
+.spotEstimateBadgeRow {
+    margin-top: 0.68rem;
 }
 
 .spotEstimateBadge {

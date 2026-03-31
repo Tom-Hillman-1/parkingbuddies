@@ -614,9 +614,6 @@ export default function SpotDetailsPage() {
                     {spot.mode === "auction" ? (
                         <div className="card spotSimpleAction">
                             <div className="h3">Place a bid</div>
-                            <p className="tiny muted" style={{ margin: "4px 0 12px" }}>
-                                Bids are treated as offers. Owners review and approve them manually.
-                            </p>
 
                             {!token && (
                                 <div className="spotAlert spotAlert--danger">
@@ -642,10 +639,11 @@ export default function SpotDetailsPage() {
 
                             {bidPayMethod === "money" ? (
                                 <label style={{ display: "grid", gap: 6 }}>
-                                    <div className="tiny muted">
-                                        Your bid per {listingUnit} (GBP)
-                                        {auctionMoneyStartLabel && <span> · Minimum {formatGbp(auctionMinPerUnit)} / {listingUnit}</span>}
-                                    </div>
+                                    {auctionMoneyStartLabel ? (
+                                        <div className="tiny muted" style={{ paddingLeft: "5px" }}>
+                                            Minimum {formatGbp(auctionMinPerUnit)} / {listingUnit}
+                                        </div>
+                                    ) : null}
                                     <input
                                         className="input"
                                         type="number"
@@ -653,12 +651,9 @@ export default function SpotDetailsPage() {
                                         step={0.25}
                                         value={bidMoneyPerHour}
                                         onChange={(e) => setBidMoneyPerHour(e.target.value)}
-                                        placeholder="e.g. 8"
+                                        placeholder={`Your bid per ${listingUnit} (GBP)`}
                                         disabled={auctionClosed || bidBusy || listingInactive}
                                     />
-                                    <div className="tiny muted">
-                                        Estimated total: {bidTotalMoney > 0 ? formatGbp(bidTotalMoney) : "-"}
-                                    </div>
                                     {bidMoneyBelowMinimum && (
                                         <div className="tiny" style={{ color: "#a23636", marginTop: 4 }}>
                                             Card payments in GBP must be at least {formatGbp(STRIPE_MIN_GBP_PAYMENT)} for this slot.
@@ -681,9 +676,6 @@ export default function SpotDetailsPage() {
                                         placeholder={`Points per ${listingUnit}`}
                                         disabled={auctionClosed || bidBusy || listingInactive}
                                     />
-                                    <div className="tiny muted">
-                                        Estimated total: {bidTotalPoints > 0 ? `${bidTotalPoints} pts` : "-"}
-                                    </div>
                                     {bidPointsInsufficient && (
                                         <div className="tiny" style={{ color: "#a23636", marginTop: 4 }}>
                                             Not enough points ({userPoints} available).
@@ -691,6 +683,13 @@ export default function SpotDetailsPage() {
                                     )}
                                 </label>
                             )}
+
+                            <div className="spotSimpleInlineMeta spotEstimateBadgeRow">
+                                <span className="badge spotEstimateBadge">
+                                    <span className="spotEstimateBadgeLabel">Total price:</span>
+                                    <strong>{bidPayMethod === "points" ? (bidTotalPoints > 0 ? `${bidTotalPoints} pts` : "-") : (bidTotalMoney > 0 ? formatGbp(bidTotalMoney) : "-")}</strong>
+                                </span>
+                            </div>
 
                             <div className="rowInline" style={{ marginTop: 4 }}>
                                 <button
@@ -716,7 +715,22 @@ export default function SpotDetailsPage() {
                             {isOwner && <div className="spotAlert">You cannot book your own listing.</div>}
                             {listingInactive && <div className="spotAlert">This listing is no longer active for new bookings.</div>}
 
-                            <div className="spotSimpleInlineMeta">
+                            <AppRadioCards
+                                ariaLabel="Booking payment method"
+                                className="payToggle"
+                                itemClassName="payToggleBtn"
+                                activeClassName="active"
+                                orientation="horizontal"
+                                value={payMethod}
+                                onChange={setPayMethod}
+                                isDisabled={busy || listingInactive}
+                                options={[
+                                    ...(canUseMoneyBooking ? [{ id: "money" as const, content: "Card" }] : []),
+                                    ...(canUsePoints ? [{ id: "points" as const, content: "Points" }] : []),
+                                ]}
+                            />
+
+                            <div className="spotSimpleInlineMeta spotEstimateBadgeRow">
                                 <span className="badge spotEstimateBadge">
                                     <span className="spotEstimateBadgeLabel">Total price:</span>
                                     <strong>{estimatedBookingTotalLabel}</strong>
@@ -732,21 +746,6 @@ export default function SpotDetailsPage() {
                                     Not enough points ({userPoints} available).
                                 </div>
                             )}
-
-                            <AppRadioCards
-                                ariaLabel="Booking payment method"
-                                className="payToggle"
-                                itemClassName="payToggleBtn"
-                                activeClassName="active"
-                                orientation="horizontal"
-                                value={payMethod}
-                                onChange={setPayMethod}
-                                isDisabled={busy || listingInactive}
-                                options={[
-                                    ...(canUseMoneyBooking ? [{ id: "money" as const, content: "Card" }] : []),
-                                    ...(canUsePoints ? [{ id: "points" as const, content: "Points" }] : []),
-                                ]}
-                            />
 
                             <div className="rowInline" style={{ marginTop: 4 }}>
                                 <button
