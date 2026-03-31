@@ -58,10 +58,12 @@ export default function SignupPage() {
     const password = useWatch({ control: form.control, name: "password", defaultValue: "" });
     const strength = useMemo(() => getPasswordStrength(password), [password]);
     const hasTriedSubmit = form.formState.submitCount > 0;
+
     const showFieldError = (fieldName: keyof SignupFormValues) => {
         const fieldState = form.getFieldState(fieldName, form.formState);
         return hasTriedSubmit || fieldState.isTouched;
     };
+
     const requirementChecks = [
         { met: strength.checks.minLength, label: PASSWORD_REQUIREMENT_LABELS.minLength },
         { met: strength.checks.hasUppercase, label: PASSWORD_REQUIREMENT_LABELS.hasUppercase },
@@ -113,28 +115,6 @@ export default function SignupPage() {
 
                         <AppField
                             label="Password"
-                            description={
-                                <>
-                                    <div className="tiny muted" style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
-                                        {requirementChecks.map((item) => (
-                                            <span
-                                                key={item.label}
-                                                style={{
-                                                    color: item.met ? "rgba(59,186,156,0.95)" : "rgba(122,138,164,0.95)",
-                                                }}
-                                            >
-                                                {item.met ? "✓" : "○"} {item.label}
-                                            </span>
-                                        ))}
-                                    </div>
-                                    <div className="strengthBar" aria-hidden>
-                                        <div className="strengthFill" style={{ width: strength.width, background: strength.color }} />
-                                    </div>
-                                    <div className="tiny muted" style={{ marginTop: 6 }}>
-                                        Strength: {strength.label}
-                                    </div>
-                                </>
-                            }
                             error={showFieldError("password") ? form.formState.errors.password?.message : undefined}
                         >
                             <div className="authInputRow">
@@ -162,10 +142,38 @@ export default function SignupPage() {
                             />
                         </AppField>
 
+                        <div style={{ marginTop: 0, marginBottom: 0 }}>
+                            <div
+                                className="tiny muted"
+                                style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: 4 }}
+                            >
+                                {requirementChecks.map((item) => (
+                                    <span
+                                        key={item.label}
+                                        style={{
+                                            color: item.met ? "rgba(59,186,156,0.95)" : "rgba(122,138,164,0.95)",
+                                        }}
+                                    >
+                                        {item.met ? "✓" : "○"} {item.label}
+                                    </span>
+                                ))}
+                            </div>
+
+                            <div className="strengthBar" aria-hidden>
+                                <div
+                                    className="strengthFill"
+                                    style={{ width: strength.width, background: strength.color }}
+                                />
+                            </div>
+
+                            
+                        </div>
+
                         <label className="chip">
                             <input type="checkbox" {...form.register("agree")} />
                             I agree to the ParkingBuddies terms
                         </label>
+
                         {showFieldError("agree") && form.formState.errors.agree && (
                             <div className="spotAlert">{form.formState.errors.agree.message}</div>
                         )}
