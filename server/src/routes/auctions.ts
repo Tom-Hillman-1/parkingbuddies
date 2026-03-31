@@ -29,6 +29,12 @@ const ownerBidActionRateLimit = simpleRateLimit({
     message: "Too many bid actions. Please wait a moment and try again.",
     keyPrefix: "auctions_owner_action",
 });
+const bidderBidActionRateLimit = simpleRateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    message: "Too many bid actions. Please wait a moment and try again.",
+    keyPrefix: "auctions_bidder_action",
+});
 
 const spotIdParamsSchema = z.object({
     spotId: z.string().uuid("spotId must be a valid listing ID"),
@@ -259,6 +265,7 @@ router.get("/bids/:bidId", requireAuth, async (req: AuthRequest, res) => {
                 price_unit: row.price_unit ?? "hour",
                 booking_id: bookingId,
                 payment_status: paymentStatus,
+                can_cancel: row.bidder_user_id === req.userId && (row.status ?? "pending") === "pending",
                 owner_contact_email: row.status === "accepted" ? row.owner_contact_email ?? null : null,
                 owner_contact_phone: row.status === "accepted" ? row.owner_contact_phone ?? null : null,
                 owner_contact_info: row.status === "accepted" ? row.owner_contact_info ?? null : null,
@@ -872,6 +879,70 @@ router.post("/:spotId/reject", requireAuth, ownerBidActionRateLimit, async (req:
         }
     }
     return res.json({ ok: true, rejected_bid_id: bidId });
+});
+
+router.post("/bids/:bidId/cancel", requireAuth, bidderBidActionRateLimit, async (req: AuthRequest, res) => {
+    const parsedParams = parseWithSchema(bidIdParamsSchema, req.params ?? {}, res, "auction_cancel_bid");
+    if (!parsedParams.ok) return;
+    const bidId = parsedParams.data.bidId;
+
+    const client = await pool.connect();
+    let paymentIntentToCancel: string | null = null;
+    let spotId: string | null = null;
+    try {
+        await client.query("BEGIN");
+
+        const bidR = await client.query(
+            `SELECT id, parking_spot_id, bidder_user_id, payment_intent_id, status
+             FROM auction_bids
+             WHERE id = $1`,
+            [bidId]
+        );
+        if (!bidR.rowCount) {
+            await client.query("ROLLBACK");
+            return res.status(404).json({ ok: false, error: "Bid not found" });
+        }
+
+        const bid = bidR.rows[0] as any;
+        if (bid.bidder_user_id !== req.userId) {
+            await client.query("ROLLBACK");
+            return res.status(403).json({ ok: false, error: "Only the bidder can cancel this bid" });
+        }
+        if (String(bid.status ?? "pending") !== "pending") {
+            await client.query("ROLLBACK");
+            return res.status(400).json({ ok: false, error: "Only pending bids can be cancelled" });
+        }
+
+        spotId = String(bid.parking_spot_id ?? "");
+        paymentIntentToCancel = bid.payment_intent_id ?? null;
+
+        await client.query(
+            `UPDATE auction_bids
+             SET status = 'rejected', updated_at = now()
+             WHERE id = $1`,
+            [bidId]
+        );
+
+        await client.query("COMMIT");
+    } catch (e) {
+        await client.query("ROLLBACK");
+        return serverError(res, e, "Unable to cancel bid right now");
+    } finally {
+        client.release();
+    }
+
+    if (paymentIntentToCancel) {
+        const cancelResult = await cancelPaymentIntentIfPossible(paymentIntentToCancel, { spotId: spotId ?? undefined, bidId });
+        if (!cancelResult.canceled && !cancelResult.skipped) {
+            return res.json({
+                ok: true,
+                cancelled_bid_id: bidId,
+                authorization_release_pending: true,
+            });
+        }
+    }
+
+    return res.json({ ok: true, cancelled_bid_id: bidId });
 });
 
 export default router;

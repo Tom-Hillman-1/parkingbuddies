@@ -1655,34 +1655,6 @@ label > span:first-child {
     z-index: 320;
 }
 
-.map-pin {
-    display: block;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    border: 3px solid #fff;
-    background: #2d82ff;
-    box-shadow: 0 6px 14px rgba(20, 60, 133, 0.35);
-    transition: transform 140ms ease, background 140ms ease;
-}
-
-.map-pin::after {
-    content: "";
-    position: absolute;
-    inset: -6px;
-    border-radius: 999px;
-    border: 2px solid rgba(45, 130, 255, 0.24);
-}
-
-.map-pin--hovered {
-    transform: scale(1.12);
-}
-
-.map-pin--selected {
-    background: #125fd5;
-    transform: scale(1.22);
-}
-
 .map-popup .leaflet-popup-content-wrapper {
     border-radius: 18px;
     border: 1px solid rgba(255, 255, 255, 0.74);
@@ -2278,9 +2250,9 @@ label > span:first-child {
 
     .spotMapWrap .leafletShell,
     .spotMapWrap .leafletMap {
-        min-height: 110px;
-        height: 118px;
-        max-height: 118px;
+        min-height: 220px;
+        height: 220px;
+        max-height: 220px;
     }
 
     .settingsGrid {
@@ -2706,7 +2678,7 @@ label > span:first-child {
     .createWizardPage .wizardIntro .wizardTileFooter {
         margin-top: 0.28rem;
         padding-top: 0.22rem;
-        justify-content: space-between;
+        justify-content: flex-start;
         align-items: center;
         gap: 0.44rem;
     }
@@ -2719,7 +2691,7 @@ label > span:first-child {
 
     .createWizardPage .wizardIntro .wizardTileSpacesValue {
         line-height: 1.15;
-        text-align: right;
+        text-align: left;
     }
 
     .wizardActions--intro {

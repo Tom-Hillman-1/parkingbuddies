@@ -959,7 +959,7 @@ export default function CreateListingPage() {
 
                     <div className="wizardContactBlock">
                         <div className="createFieldHint">
-                            These contact details belong to the whole section below and will only be shared with drivers after booking is complete.
+                            The details below will only be shared with drivers after booking is complete.
                         </div>
 
                         <AppField label="Email">
@@ -1264,9 +1264,9 @@ export default function CreateListingPage() {
                                         content: (
                                             <>
                                                 <div className="wizardTileHead">
+                                                    <span className="wizardTileTitle">{choice.title}</span>
                                                     <Tooltip label={`${choice.title} mode help`} text={choice.help} />
                                                 </div>
-                                                <span className="wizardTileTitle">{choice.title}</span>
                                                 <span className="wizardTileCopy">{choice.copy}</span>
                                                 {mode === choice.mode && (
                                                     <div className="wizardTileFooter">

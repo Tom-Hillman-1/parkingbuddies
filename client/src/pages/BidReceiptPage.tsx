@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import AppPageState from "../components/AppPageState";
-import { apiGet } from "../lib/api";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { apiGet, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ReceiptCard, ReceiptDivider, ReceiptRow } from "../components/ReceiptCard";
 import {
@@ -23,6 +22,7 @@ type BidReceipt = {
     status: string;
     payment_status?: string | null;
     price_unit?: PriceUnit;
+    can_cancel?: boolean;
     created_at: string;
     start_time?: string;
     end_time?: string;
@@ -39,10 +39,12 @@ function renderMutedReceiptCopy(text: string) {
 
 export default function BidReceiptPage() {
     const { bidId } = useParams();
+    const navigate = useNavigate();
     const { token } = useAuth();
     const [bid, setBid] = useState<BidReceipt | null>(null);
     const [loading, setLoading] = useState(true);
     const [err, setErr] = useState<string | null>(null);
+    const [cancelBusy, setCancelBusy] = useState(false);
 
     const id = bidId ?? "";
 
@@ -129,6 +131,24 @@ export default function BidReceiptPage() {
         ? "Your accepted bid has been turned into a booking."
         : `Bid confirmation #${id}`;
 
+    async function cancelBid() {
+        if (!token || !bid?.can_cancel || cancelBusy) return;
+        setCancelBusy(true);
+        setErr(null);
+        try {
+            await apiPost<{ cancelled_bid_id: string; authorization_release_pending?: boolean }>(
+                `/auctions/bids/${bid.id}/cancel`,
+                {},
+                token
+            );
+            navigate("/dashboard?tab=myAuctionBids", { replace: true });
+        } catch (error: unknown) {
+            setErr(readErrorMessage(error, "Unable to cancel bid right now."));
+        } finally {
+            setCancelBusy(false);
+        }
+    }
+
     return (
         <div className="container">
             <div className="pageHeader">
@@ -137,13 +157,7 @@ export default function BidReceiptPage() {
                 <div className="heroSub muted">{pageSubtitle}</div>
             </div>
 
-            {err && (
-                <AppPageState
-                    card
-                    title="This receipt is still circling the block."
-                    copy="The bid details did not load properly. Head back home and try again in a moment."
-                />
-            )}
+            {err && <div className="card formSection">{err}</div>}
 
             {!loading && !err && bid && (
                 <>
@@ -186,6 +200,11 @@ export default function BidReceiptPage() {
                         </div>
                         <div className="rowInline" style={{ marginTop: 10 }}>
                             <Link to="/dashboard?tab=myAuctionBids" className="btn btn-primary">Go to dashboard</Link>
+                            {bid.can_cancel && (
+                                <button type="button" className="btn" onClick={() => void cancelBid()} disabled={cancelBusy}>
+                                    {cancelBusy ? "Cancelling..." : "Cancel bid"}
+                                </button>
+                            )}
                             {bid.booking_id && <Link to={`/pay/${bid.booking_id}`} className="btn">Booking confirmation</Link>}
                             {bid.parking_spot_id && <Link to={`/spots/${bid.parking_spot_id}`} className="btn">View listing</Link>}
                         </div>

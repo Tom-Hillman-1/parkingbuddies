@@ -278,12 +278,19 @@
 @media (max-width: 720px) {
     .spotMapWrap .leafletShell,
     .spotMapWrap .leafletMap {
-        min-height: 110px;
-        height: 118px;
+        min-height: 220px;
+        height: 220px;
+        max-height: 220px;
+    }
+
+    .spotHeroImg,
+    .spotHeroFallback {
+        min-height: 220px;
+        height: 220px;
+        max-height: 220px;
     }
 
     .spotHeroFallback {
-        min-height: 132px;
         font-size: 0.84rem;
         padding: 0.7rem;
         text-align: center;

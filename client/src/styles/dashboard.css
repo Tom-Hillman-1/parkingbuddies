@@ -899,6 +899,14 @@
     width: 100%;
 }
 
+.dashboardModern .dashboardSlotActionGrid .btn,
+.dashboardModern .dashboardSlotActionGridWide .btn {
+    min-height: 40px;
+    padding: 0.45rem 0.7rem;
+    line-height: 1.2;
+    white-space: normal;
+}
+
 @media (max-width: 980px) {
     .dashboardPage.dashboardModern {
         padding: 0.7rem 0.7rem 1rem;

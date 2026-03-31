@@ -1,7 +1,10 @@
 ﻿import { useEffect, useRef } from "react";
 import type { Marker as LeafletMarker } from "leaflet";
 import L from "leaflet";
-import { MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents, ZoomControl } from "react-leaflet";
+import markerIcon2xUrl from "leaflet/dist/images/marker-icon-2x.png";
+import markerIconUrl from "leaflet/dist/images/marker-icon.png";
+import markerShadowUrl from "leaflet/dist/images/marker-shadow.png";
+import { CircleMarker, MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents, ZoomControl } from "react-leaflet";
 import { Link } from "react-router-dom";
 
 export type MapSpot = {
@@ -19,12 +22,17 @@ export type MapSpot = {
 type PinState = "default" | "hovered" | "selected";
 
 function makePin(state: PinState) {
-    return L.divIcon({
-        className: "",
-        html: `<span class="map-pin map-pin--${state}" aria-hidden="true"></span>`,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
-        popupAnchor: [0, -12],
+    const scale = state === "selected" ? 1.12 : state === "hovered" ? 1.06 : 1;
+
+    return new L.Icon({
+        iconRetinaUrl: markerIcon2xUrl,
+        iconUrl: markerIconUrl,
+        shadowUrl: markerShadowUrl,
+        iconSize: [25 * scale, 41 * scale],
+        iconAnchor: [12.5 * scale, 41 * scale],
+        popupAnchor: [0, -34 * scale],
+        shadowSize: [41 * scale, 41 * scale],
+        shadowAnchor: [13 * scale, 41 * scale],
     });
 }
 
@@ -80,6 +88,7 @@ export default function SpotsMap({
     onHover,
     pickerPosition,
     onMapPick,
+    userLocation,
     showPopupDetails = true,
 }: {
     spots: MapSpot[];
@@ -90,6 +99,7 @@ export default function SpotsMap({
     onHover?: (id: string | null) => void;
     pickerPosition?: { lat: number; lng: number } | null;
     onMapPick?: (lat: number, lng: number) => void;
+    userLocation?: { lat: number; lng: number } | null;
     showPopupDetails?: boolean;
 }) {
     const markerRefs = useRef<Record<string, LeafletMarker | null>>({});
@@ -116,7 +126,13 @@ export default function SpotsMap({
 
     return (
         <div className="leafletShell">
-            <MapContainer center={[center.lat, center.lng]} zoom={13} className="leafletMap" zoomControl={false}>
+            <MapContainer
+                center={[center.lat, center.lng]}
+                zoom={13}
+                className="leafletMap"
+                zoomControl={false}
+                scrollWheelZoom={false}
+            >
                 <Recenter center={center} />
                 <MapPickerEvents onMapPick={onMapPick} />
                 <ZoomControl position="topright" />
@@ -131,6 +147,30 @@ export default function SpotsMap({
                         position={[pickerPosition.lat, pickerPosition.lng]}
                         icon={pinIcon.selected}
                     />
+                )}
+
+                {userLocation && (
+                    <>
+                        <CircleMarker
+                            center={[userLocation.lat, userLocation.lng]}
+                            radius={18}
+                            pathOptions={{
+                                stroke: false,
+                                fillColor: "#2d82ff",
+                                fillOpacity: 0.18,
+                            }}
+                        />
+                        <CircleMarker
+                            center={[userLocation.lat, userLocation.lng]}
+                            radius={7}
+                            pathOptions={{
+                                color: "#ffffff",
+                                weight: 3,
+                                fillColor: "#2d82ff",
+                                fillOpacity: 1,
+                            }}
+                        />
+                    </>
                 )}
 
                 {spots.map((spot) => {

@@ -531,6 +531,27 @@ export default function DashboardPage() {
         });
     };
 
+    const cancelBid = async (bidId: string) => {
+        if (!token) return;
+        setBusyId(bidId);
+        setErr(null);
+        setMsg(null);
+        try {
+            const response = await apiPost<{ authorization_release_pending?: boolean }>(`/auctions/bids/${bidId}/cancel`, {}, token);
+            setMsg(
+                response.authorization_release_pending
+                    ? "Bid cancelled. Your bank may take a little while to remove the card authorization."
+                    : "Bid cancelled."
+            );
+            await dashboardQuery.refetch();
+            await queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
+        } catch (error: unknown) {
+            setErr(readErrorMessage(error, "Cancel failed"));
+        } finally {
+            setBusyId(null);
+        }
+    };
+
     const handleRefreshConnectStatus = async () => {
         const result = await refreshConnectStatus();
         if (!result.ok && result.error) setErr(result.error);
@@ -721,7 +742,17 @@ export default function DashboardPage() {
                                                 amount={pendingBidAmountLabel(bid)}
                                                 badges={renderBadgeRow([{ label: capitalizeLabel(bid.status), className: "badge badge--warm" }, { label: "Owner review" }, { label: isPoints ? "Not deducted yet" : "Not charged yet" }])}
                                                 time={slotTime(bid.start_time, bid.end_time)}
-                                                actions={<><Link to={`/bids/${bid.id}`} className="btn btn-primary">View local receipt</Link><Link to={`/spots/${bid.parking_spot_id}`} className="btn">View listing</Link></>}
+                                                actions={
+                                                    <div className="dashboardSlotActionGrid">
+                                                        <Link to={`/bids/${bid.id}`} className="btn btn-primary">View local receipt</Link>
+                                                        <Link to={`/spots/${bid.parking_spot_id}`} className="btn">View listing</Link>
+                                                        <div className="dashboardSlotActionGridWide">
+                                                            <button className="btn" onClick={() => void cancelBid(bid.id)} disabled={busyId === bid.id}>
+                                                                {busyId === bid.id ? "Cancelling..." : "Cancel bid"}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                }
                                             />
                                         );
                                     })}

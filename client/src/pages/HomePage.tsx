@@ -753,6 +753,7 @@ export default function HomePage() {
                         center={mapCenter}
                         selectedId={selectedId}
                         hoveredId={hoveredId}
+                        userLocation={isLocEnabled ? userLoc : null}
                         onSelect={(id) => setSelectedId(id)}
                         onHover={(id) => setHoveredId(id)}
                     />
