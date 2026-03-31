@@ -143,15 +143,15 @@ function BookingCardForm({
     return (
         <div className="card formSection" style={{ marginTop: 14, marginBottom: 14 }}>
             <div className="h3">Secure card payment</div>
-            <div className="spotAlert" style={{ marginTop: 12 }}>
+            <div className="spotAlert">
                 {SECURE_PAYMENT_NOTICE}
             </div>
-            <div style={{ padding: 12, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, marginTop: 12, minHeight: 230 }}>
+            <div style={{border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, marginTop: 12, minHeight: 230 }}>
                 <PaymentElement />
             </div>
-            <div className="rowInline" style={{ marginTop: 12 }}>
-                <button className="btn btn-primary" onClick={confirmPayment} disabled={busy}>
-                    {busy ? "Processing..." : "Pay now"}
+            <div className="rowInline">
+                <button className="btn btn-primary" onClick={confirmPayment} disabled={busy} style={{marginLeft: 6}}>
+                    {busy ? "Processing..." : "Confirm Payment "}
                 </button>
             </div>
         </div>
@@ -350,7 +350,6 @@ export default function PayBookingPage() {
     const bookingAddress = booking?.spot_address ?? "Address on file";
     const bookingWindow = booking ? formatDateRangeLocal(booking.start_time, booking.end_time) : "Time on file";
     const bookedAt = formatDateTimeLocal(booking?.created_at);
-    const listingPath = booking?.parking_spot_id ? `/spots/${booking.parking_spot_id}` : "/";
     const amountReceived = toFiniteNumber(receipt?.amount_received_gbp);
     const ownerContactEmail = String(booking?.owner_contact_email ?? "").trim();
     const ownerContactPhone = String(booking?.owner_contact_phone ?? "").trim();
@@ -478,12 +477,7 @@ export default function PayBookingPage() {
                         </div>
                     )}
 
-                    {(requiresPayment || bookingMoneyBelowMinimum) && (
-                        <div className="receiptActions" style={{ marginTop: 12 }}>
-                            <Link to={listingPath} className="btn">Return to listing</Link>
-                            <Link to="/about#contact-bottom" className="btn">Contact support</Link>
-                        </div>
-                    )}
+
 
                     {!requiresPayment && !bookingMoneyBelowMinimum && (
                         <div className="receiptActions" style={{ marginTop: 12 }}>

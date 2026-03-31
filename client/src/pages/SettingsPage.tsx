@@ -306,7 +306,7 @@ export default function SettingsPage() {
                                                 style={{ width: passwordStrength.width, background: passwordStrength.color }}
                                             />
                                         </div>
-                                        
+
                                     </>
                                 }
                                 error={passwordForm.formState.errors.newPassword?.message}
