@@ -123,15 +123,15 @@ export default function BidReceiptPage() {
         return renderMutedReceiptCopy("Not provided.");
     }
 
-    const pageKicker = acceptedBid ? "BOOKING" : "BID";
-    const pageTitle = acceptedBid ? "Booking confirmed" : "Bid summary";
-    const pageSubtitle = acceptedBid
-        ? "Review the booking details created from your accepted bid."
-        : "Review your bid details while the latest owner decision is still on file.";
     const summaryTitle = acceptedBid ? "Booking summary" : "Bid summary";
     const summarySubtitle = acceptedBid
         ? "Your accepted bid has been turned into a booking."
         : `Bid confirmation #${id}`;
+    const showConfirmationNotice = !!bid && String(bid.status ?? "").toLowerCase() !== "rejected";
+    const confirmationTitle = acceptedBid ? "Booking confirmed" : "Bid submitted";
+    const confirmationCopy = acceptedBid
+        ? "Your accepted bid has been turned into a booking. The full details are below."
+        : "Your bid is in. It is now waiting for the owner's decision.";
 
     async function cancelBid() {
         if (!token || !bid?.can_cancel || cancelBusy) return;
@@ -154,11 +154,12 @@ export default function BidReceiptPage() {
 
     return (
         <div className="container">
-            <div className="pageHeader">
-                <div className="heroKicker">{pageKicker}</div>
-                <div className="heroTitle">{pageTitle}</div>
-                <div className="heroSub muted">{pageSubtitle}</div>
-            </div>
+            {showConfirmationNotice ? (
+                <div className="paymentSuccessNotice">
+                    <div className="h3">{confirmationTitle}</div>
+                    <div className="createFieldHint">{confirmationCopy}</div>
+                </div>
+            ) : null}
 
             {err && <div className="card formSection">{err}</div>}
 

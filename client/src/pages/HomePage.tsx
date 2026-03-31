@@ -248,6 +248,23 @@ export default function HomePage() {
     const spotsRef = useRef<HTMLDivElement | null>(null);
     const mapRef = useRef<HTMLElement | null>(null);
 
+    function scrollToFirstSpot() {
+        if (typeof window === "undefined") return;
+
+        window.requestAnimationFrame(() => {
+            const target =
+                spotsRef.current?.querySelector<HTMLElement>(".spot-card") ??
+                spotsRef.current;
+
+            if (!target) return;
+
+            const navHeight = document.querySelector<HTMLElement>(".nav")?.getBoundingClientRect().height ?? 0;
+            const top = target.getBoundingClientRect().top + window.scrollY - navHeight - 12;
+
+            window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+        });
+    }
+
     useEffect(() => {
         let active = true;
 
@@ -417,7 +434,7 @@ export default function HomePage() {
         setActiveSort(draftSort);
         setActiveModeFilter(draftModeFilter);
         setSearchFeedback(null);
-        spotsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        scrollToFirstSpot();
     }
 
     function requestLocation() {
@@ -440,7 +457,7 @@ export default function HomePage() {
     }
 
     function goToSpots() {
-        spotsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        scrollToFirstSpot();
     }
 
     function focusSpotOnMap(spotId: string, shouldScroll: boolean) {

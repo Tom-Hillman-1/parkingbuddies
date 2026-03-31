@@ -128,7 +128,7 @@ export const listingPayloadSchema = z.object({
     lng: z.coerce.number().min(-180, "lng must be between -180 and 180").max(180, "lng must be between -180 and 180"),
     parking_type: parkingTypeSchema.optional().default("private"),
     capacity_total: z.coerce.number().int().min(1, "capacity_total must be at least 1").optional().default(1),
-    image_url: optionalImageUrlString(4_500_000),
+    image_url: optionalImageUrlString(14_500_000),
     price_unit: priceUnitSchema.optional().default("hour"),
     price_gbp: z.coerce.number().min(0, "price_gbp must be zero or higher").optional().default(0),
     allow_points: z.boolean().optional().default(false),

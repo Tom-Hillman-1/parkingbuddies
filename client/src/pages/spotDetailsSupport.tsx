@@ -45,6 +45,11 @@ export type AvailabilitySpot = {
     availability_json?: AvailabilityJson | null;
 };
 
+type SlotBookingLike = {
+    start_time?: string | null;
+    end_time?: string | null;
+};
+
 export type AuctionBidLike = {
     pay_method?: "money" | "points";
     amount_gbp?: number | string;
@@ -56,6 +61,8 @@ export const DURATION_OPTIONS = buildDurationOptions();
 
 export type SlotCalendarProps<TSpot extends AvailabilitySpot> = {
     spot: TSpot;
+    bookings?: SlotBookingLike[];
+    capacity?: number;
     startDate: string;
     endDate?: string | null;
     onPickDate: (date: string) => void;
@@ -64,13 +71,19 @@ export type SlotCalendarProps<TSpot extends AvailabilitySpot> = {
 
 export function SlotCalendar<TSpot extends AvailabilitySpot>({
     spot,
+    bookings = [],
+    capacity = 1,
     startDate,
     endDate,
     onPickDate,
     disabled,
 }: SlotCalendarProps<TSpot>) {
     const [visibleMonth, setVisibleMonth] = useState(() => calendarMonthFromYmd(startDate));
-    const dayLabels = useMemo(() => buildSlotDayLabels(spot), [spot]);
+    const fullyBookedDays = useMemo(
+        () => buildFullyBookedDaySet(spot, bookings, Math.max(1, capacity)),
+        [spot, bookings, capacity]
+    );
+    const dayLabels = useMemo(() => buildSlotDayLabels(spot, fullyBookedDays), [spot, fullyBookedDays]);
     const selectedDays = useMemo(() => buildSelectedSlotDays(startDate, endDate), [startDate, endDate]);
 
     useEffect(() => {
@@ -85,14 +98,16 @@ export function SlotCalendar<TSpot extends AvailabilitySpot>({
                 selected={selectedDays}
                 month={visibleMonth}
                 onMonthChange={setVisibleMonth}
-                disabled={(day) => disabled || !isDaySelectable(spot, day)}
+                disabled={(day) => disabled || !isDaySelectable(spot, day) || fullyBookedDays.has(getDayKey(day))}
                 modifiers={{
-                    availableSingle: (day) => hasWindowDayState(spot, day, "single"),
-                    availableStart: (day) => hasWindowDayState(spot, day, "start"),
-                    availableMiddle: (day) => hasWindowDayState(spot, day, "middle"),
-                    availableEnd: (day) => hasWindowDayState(spot, day, "end"),
+                    fullyBooked: (day) => fullyBookedDays.has(getDayKey(day)),
+                    availableSingle: (day) => !fullyBookedDays.has(getDayKey(day)) && hasWindowDayState(spot, day, "single"),
+                    availableStart: (day) => !fullyBookedDays.has(getDayKey(day)) && hasWindowDayState(spot, day, "start"),
+                    availableMiddle: (day) => !fullyBookedDays.has(getDayKey(day)) && hasWindowDayState(spot, day, "middle"),
+                    availableEnd: (day) => !fullyBookedDays.has(getDayKey(day)) && hasWindowDayState(spot, day, "end"),
                 }}
                 modifiersClassNames={{
+                    fullyBooked: "appCalendarDay--fullyBooked",
                     availableSingle: "appCalendarDay--availableSingle",
                     availableStart: "appCalendarDay--availableStart",
                     availableMiddle: "appCalendarDay--availableMiddle",
@@ -264,7 +279,7 @@ function getWindowDayState(window: WindowSlot, dayKey: string): WindowDayState |
 }
 
 function hasWindowDayState(spot: AvailabilitySpot, day: Date, state: WindowDayState) {
-    const key = toLocalDateInput(startOfDay(day));
+    const key = getDayKey(day);
     return readSavedSlots(spot).some((window) => getWindowDayState(window, key) === state);
 }
 
@@ -286,6 +301,87 @@ function isDaySelectable(spot: AvailabilitySpot, day: Date) {
 
     const windows = readSavedSlots(spot);
     return windows.some((window) => slotCoversDay(window, dayStart));
+}
+
+function getDayKey(day: Date) {
+    return toLocalDateInput(startOfDay(day));
+}
+
+function buildFullyBookedDaySet(spot: AvailabilitySpot, bookings: SlotBookingLike[], capacity: number) {
+    const dayWindows = new Map<string, Array<{ start: Date; end: Date }>>();
+    const bookedRanges = bookings
+        .map((booking) => {
+            if (!booking.start_time || !booking.end_time) return null;
+            const start = new Date(booking.start_time);
+            const end = new Date(booking.end_time);
+            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || !(start < end)) return null;
+            return { start, end };
+        })
+        .filter((range): range is { start: Date; end: Date } => Boolean(range));
+
+    for (const window of readSavedSlots(spot)) {
+        const start = parseYmd(window.date_from);
+        const end = parseYmd(window.date_to);
+        if (!start || !end) continue;
+
+        for (let day = startOfDay(start); day <= end; day = addDays(day, 1)) {
+            const key = getDayKey(day);
+            const nextDay = addDays(day, 1);
+            const segmentStart = key === window.date_from ? setTime(day, window.start) : day;
+            const segmentEnd = key === window.date_to ? setTime(day, window.end) : nextDay;
+            if (!(segmentStart < segmentEnd)) continue;
+
+            const segments = dayWindows.get(key) ?? [];
+            segments.push({ start: segmentStart, end: segmentEnd });
+            dayWindows.set(key, segments);
+        }
+    }
+
+    const fullDays = new Set<string>();
+    for (const [key, segments] of dayWindows.entries()) {
+        if (segments.length > 0 && segments.every((segment) => isSegmentFullyBooked(segment.start, segment.end, bookedRanges, capacity))) {
+            fullDays.add(key);
+        }
+    }
+
+    return fullDays;
+}
+
+function isSegmentFullyBooked(
+    segmentStart: Date,
+    segmentEnd: Date,
+    bookings: Array<{ start: Date; end: Date }>,
+    capacity: number
+) {
+    const points = [segmentStart.getTime(), segmentEnd.getTime()];
+
+    for (const booking of bookings) {
+        const overlapStart = Math.max(segmentStart.getTime(), booking.start.getTime());
+        const overlapEnd = Math.min(segmentEnd.getTime(), booking.end.getTime());
+        if (overlapStart < overlapEnd) {
+            points.push(overlapStart, overlapEnd);
+        }
+    }
+
+    const sorted = Array.from(new Set(points)).sort((a, b) => a - b);
+    for (let i = 0; i < sorted.length - 1; i += 1) {
+        const left = sorted[i];
+        const right = sorted[i + 1];
+        if (right <= left) continue;
+
+        const sample = left + (right - left) / 2;
+        let active = 0;
+        for (const booking of bookings) {
+            if (booking.start.getTime() < sample && booking.end.getTime() > sample) {
+                active += 1;
+                if (active >= capacity) break;
+            }
+        }
+
+        if (active < capacity) return false;
+    }
+
+    return true;
 }
 
 export function getAutoStartForDate(spot: AvailabilitySpot | null, ymd: string) {
@@ -353,8 +449,12 @@ function SlotDayButton({
     );
 }
 
-function buildSlotDayLabels(spot: AvailabilitySpot) {
+function buildSlotDayLabels(spot: AvailabilitySpot, fullyBookedDays = new Set<string>()) {
     const labels = new Map<string, string>();
+
+    for (const key of fullyBookedDays) {
+        labels.set(key, "Full");
+    }
 
     // The listing stores availability as date windows, so the picker expands
     // them here into day-level hints for the calendar grid.
@@ -365,6 +465,7 @@ function buildSlotDayLabels(spot: AvailabilitySpot) {
 
         for (let day = startOfDay(start); day <= end; day = addDays(day, 1)) {
             const key = toLocalDateInput(day);
+            if (fullyBookedDays.has(key)) continue;
             const nextLabel = formatWindowLabelForDay(window, key);
             if (!nextLabel) continue;
 

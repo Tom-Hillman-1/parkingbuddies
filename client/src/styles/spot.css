@@ -188,6 +188,24 @@
     color: #146244;
 }
 
+.slotCal .appCalendar .appCalendarDay--fullyBooked {
+    background: transparent;
+}
+
+.slotCal .appCalendar .appCalendarDay--fullyBooked .rdp-day_button,
+.slotCal .appCalendar .appCalendarDay--fullyBooked.rdp-disabled .rdp-day_button {
+    border-color: #efc4cc;
+    background: linear-gradient(180deg, #fff4f6 0%, #ffe7eb 100%);
+    color: #a23636;
+    box-shadow: none;
+}
+
+.slotCal .appCalendar .appCalendarDay--fullyBooked .rdp-day_button::after,
+.slotCal .appCalendar .appCalendarDay--fullyBooked.rdp-disabled .rdp-day_button::after {
+    color: #a23636;
+    font-weight: 700;
+}
+
 .slotCal .appCalendar--slots .rdp-month_grid {
     border-spacing: 0.38rem 0.56rem;
 }

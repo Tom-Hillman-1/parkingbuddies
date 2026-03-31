@@ -565,6 +565,8 @@ export default function SpotDetailsPage() {
                         <SlotCalendar
                             key={`${calendarStartDate || "none"}-${calendarEndDate || "none"}-${calendarResetNonce}`}
                             spot={spot}
+                            bookings={bookings}
+                            capacity={capacity}
                             startDate={calendarStartDate}
                             endDate={calendarEndDate}
                             onPickDate={pickCalendarDate}

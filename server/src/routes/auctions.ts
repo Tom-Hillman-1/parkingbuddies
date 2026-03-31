@@ -434,6 +434,24 @@ router.post("/:spotId/bid", requireAuth, bidSubmitRateLimit, async (req: AuthReq
             return rollbackWith(400, "Owners cannot bid on their own listings", payMethod === "money");
         }
 
+        if (payMethod === "money" && paymentIntentIdValue.trim()) {
+            const existingBidR = await client.query(
+                `SELECT id
+                 FROM auction_bids
+                 WHERE parking_spot_id = $1
+                   AND bidder_user_id = $2
+                   AND payment_intent_id = $3
+                   AND status IN ('pending', 'accepted')
+                 ORDER BY created_at DESC
+                 LIMIT 1`,
+                [spotId, req.userId, paymentIntentIdValue]
+            );
+            if (existingBidR.rowCount) {
+                await client.query("COMMIT");
+                return res.json({ ok: true, bid_id: existingBidR.rows[0].id });
+            }
+        }
+
         const unit = normalizeAuctionUnit(spot.price_unit);
         const start = requestedStart;
         const end = requestedEnd;

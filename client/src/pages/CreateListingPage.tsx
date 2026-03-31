@@ -97,7 +97,7 @@ type ListingSubmitPayload = {
     auction_start_price_gbp?: number;
 };
 
-const MAX_IMAGE_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_IMAGE_FILE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 function buildEditSnapshot(listing: ParkingSpot, ownerContact: OwnerContactForEdit): DraftSnapshot {
@@ -654,7 +654,7 @@ export default function CreateListingPage() {
             return;
         }
         if (file.size > MAX_IMAGE_FILE_BYTES) {
-            setError("Image must be 2MB or smaller.");
+            setError("Image must be 10MB or smaller.");
             event.target.value = "";
             return;
         }
@@ -703,7 +703,6 @@ export default function CreateListingPage() {
     const normalizedOwnerContactInfo = ownerContactInfo.trim();
     const normalizedAddress = addressText.trim();
     const setupCapacity = Math.max(0, Math.floor(Number(capacityTotal) || 0));
-    const spacesLabel = `${setupCapacity || 1} ${(setupCapacity || 1) === 1 ? "space" : "spaces"}`;
     const priceNum = Number(price || 0);
     const pointsNum = Number(pointsCost || 0);
     const auctionStartNum = Number(auctionStartPrice || 0);
@@ -1275,9 +1274,8 @@ export default function CreateListingPage() {
                                                             className="btn wizardTileSpotsBtn"
                                                             onClick={openSpacesSheetFromTile}
                                                         >
-                                                            Edit spaces
+                                                            {`Edit spaces: ${setupCapacity || 1}`}
                                                         </button>
-                                                        <span className="wizardTileSpacesValue">{spacesLabel}</span>
                                                     </div>
                                                 )}
                                             </>
@@ -1468,16 +1466,6 @@ export default function CreateListingPage() {
                                 disabled={connectBusy}
                             >
                                 {connectBusy ? "Opening..." : "Complete Stripe onboarding"}
-                            </AppButton>
-                            <AppButton
-                                type="button"
-                                onPress={() => {
-                                    setConnectNotice("");
-                                    closeSheet();
-                                    setActiveStep(3);
-                                }}
-                            >
-                                Go back to pricing
                             </AppButton>
                         </div>
                     </div>

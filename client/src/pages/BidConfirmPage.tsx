@@ -33,6 +33,38 @@ function buildIntentKey(spotId: string, start: string, end: string, amountGbp: n
     return `bid_${spotId}_${normalizedStart}_${normalizedEnd}_${amount}`;
 }
 
+function normalizeBidSaveError(message: string) {
+    const trimmed = message.trim();
+    if (!trimmed) {
+        return "We could not finish saving your bid right now. Please try again.";
+    }
+
+    const lower = trimmed.toLowerCase();
+    if (
+        lower.includes("network error") ||
+        lower.includes("request failed (500)") ||
+        lower.includes("unable to place bid right now")
+    ) {
+        return "We could not finish saving your bid right now. Please press Confirm & authorize again in a moment.";
+    }
+
+    return trimmed;
+}
+
+function shouldReleaseAuthorization(message: string) {
+    const lower = message.toLowerCase();
+    return (
+        lower.includes("slot") ||
+        lower.includes("not available") ||
+        lower.includes("must be at least") ||
+        lower.includes("does not accept") ||
+        lower.includes("amount mismatch") ||
+        lower.includes("does not match") ||
+        lower.includes("not completed") ||
+        lower.includes("cannot bid")
+    );
+}
+
 function BidCardForm({
     spotId,
     amountGbp,
@@ -60,10 +92,23 @@ function BidCardForm({
     const elements = useElements();
     const [busy, setBusy] = useState(false);
 
+    async function submitMoneyBid(confirmedPaymentIntentId: string) {
+        return apiPost<{ bid_id: string }>(
+            `/auctions/${spotId}/bid`,
+            {
+                amount_gbp: amountGbp,
+                payment_intent_id: confirmedPaymentIntentId,
+                start_time: start,
+                end_time: end,
+                pay_method: "money",
+            },
+            token
+        );
+    }
+
     async function confirm() {
         setBusy(true);
         onError(null);
-        let bidSubmitted = false;
         try {
             if (!stripe || !elements) {
                 onError("Secure authorization form is not ready yet.");
@@ -93,28 +138,26 @@ function BidCardForm({
                 return;
             }
 
-            const response = await apiPost<{ bid_id: string }>(
-                `/auctions/${spotId}/bid`,
-                {
-                    amount_gbp: amountGbp,
-                    payment_intent_id: confirmedPaymentIntentId,
-                    start_time: start,
-                    end_time: end,
-                    pay_method: "money",
-                },
-                token
-            );
-            bidSubmitted = true;
+            let response;
+            try {
+                response = await submitMoneyBid(confirmedPaymentIntentId);
+            } catch (firstError: unknown) {
+                response = await submitMoneyBid(confirmedPaymentIntentId).catch(() => {
+                    throw firstError;
+                });
+            }
+
             onDone(response.bid_id);
         } catch (error: unknown) {
-            if (!bidSubmitted) {
+            const message = normalizeBidSaveError(readErrorMessage(error, "Authorization failed"));
+            if (shouldReleaseAuthorization(message)) {
                 try {
                     await apiPost("/payments/auction-intent/cancel", { payment_intent_id: paymentIntentId }, token);
                 } catch {
                     // Best-effort cleanup only.
                 }
             }
-            onError(readErrorMessage(error, "Authorization failed"));
+            onError(message);
         } finally {
             setBusy(false);
         }
@@ -323,8 +366,6 @@ export default function BidConfirmPage() {
                 <div className="heroSub muted">Review the details before you authorize.</div>
             </div>
 
-            {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
-
             <ReceiptCard
                 kicker="PARKINGBUDDIES"
                 title="Bid receipt"
@@ -376,6 +417,12 @@ export default function BidConfirmPage() {
                     </div>
                 </div>
             )}
+
+            {err ? (
+                <div className="spotAlert spotAlert--danger" style={{ marginTop: 12 }}>
+                    {err}
+                </div>
+            ) : null}
         </div>
     );
 }
