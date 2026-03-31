@@ -500,7 +500,7 @@ export default function HomePage() {
                     Browse nearby spaces, compare options quickly, and book in seconds.
                 </p>
                 <div className="home-actions">
-                    <Link to="/create-listing" className="btn btn-primary">List your spot</Link>
+                    <Link to="/create-listing" className="btn btn-primary">List a spot</Link>
                     <button type="button" className="btn btn-ghost" onClick={goToSpots}>View spots</button>
                 </div>
                 {heroCityAnimationData ? (

@@ -715,8 +715,13 @@ label > span:first-child {
 }
 
 .home-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     min-width: 176px;
     padding: 0.82rem 1.25rem;
+    text-align: center;
+    line-height: 1.1;
 }
 
 .home-content {
@@ -2507,15 +2512,16 @@ label > span:first-child {
     .home-actions .btn {
         flex: 1 1 0;
         min-width: 0;
-        min-height: 34px;
-        padding: 0.42rem 0.56rem;
-        font-size: 0.8rem;
-        border-radius: 9px;
+        min-height: 42px;
+        padding: 0.58rem 0.82rem;
+        font-size: 0.82rem;
+        border-radius: 999px;
+        white-space: nowrap;
     }
 
     .home-hero {
-        min-height: clamp(22rem, calc(100svh - 7.2rem), 28rem);
-        padding: clamp(0.95rem, 3.3vh, 1.55rem) 0.82rem 1rem;
+        min-height: calc(100svh - 5.9rem);
+        padding: clamp(1rem, 3.4vh, 1.5rem) 0.82rem 1.4rem;
         border-radius: 18px;
     }
 
@@ -2654,8 +2660,8 @@ label > span:first-child {
     }
 
     .home-hero {
-        min-height: clamp(21rem, calc(100svh - 6.4rem), 25.5rem);
-        padding: clamp(0.82rem, 3vh, 1.2rem) 0.78rem 0.92rem;
+        min-height: calc(100svh - 5.25rem);
+        padding: clamp(1rem, 3.1vh, 1.35rem) 0.78rem 1.35rem;
     }
 
     .home-hero-bg-animation {
@@ -2670,6 +2676,17 @@ label > span:first-child {
     .home-title,
     .heroTitle {
         max-width: 18ch;
+    }
+
+    .home-actions {
+        align-items: center;
+        margin-top: 0.8rem;
+    }
+
+    .home-actions .btn {
+        min-height: 44px;
+        padding: 0.62rem 0.88rem;
+        border-radius: 999px;
     }
 
     .homeDateDialog {
