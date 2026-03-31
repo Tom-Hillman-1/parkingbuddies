@@ -206,7 +206,7 @@ function cardFeatures(spot: ParkingSpot) {
 
     return rawFeatures
         .filter((feature): feature is string => typeof feature === "string" && feature.trim().length > 0)
-        .slice(0, 3);
+        .slice(0, 2);
 }
 
 function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {

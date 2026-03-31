@@ -38,8 +38,8 @@ export function ReceiptCard({
 export function ReceiptRow({ label, value }: ReceiptRowProps) {
     return (
         <div className="receiptRow">
-            <span className="tiny muted">{label}</span>
-            <span className="spotInfoValue">{value}</span>
+            <span className="receiptKey tiny muted">{label}</span>
+            <span className="receiptValue">{value}</span>
         </div>
     );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiGet, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -40,6 +41,7 @@ function renderMutedReceiptCopy(text: string) {
 export default function BidReceiptPage() {
     const { bidId } = useParams();
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
     const { token } = useAuth();
     const [bid, setBid] = useState<BidReceipt | null>(null);
     const [loading, setLoading] = useState(true);
@@ -141,6 +143,7 @@ export default function BidReceiptPage() {
                 {},
                 token
             );
+            await queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
             navigate("/dashboard?tab=myAuctionBids", { replace: true });
         } catch (error: unknown) {
             setErr(readErrorMessage(error, "Unable to cancel bid right now."));
@@ -198,16 +201,20 @@ export default function BidReceiptPage() {
                                     ? "Your bid was accepted and the booking is confirmed."
                                     : "This bid was rejected by the owner."}
                         </div>
-                        <div className="rowInline" style={{ marginTop: 10 }}>
-                            <Link to="/dashboard?tab=myAuctionBids" className="btn btn-primary">Go to dashboard</Link>
+                        <div className="actionInlineGrid" style={{ marginTop: 10 }}>
+                            <Link to="/dashboard?tab=myAuctionBids" className="btn btn-primary">Manage bid</Link>
                             {bid.can_cancel && (
                                 <button type="button" className="btn" onClick={() => void cancelBid()} disabled={cancelBusy}>
                                     {cancelBusy ? "Cancelling..." : "Cancel bid"}
                                 </button>
                             )}
-                            {bid.booking_id && <Link to={`/pay/${bid.booking_id}`} className="btn">Booking confirmation</Link>}
                             {bid.parking_spot_id && <Link to={`/spots/${bid.parking_spot_id}`} className="btn">View listing</Link>}
                         </div>
+                        {bid.booking_id && (
+                            <div className="actionInlineGrid" style={{ marginTop: 10 }}>
+                                <Link to={`/pay/${bid.booking_id}`} className="btn">Booking confirmation</Link>
+                            </div>
+                        )}
                     </div>
                 </>
             )}

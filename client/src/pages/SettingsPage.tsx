@@ -67,7 +67,6 @@ export default function SettingsPage() {
         connectBusy,
         refreshConnectStatus,
         beginConnectOnboarding,
-        openConnectDashboard,
     } = useStripeConnect(token);
 
     const profileForm = useForm<ProfileFormValues>({
@@ -170,10 +169,10 @@ export default function SettingsPage() {
         }
     }
 
-    async function handleOpenStripeDashboard() {
+    async function handleRefreshConnectStatus() {
         setPayoutErr(null);
-        const result = await openConnectDashboard();
-        if (!result.ok) {
+        const result = await refreshConnectStatus();
+        if (!result.ok && result.error) {
             setPayoutErr(result.error);
         }
     }
@@ -448,19 +447,11 @@ export default function SettingsPage() {
                                                     ? "Update Stripe details"
                                                     : "Continue onboarding"}
                                 </AppButton>
-                                {connect?.demo_available && !connect?.demo_bypass && !connect?.account_id && (
-                                    <AppButton
-                                        onClick={() => handleBeginConnectOnboarding("demo")}
-                                        disabled={connectBusy}
-                                    >
-                                        Use demo payouts
-                                    </AppButton>
-                                )}
                                 <AppButton
-                                    onClick={handleOpenStripeDashboard}
-                                    disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}
+                                    onClick={handleRefreshConnectStatus}
+                                    disabled={connectBusy}
                                 >
-                                    Open Stripe dashboard
+                                    Refresh status
                                 </AppButton>
                             </div>
                         </div>

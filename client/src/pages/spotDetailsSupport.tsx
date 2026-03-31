@@ -80,7 +80,7 @@ export function SlotCalendar<TSpot extends AvailabilitySpot>({
     return (
         <div className={`slotCal${disabled ? " is-disabled" : ""}`}>
             <AppCalendar
-                mode="range"
+                mode="single"
                 month={visibleMonth}
                 onMonthChange={setVisibleMonth}
                 disabled={(day) => disabled || !isDaySelectable(spot, day)}

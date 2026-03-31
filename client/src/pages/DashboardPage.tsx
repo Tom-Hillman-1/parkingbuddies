@@ -552,12 +552,6 @@ export default function DashboardPage() {
         }
     };
 
-    const handleRefreshConnectStatus = async () => {
-        const result = await refreshConnectStatus();
-        if (!result.ok && result.error) setErr(result.error);
-        await queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
-    };
-
     const handleBeginConnectOnboarding = async (mode: "stripe" | "demo" = "stripe") => {
         setErr(null);
         setMsg(null);
@@ -1069,7 +1063,6 @@ export default function DashboardPage() {
                                         <button className="btn" onClick={() => handleBeginConnectOnboarding("stripe")} disabled={connectBusy}>
                                             {connectBusy ? "Opening..." : connect?.demo_bypass ? "Connect Stripe instead" : !connect?.account_id ? "Connect Stripe" : connect.onboarding_complete ? "Update Stripe details" : "Continue onboarding"}
                                         </button>
-                                        <button className="btn" onClick={handleRefreshConnectStatus} disabled={connectBusy}>Refresh status</button>
                                     </div>
                                 </div>
                         </DashboardDisclosureCard>

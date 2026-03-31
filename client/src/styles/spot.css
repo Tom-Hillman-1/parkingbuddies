@@ -1,6 +1,9 @@
 .spotSimple {
     display: grid;
-    grid-template-columns: 320px minmax(0, 1fr);
+    grid-template-columns: 400px minmax(0, 1fr);
+    grid-template-areas:
+        "side header"
+        "side main";
     align-items: start;
     gap: 1rem;
 }
@@ -15,9 +18,39 @@
 }
 
 .spotSimpleHeader {
+    grid-area: header;
     border: 1px solid rgba(255, 255, 255, 0.72);
     border-radius: 24px;
     background: linear-gradient(135deg, #ffffff 0%, #edf6ff 100%);
+}
+
+.spotSimpleHeaderTop {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 118px;
+    align-items: start;
+    gap: 1rem;
+}
+
+.spotSimpleHeaderCopy {
+    display: grid;
+    gap: 0.42rem;
+    min-width: 0;
+}
+
+.spotSimpleHeader .heroTitle {
+    max-width: none;
+}
+
+.spotSimpleHeaderDesc {
+    margin: 0;
+}
+
+.spotSimpleSide {
+    grid-area: side;
+}
+
+.spotSimpleMain {
+    grid-area: main;
 }
 
 .spotSimpleHeader--closed {
@@ -29,7 +62,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.45rem;
-    margin-top: 0.6rem;
+    margin-top: 0.78rem;
 }
 
 .spotOwnerTools {
@@ -100,6 +133,31 @@
 .slotCal.is-disabled {
     opacity: 0.68;
     pointer-events: none;
+}
+
+.slotCal .appCalendar .rdp-day.rdp-range_start,
+.slotCal .appCalendar .rdp-day.rdp-range_middle,
+.slotCal .appCalendar .rdp-day.rdp-range_end,
+.slotCal .appCalendar .appCalendarDay--draftSingle,
+.slotCal .appCalendar .appCalendarDay--draftStart,
+.slotCal .appCalendar .appCalendarDay--draftMiddle,
+.slotCal .appCalendar .appCalendarDay--draftEnd,
+.slotCal .appCalendar .appCalendarDay--selectedSingle {
+    background: transparent;
+}
+
+.slotCal .appCalendar .rdp-day.rdp-range_start .rdp-day_button,
+.slotCal .appCalendar .rdp-day.rdp-range_middle .rdp-day_button,
+.slotCal .appCalendar .rdp-day.rdp-range_end .rdp-day_button,
+.slotCal .appCalendar .appCalendarDay--draftSingle .rdp-day_button,
+.slotCal .appCalendar .appCalendarDay--draftStart .rdp-day_button,
+.slotCal .appCalendar .appCalendarDay--draftMiddle .rdp-day_button,
+.slotCal .appCalendar .appCalendarDay--draftEnd .rdp-day_button,
+.slotCal .appCalendar .appCalendarDay--selectedSingle .rdp-day_button {
+    border-color: #1a6cff;
+    background: #1a6cff;
+    color: #ffffff;
+    box-shadow: 0 0 0 2px rgba(26, 108, 255, 0.18);
 }
 
 .slotRangeSummary {
@@ -247,20 +305,28 @@
     height: 320px;
 }
 
-.spotHeroImg,
-.spotHeroFallback {
+.spotHeaderThumb {
     width: 100%;
-    min-height: 220px;
+    align-self: start;
+}
+
+.spotHeaderThumbImg,
+.spotHeaderThumbFallback {
+    width: 100%;
+    height: 118px;
     border-radius: 18px;
     object-fit: cover;
     border: 1px solid var(--line);
 }
 
-.spotHeroFallback {
+.spotHeaderThumbFallback {
     display: grid;
     place-items: center;
     color: var(--muted);
     background: #f8fbff;
+    font-size: 0.76rem;
+    text-align: center;
+    padding: 0.7rem;
 }
 
 .ui-reveal {
@@ -278,22 +344,28 @@
 @media (max-width: 720px) {
     .spotMapWrap .leafletShell,
     .spotMapWrap .leafletMap {
-        min-height: 220px;
-        height: 220px;
-        max-height: 220px;
+        min-height: 176px;
+        height: 176px;
+        max-height: 176px;
     }
 
-    .spotHeroImg,
-    .spotHeroFallback {
-        min-height: 220px;
-        height: 220px;
-        max-height: 220px;
+    .spotSimpleHeaderTop {
+        grid-template-columns: minmax(0, 1fr) 84px;
+        gap: 0.78rem;
     }
 
-    .spotHeroFallback {
-        font-size: 0.84rem;
-        padding: 0.7rem;
-        text-align: center;
+    .spotSimpleHeaderCopy {
+        gap: 0.34rem;
+    }
+
+    .spotHeaderThumbImg,
+    .spotHeaderThumbFallback {
+        height: 84px;
+    }
+
+    .spotHeaderThumbFallback {
+        font-size: 0.68rem;
+        padding: 0.45rem;
     }
 
     .spotOwnerActions {

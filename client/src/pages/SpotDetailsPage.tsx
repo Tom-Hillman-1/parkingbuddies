@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AppPageState from "../components/AppPageState";
 import SpotsMap from "../components/SpotsMap";
@@ -54,6 +54,7 @@ export default function SpotDetailsPage() {
     const { id } = useParams<{ id: string }>();
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
     const { token, user } = useAuth();
 
     const spotQuery = useQuery({
@@ -386,6 +387,7 @@ export default function SpotDetailsPage() {
             const r = await apiPost<{ booking: SpotBooking }>("/bookings", body, token);
             const booking = r.booking;
             await bookingsQuery.refetch();
+            await queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
 
             const needsPayment =
                 booking?.pay_method === "money" &&
@@ -491,6 +493,54 @@ export default function SpotDetailsPage() {
     return (
         <div className="container">
             <div className="spotSimple">
+                <div className={`card spotSimpleHeader ${auctionClosed ? "spotSimpleHeader--closed" : ""}`}>
+                    <div className="spotSimpleHeaderTop">
+                        <div className="spotSimpleHeaderCopy">
+                            <div className="heroKicker">ParkingBuddies</div>
+                            <div className="heroTitle">{spot.title}</div>
+                            <p className="muted spotSimpleHeaderDesc">{spot.description}</p>
+                        </div>
+
+                        <div className="spotHeaderThumb" aria-hidden="true">
+                            {spot.image_url ? (
+                                <img src={spot.image_url} alt={spot.title} className="spotHeaderThumbImg" />
+                            ) : (
+                                <div className="spotHeaderThumbFallback">No image</div>
+                            )}
+                        </div>
+                    </div>
+
+                    {isOwner && (
+                        <div className="spotOwnerTools">
+                            <div className="rowInline spotOwnerActions">
+                                <Link to={`/create-listing?edit=${spot.id}`} className="btn btn-primary">
+                                    Edit listing
+                                </Link>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="spotSimpleBadges">
+                        <span className="badge">{modeLabel}</span>
+                        <span className="badge badge--cool">{priceLabel}</span>
+                        <span className="badge">{formatAvailability(spot)}</span>
+                        {listingInactive && <span className="badge badge--rose">Inactive</span>}
+                        {capacity > 1 && (
+                            <span className={`badge ${spotsLeft > 0 ? "badge--green" : "badge--rose"}`}>
+                                {spotsLeft}/{capacity} available
+                            </span>
+                        )}
+                        {auctionClosed && (
+                            <span className="badge badge--rose">No slots left</span>
+                        )}
+                        {featureBadges.map((feature) => (
+                            <span key={feature} className={`badge badge--${listingFeatureTone(feature)}`}>
+                                {listingFeatureLabel(feature)}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+
                 <aside className="spotSimpleSide">
                     <div className="card spotSimpleMedia">
                         <div className="h3">Map</div>
@@ -503,53 +553,9 @@ export default function SpotDetailsPage() {
                             />
                         </div>
                     </div>
-
-                    <div className="card spotSimpleMedia">
-                        {spot.image_url ? (
-                            <img src={spot.image_url} alt={spot.title} className="spotHeroImg" />
-                        ) : (
-                            <div className="spotHeroFallback">No image uploaded</div>
-                        )}
-                    </div>
                 </aside>
 
                 <main className="spotSimpleMain">
-                    <div className={`card spotSimpleHeader ${auctionClosed ? "spotSimpleHeader--closed" : ""}`}>
-                        <div className="heroKicker">ParkingBuddies</div>
-                        <div className="heroTitle">{spot.title}</div>
-                        <p className="muted" style={{ marginTop: 6 }}>{spot.description}</p>
-
-                        {isOwner && (
-                            <div className="spotOwnerTools">
-                                <div className="rowInline spotOwnerActions">
-                                    <Link to={`/create-listing?edit=${spot.id}`} className="btn btn-primary">
-                                        Edit listing
-                                    </Link>
-                                </div>
-                            </div>
-                        )}
-
-                        <div className="spotSimpleBadges">
-                            <span className="badge">{modeLabel}</span>
-                            <span className="badge badge--cool">{priceLabel}</span>
-                            <span className="badge">{formatAvailability(spot)}</span>
-                            {listingInactive && <span className="badge badge--rose">Inactive</span>}
-                            {capacity > 1 && (
-                                <span className={`badge ${spotsLeft > 0 ? "badge--green" : "badge--rose"}`}>
-                                    {spotsLeft}/{capacity} available
-                                </span>
-                            )}
-                            {auctionClosed && (
-                                <span className="badge badge--rose">No slots left</span>
-                            )}
-                            {featureBadges.map((feature) => (
-                                <span key={feature} className={`badge badge--${listingFeatureTone(feature)}`}>
-                                    {listingFeatureLabel(feature)}
-                                </span>
-                            ))}
-                        </div>
-                    </div>
-
                     <div className="card spotSimpleAction">
                         <div className="h3">Choose your slot</div>
                         <p className="tiny muted" style={{ margin: "0 0 6px" }}>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
@@ -129,7 +129,7 @@ function BidCardForm({
             <div style={{ padding: 10, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, marginTop: 10 }}>
                 <PaymentElement />
             </div>
-            <div className="rowInline" style={{ marginTop: 12 }}>
+            <div className="actionInlineGrid" style={{ marginTop: 12 }}>
                 <button
                     onClick={confirm}
                     disabled={busy}
@@ -234,6 +234,7 @@ function BidPaymentSection({
 export default function BidConfirmPage() {
     const { token } = useAuth();
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
 
     const spotId = useQueryValue("spotId");
     const start = useQueryValue("start");
@@ -252,8 +253,9 @@ export default function BidConfirmPage() {
         setErr(message ? message : null);
     }, []);
     const handleMoneyBidDone = useCallback((bidId: string) => {
+        void queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
         navigate(`/bids/${bidId}`);
-    }, [navigate]);
+    }, [navigate, queryClient]);
     const spotQuery = useQuery({
         queryKey: ["bid-confirm-spot", spotId],
         enabled: Boolean(spotId),
@@ -299,6 +301,7 @@ export default function BidConfirmPage() {
                 },
                 token
             );
+            await queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
             navigate(`/bids/${response.bid_id}`);
         } catch (error: unknown) {
             setErr(readErrorMessage(error, "Bid failed"));
@@ -365,7 +368,7 @@ export default function BidConfirmPage() {
                     <div className="tiny muted" style={{ marginTop: 6 }}>
                         Points are reserved when your bid is accepted by the owner.
                     </div>
-                    <div className="rowInline" style={{ marginTop: 10 }}>
+                    <div className="actionInlineGrid" style={{ marginTop: 10 }}>
                         <button className="btn btn-primary" onClick={confirmPoints} disabled={busy}>
                             {busy ? "Submitting..." : "Confirm bid"}
                         </button>

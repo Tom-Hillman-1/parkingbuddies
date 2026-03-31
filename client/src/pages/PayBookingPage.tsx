@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Navigate, useParams } from "react-router-dom";
 import Lottie from "lottie-react";
 import { loadStripe } from "@stripe/stripe-js";
@@ -47,7 +47,7 @@ type StripeIntentDetails = {
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string);
 const POUND = String.fromCharCode(163);
-const STRIPE_TEST_MODE = String(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY ?? "").startsWith("pk_test_");
+const SECURE_PAYMENT_NOTICE = "Enter your details in Stripe's secure payment form. Once payment succeeds, you will be sent straight to the Stripe receipt.";
 
 function sleep(ms: number) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -143,14 +143,9 @@ function BookingCardForm({
     return (
         <div className="card formSection" style={{ marginTop: 14, marginBottom: 14 }}>
             <div className="h3">Secure card payment</div>
-            <div className="muted" style={{ marginTop: 6 }}>
-                Enter your details in Stripe's secure payment form. Once payment succeeds, you will be sent straight to the Stripe receipt.
+            <div className="spotAlert" style={{ marginTop: 12 }}>
+                {SECURE_PAYMENT_NOTICE}
             </div>
-            {STRIPE_TEST_MODE && (
-                <div className="spotAlert" style={{ marginTop: 12 }}>
-                    Stripe test mode is active on this deployment. Use Stripe test card details here. Real cards will not complete payment on this version.
-                </div>
-            )}
             <div style={{ padding: 12, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, marginTop: 12, minHeight: 230 }}>
                 <PaymentElement />
             </div>
@@ -209,11 +204,6 @@ function BookingPaymentSection({
                 <div className="muted" style={{ marginTop: 6 }}>
                     {intentLoading ? "Preparing Stripe's secure payment form..." : "The secure payment form is unavailable right now."}
                 </div>
-                {STRIPE_TEST_MODE && (
-                    <div className="spotAlert" style={{ marginTop: 12 }}>
-                        Stripe test mode is active on this deployment. Use Stripe test card details here. Real cards will not complete payment on this version.
-                    </div>
-                )}
             </div>
         );
     }
@@ -257,6 +247,7 @@ function BookingPaymentSection({
 export default function PayBookingPage() {
     const { bookingId } = useParams();
     const { token, user } = useAuth();
+    const queryClient = useQueryClient();
     const [err, setErr] = useState<string | null>(null);
     const [processingPayment, setProcessingPayment] = useState(false);
 
@@ -323,6 +314,7 @@ export default function PayBookingPage() {
     async function refreshPaymentState() {
         await bookingQuery.refetch();
         await receiptQuery.refetch();
+        await queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
     }
 
     useEffect(() => {
@@ -412,7 +404,7 @@ export default function PayBookingPage() {
                     copy="The booking details did not load properly. Head back home and try again in a moment."
                 />
             )}
-            {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
+            {err && <div className="spotAlert" style={{ marginBottom: 14, color: "#9f2f45", borderColor: "#f1c7d1", background: "#fff4f6" }}>{err}</div>}
 
             {!loadErr && booking && (
                 <>
@@ -457,13 +449,6 @@ export default function PayBookingPage() {
                         <ReceiptRow label="Owner phone" value={getOwnerContactValue(ownerContactPhone)} />
                         <ReceiptRow label="Arrival notes" value={getOwnerContactValue(ownerContactInfo)} />
                     </ReceiptCard>
-
-                    {!requiresPayment && (
-                        <div className="paymentSuccessNotice">
-                            <div className="h3">Booking confirmed</div>
-                            <div className="createFieldHint">Nice. Your booking is locked in and the full details are ready below.</div>
-                        </div>
-                    )}
 
                     {requiresPayment && (
                         <BookingPaymentSection
