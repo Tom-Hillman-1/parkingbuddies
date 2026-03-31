@@ -136,7 +136,9 @@ function auctionEndFromAvailability(availability: AvailabilityJson) {
 
 function buildAvailabilityJson(body: ListingPayload): { ok: true; availability: AvailabilityJson } {
     const parking_kind = body.parking_kind ?? body.availability.parking_kind;
+    const features = Array.isArray(body.availability.features) ? body.availability.features : [];
     const kindField = parking_kind ? { parking_kind } : {};
+    const featureField = features.length ? { features } : { features: [] };
 
     const windows = body.availability.windows
         .filter((rawWindow: ListingPayload["availability"]["windows"][number]) => isWindowSlot(rawWindow))
@@ -148,7 +150,7 @@ function buildAvailabilityJson(body: ListingPayload): { ok: true; availability: 
             end: rawWindow.end,
         }));
 
-    return { ok: true, availability: { type: "window_slots", windows, ...kindField } };
+    return { ok: true, availability: { type: "window_slots", windows, ...kindField, ...featureField } };
 }
 
 function normalizeListingInput(

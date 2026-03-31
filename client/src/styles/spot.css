@@ -276,6 +276,39 @@
 }
 
 @media (max-width: 720px) {
+    .spotMapWrap .leafletShell,
+    .spotMapWrap .leafletMap {
+        min-height: 110px;
+        height: 118px;
+    }
+
+    .spotHeroFallback {
+        min-height: 132px;
+        font-size: 0.84rem;
+        padding: 0.7rem;
+        text-align: center;
+    }
+
+    .spotOwnerActions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        align-items: stretch;
+    }
+
+    .spotOwnerActions > * {
+        min-width: 0;
+    }
+
+    .spotOwnerActions .btn {
+        width: 100%;
+        min-width: 0;
+        justify-content: center;
+        text-align: center;
+        white-space: normal;
+        line-height: 1.2;
+        padding-inline: 0.8rem;
+    }
+
     .slotRangeGrid {
         grid-template-columns: 1fr;
     }

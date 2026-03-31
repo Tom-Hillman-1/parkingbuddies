@@ -36,6 +36,7 @@ import {
     toTimeInput,
     type AvailabilityJson,
 } from "./spotDetailsSupport";
+import { listingFeatureLabel, listingFeatureTone } from "./createListingSupport";
 
 type PayMethod = "money" | "points";
 
@@ -257,6 +258,9 @@ export default function SpotDetailsPage() {
     const auctionPointsStartPerUnit = toFiniteNumber(spot?.points_cost);
     const auctionPointsStartLabel =
         auctionPointsStartPerUnit > 0 ? `Starting bid: ${auctionPointsStartPerUnit} pts / ${listingUnit}` : null;
+    const featureBadges = Array.isArray(spot?.availability_json?.features)
+        ? spot.availability_json.features.filter((feature): feature is string => typeof feature === "string" && feature.trim().length > 0)
+        : [];
 
     const userPoints = toFiniteNumber(user?.points_balance);
     const pointsBookingInsufficient = payMethod === "points" && pointsMinTotal > 0 && userPoints < pointsMinTotal;
@@ -506,9 +510,6 @@ export default function SpotDetailsPage() {
                                     <Link to={`/create-listing?edit=${spot.id}`} className="btn btn-primary">
                                         Edit listing
                                     </Link>
-                                    <Link to="/dashboard?tab=manageListings" className="btn">
-                                        Go to dashboard
-                                    </Link>
                                 </div>
                             </div>
                         )}
@@ -526,6 +527,11 @@ export default function SpotDetailsPage() {
                             {auctionClosed && (
                                 <span className="badge badge--rose">No slots left</span>
                             )}
+                            {featureBadges.map((feature) => (
+                                <span key={feature} className={`badge badge--${listingFeatureTone(feature)}`}>
+                                    {listingFeatureLabel(feature)}
+                                </span>
+                            ))}
                         </div>
                     </div>
 

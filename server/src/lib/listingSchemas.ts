@@ -24,6 +24,24 @@ export const parkingKindSchema = z.enum([
 ]);
 export type ParkingKind = z.infer<typeof parkingKindSchema>;
 
+export const listingFeatureSchema = z.enum([
+    "protected_lot",
+    "private_outdoor",
+    "private_indoor",
+    "gated_access",
+    "locked_area",
+    "ev_friendly",
+    "cctv",
+    "covered",
+    "well_lit",
+    "wide_bay",
+    "accessible",
+    "residential",
+    "near_station",
+    "near_airport",
+]);
+export type ListingFeature = z.infer<typeof listingFeatureSchema>;
+
 const parkingKindInputSchema = z
     .union([parkingKindSchema, z.literal("covered_parking")])
     .transform((value): ParkingKind => (value === "covered_parking" ? "closed_parking" : value));
@@ -42,22 +60,26 @@ function optionalTrimmedNullableString(maxLength: number) {
         });
 }
 
-function optionalHttpUrlString(maxLength: number) {
+function optionalImageUrlString(maxLength: number) {
     return optionalTrimmedNullableString(maxLength).superRefine((value, ctx) => {
         if (!value) return;
+
+        if (/^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/i.test(value)) {
+            return;
+        }
 
         try {
             const parsed = new URL(value);
             if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
                 ctx.addIssue({
                     code: "custom",
-                    message: "image_url must use http or https",
+                    message: "image_url must use http, https, or a supported image upload",
                 });
             }
         } catch {
             ctx.addIssue({
                 code: "custom",
-                message: "image_url must be a valid URL",
+                message: "image_url must be a valid image URL",
             });
         }
     });
@@ -93,6 +115,7 @@ export const listingAvailabilitySchema = z.object({
     type: z.literal("window_slots"),
     windows: z.array(listingAvailabilityWindowSchema).min(1, "availability.windows must contain at least one slot"),
     parking_kind: parkingKindInputSchema.optional(),
+    features: z.array(listingFeatureSchema).max(16, "availability.features can contain at most 16 items").optional().default([]),
 });
 export type ListingAvailability = z.output<typeof listingAvailabilitySchema>;
 
@@ -105,7 +128,7 @@ export const listingPayloadSchema = z.object({
     lng: z.coerce.number().min(-180, "lng must be between -180 and 180").max(180, "lng must be between -180 and 180"),
     parking_type: parkingTypeSchema.optional().default("private"),
     capacity_total: z.coerce.number().int().min(1, "capacity_total must be at least 1").optional().default(1),
-    image_url: optionalHttpUrlString(2048),
+    image_url: optionalImageUrlString(4_500_000),
     price_unit: priceUnitSchema.optional().default("hour"),
     price_gbp: z.coerce.number().min(0, "price_gbp must be zero or higher").optional().default(0),
     allow_points: z.boolean().optional().default(false),

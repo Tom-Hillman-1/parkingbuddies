@@ -36,15 +36,18 @@ type StripeReceiptDetails = {
     amount_received_gbp?: number;
     payment_intent_id?: string;
     charge_id?: string | null;
+    payment_status?: string;
 };
 
 type StripeIntentDetails = {
-    client_secret: string;
+    client_secret: string | null;
     payment_intent_id: string;
+    payment_intent_status?: string | null;
 };
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string);
 const POUND = String.fromCharCode(163);
+const STRIPE_TEST_MODE = String(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY ?? "").startsWith("pk_test_");
 
 function sleep(ms: number) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -55,8 +58,15 @@ function renderMutedReceiptCopy(text: string) {
 }
 
 async function fetchBookingReceipt(bookingId: string, token: string) {
-    const response = await apiGet<{ receipt: StripeReceiptDetails }>(`/payments/booking/${bookingId}/receipt`, token);
-    return response.receipt ?? null;
+    const response = await apiGet<{ receipt: StripeReceiptDetails; payment_status?: string }>(
+        `/payments/booking/${bookingId}/receipt`,
+        token
+    );
+    if (!response.receipt) return null;
+    return {
+        ...response.receipt,
+        payment_status: response.payment_status ?? response.receipt.payment_status,
+    };
 }
 
 async function waitForStripeReceiptUrl(bookingId: string, token: string, attempts = 6) {
@@ -75,12 +85,14 @@ function BookingCardForm({
     clientSecret,
     onError,
     onProcessingChange,
+    onPaymentSubmitted,
 }: {
     booking: Booking;
     token: string;
     clientSecret: string;
     onError: (message: string | null) => void;
     onProcessingChange: (value: boolean) => void;
+    onPaymentSubmitted: () => Promise<void>;
 }) {
     const stripe = useStripe();
     const elements = useElements();
@@ -114,13 +126,12 @@ function BookingCardForm({
                 return;
             }
 
+            await onPaymentSubmitted();
             const receiptUrl = await waitForStripeReceiptUrl(booking.id, token);
             if (receiptUrl) {
                 window.location.href = receiptUrl;
                 return;
             }
-
-            window.location.href = `/pay/${booking.id}`;
         } catch (error: unknown) {
             onError(readErrorMessage(error, "Unable to complete payment."));
             onProcessingChange(false);
@@ -135,7 +146,12 @@ function BookingCardForm({
             <div className="muted" style={{ marginTop: 6 }}>
                 Enter your details in Stripe's secure payment form. Once payment succeeds, you will be sent straight to the Stripe receipt.
             </div>
-            <div style={{ padding: 12, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, marginTop: 12 }}>
+            {STRIPE_TEST_MODE && (
+                <div className="spotAlert" style={{ marginTop: 12 }}>
+                    Stripe test mode is active on this deployment. Use Stripe test card details here. Real cards will not complete payment on this version.
+                </div>
+            )}
+            <div style={{ padding: 12, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, marginTop: 12, minHeight: 230 }}>
                 <PaymentElement />
             </div>
             <div className="rowInline" style={{ marginTop: 12 }}>
@@ -152,17 +168,22 @@ function BookingPaymentSection({
     token,
     onError,
     onProcessingChange,
+    onPaymentSubmitted,
 }: {
     booking: Booking;
     token: string;
     onError: (message: string | null) => void;
     onProcessingChange: (value: boolean) => void;
+    onPaymentSubmitted: () => Promise<void>;
 }) {
     const [intent, setIntent] = useState<StripeIntentDetails | null>(null);
+    const [intentLoading, setIntentLoading] = useState(true);
+    const paymentIntentStatus = String(intent?.payment_intent_status ?? "").toLowerCase();
 
     useEffect(() => {
         let active = true;
         setIntent(null);
+        setIntentLoading(true);
         onError(null);
 
         apiPost<StripeIntentDetails>("/payments/booking-intent", { booking_id: booking.id }, token)
@@ -171,6 +192,9 @@ function BookingPaymentSection({
             })
             .catch((error: unknown) => {
                 if (active) onError(readErrorMessage(error, "Unable to prepare secure payment."));
+            })
+            .finally(() => {
+                if (active) setIntentLoading(false);
             });
 
         return () => {
@@ -178,7 +202,43 @@ function BookingPaymentSection({
         };
     }, [booking.id, onError, token]);
 
-    if (!intent) return null;
+    if (!intent) {
+        return (
+            <div className="card formSection" style={{ marginTop: 14, marginBottom: 14 }}>
+                <div className="h3">Secure card payment</div>
+                <div className="muted" style={{ marginTop: 6 }}>
+                    {intentLoading ? "Preparing Stripe's secure payment form..." : "The secure payment form is unavailable right now."}
+                </div>
+                {STRIPE_TEST_MODE && (
+                    <div className="spotAlert" style={{ marginTop: 12 }}>
+                        Stripe test mode is active on this deployment. Use Stripe test card details here. Real cards will not complete payment on this version.
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    if (paymentIntentStatus === "processing" || paymentIntentStatus === "succeeded") {
+        return (
+            <div className="card formSection" style={{ marginTop: 14, marginBottom: 14 }}>
+                <div className="h3">Secure card payment</div>
+                <div className="muted" style={{ marginTop: 6 }}>
+                    Your payment is already being finalized. We are checking Stripe and will update this page as soon as it is ready.
+                </div>
+            </div>
+        );
+    }
+
+    if (!intent.client_secret) {
+        return (
+            <div className="card formSection" style={{ marginTop: 14, marginBottom: 14 }}>
+                <div className="h3">Secure card payment</div>
+                <div className="muted" style={{ marginTop: 6 }}>
+                    The secure payment form is not ready yet. Please refresh and try again in a moment.
+                </div>
+            </div>
+        );
+    }
 
     return (
         <Elements stripe={stripePromise} options={buildStripeElementsOptions(intent.client_secret)}>
@@ -188,6 +248,7 @@ function BookingPaymentSection({
                 clientSecret={intent.client_secret}
                 onError={onError}
                 onProcessingChange={onProcessingChange}
+                onPaymentSubmitted={onPaymentSubmitted}
             />
         </Elements>
     );
@@ -237,10 +298,12 @@ export default function PayBookingPage() {
             return fetchBookingReceipt(id, token);
         },
     });
+    const receiptPaymentStatus = String(receiptQuery.data?.payment_status ?? "").toLowerCase();
 
     const paymentComplete =
         booking?.pay_method !== "money" ||
         paymentMarkedSucceeded ||
+        receiptPaymentStatus === "succeeded" ||
         Boolean(receiptQuery.data?.receipt_url) ||
         String(booking?.status ?? "").toLowerCase() === "confirmed" ||
         toFiniteNumber(booking?.total_price_gbp) <= 0;
@@ -253,6 +316,11 @@ export default function PayBookingPage() {
         paymentComplete &&
         !receiptQuery.data?.receipt_url;
 
+    async function refreshPaymentState() {
+        await bookingQuery.refetch();
+        await receiptQuery.refetch();
+    }
+
     useEffect(() => {
         if (!shouldPollReceipt) return;
         const timer = window.setInterval(() => {
@@ -263,6 +331,18 @@ export default function PayBookingPage() {
             window.clearInterval(timer);
         };
     }, [shouldPollReceipt, receiptQuery, bookingQuery]);
+
+    useEffect(() => {
+        if (paymentComplete) {
+            setProcessingPayment(false);
+            setErr(null);
+            return;
+        }
+        if (receiptPaymentStatus === "failed") {
+            setProcessingPayment(false);
+            setErr((current) => current ?? "Payment was not completed. Please check your details and try again.");
+        }
+    }, [paymentComplete, receiptPaymentStatus]);
 
     if (!token) return <Navigate to="/login" replace />;
 
@@ -281,6 +361,7 @@ export default function PayBookingPage() {
     const ownerContactInfo = String(booking?.owner_contact_info ?? "").trim();
     const contactLockedByPayment = booking?.pay_method === "money" && requiresPayment;
     const ownerContactPendingCopy = "Details will be shown after payment is complete.";
+    const dashboardPath = "/dashboard?tab=myBookings&notice=bookingConfirmed";
 
     function getOwnerContactValue(value: string) {
         if (contactLockedByPayment) {
@@ -348,12 +429,6 @@ export default function PayBookingPage() {
                                 : localSummarySubtitle
                         }
                         className="receiptCard--confirm payReceiptCard"
-                        actions={
-                            <>
-                                <Link to={listingPath} className="btn btn-primary">Return to listing</Link>
-                                <Link to="/about#contact-bottom" className="btn">Contact support</Link>
-                            </>
-                        }
                     >
                         <ReceiptRow label="Booking" value={bookingTitle} />
                         <ReceiptRow label="Location" value={bookingAddress} />
@@ -379,14 +454,33 @@ export default function PayBookingPage() {
                         <ReceiptRow label="Arrival notes" value={getOwnerContactValue(ownerContactInfo)} />
                     </ReceiptCard>
 
+                    {!requiresPayment && (
+                        <div className="paymentSuccessNotice">
+                            <div className="h3">Booking confirmed</div>
+                            <div className="createFieldHint">Nice. Your booking is locked in and the full details are ready below.</div>
+                        </div>
+                    )}
+
                     {requiresPayment && (
                         <BookingPaymentSection
                             booking={booking}
                             token={token}
                             onError={setErr}
                             onProcessingChange={setProcessingPayment}
+                            onPaymentSubmitted={refreshPaymentState}
                         />
                     )}
+
+                    <div className="receiptActions" style={{ marginTop: 12 }}>
+                        {requiresPayment ? (
+                            <>
+                                <Link to={listingPath} className="btn">Return to listing</Link>
+                                <Link to="/about#contact-bottom" className="btn">Contact support</Link>
+                            </>
+                        ) : (
+                            <Link to={dashboardPath} className="btn">View booking in dashboard</Link>
+                        )}
+                    </div>
 
                 </>
             )}

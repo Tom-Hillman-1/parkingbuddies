@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button, OverlayArrow, Tooltip, TooltipTrigger } from "react-aria-components";
 
 type InfoTooltipProps = {
@@ -26,12 +26,49 @@ export function InfoTooltip({
     contentClassName = "",
     icon,
 }: InfoTooltipProps) {
+    const [isTouchMode, setIsTouchMode] = useState(false);
+    const [isTouchOpen, setIsTouchOpen] = useState(false);
+
+    useEffect(() => {
+        if (typeof window === "undefined" || typeof window.matchMedia !== "function") return undefined;
+
+        const mediaQuery = window.matchMedia("(hover: none), (pointer: coarse)");
+        const update = () => setIsTouchMode(mediaQuery.matches);
+        update();
+
+        if (typeof mediaQuery.addEventListener === "function") {
+            mediaQuery.addEventListener("change", update);
+            return () => mediaQuery.removeEventListener("change", update);
+        }
+
+        mediaQuery.addListener(update);
+        return () => mediaQuery.removeListener(update);
+    }, []);
+
+    useEffect(() => {
+        if (!isTouchMode) {
+            setIsTouchOpen(false);
+        }
+    }, [isTouchMode]);
+
     return (
-        <TooltipTrigger delay={120} closeDelay={60}>
+        <TooltipTrigger
+            delay={isTouchMode ? 0 : 120}
+            closeDelay={isTouchMode ? 0 : 60}
+            isOpen={isTouchMode ? isTouchOpen : undefined}
+            onOpenChange={isTouchMode ? setIsTouchOpen : undefined}
+            shouldCloseOnPress={!isTouchMode}
+        >
             <Button
                 type="button"
                 className={`uiTooltipTrigger ${triggerClassName}`.trim()}
                 aria-label={label}
+                onPress={() => {
+                    if (isTouchMode) setIsTouchOpen((open) => !open);
+                }}
+                onBlur={() => {
+                    if (isTouchMode) setIsTouchOpen(false);
+                }}
                 onClick={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
             >

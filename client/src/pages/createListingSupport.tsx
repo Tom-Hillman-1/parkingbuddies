@@ -23,6 +23,21 @@ export type FlowStep = Exclude<WizardStep, 1>;
 export type SpaceChoice = "1" | "2" | "3plus";
 export type Tone = "blue" | "lilac" | "mint" | "cream" | "sky";
 export type WizardSheetName = "spaces" | "custom" | "confirm" | "delete";
+export type ListingFeature =
+    | "protected_lot"
+    | "private_outdoor"
+    | "private_indoor"
+    | "gated_access"
+    | "locked_area"
+    | "ev_friendly"
+    | "cctv"
+    | "covered"
+    | "well_lit"
+    | "wide_bay"
+    | "accessible"
+    | "residential"
+    | "near_station"
+    | "near_airport";
 
 export type GeocodeSuggestion = { display_name: string; lat: string; lon: string };
 export type AvailabilityWindow = {
@@ -44,6 +59,7 @@ type RawAvailabilityWindow = {
 export type DraftSnapshot = {
     mode: Mode;
     parkingType: "private" | "public";
+    features: ListingFeature[];
     title: string;
     description: string;
     ownerContactEmail: string;
@@ -87,7 +103,7 @@ export const LISTING_MODEL_OPTIONS: Array<{ mode: Mode; title: string; copy: str
 
 export const CREATE_FLOW_COPY: Record<FlowStep, { panelTitle: string; panelCopy: string; panelTone: Tone; title: string; subtitle: string }> = {
     2: { panelTitle: "Basics", panelCopy: "Set the core details so drivers quickly understand your space.", panelTone: "blue", title: "Listing information", subtitle: "Keep this short, clear, and practical." },
-    3: { panelTitle: "Pricing", panelCopy: "Choose a simple pricing setup that matches your listing model.", panelTone: "mint", title: "Pricing", subtitle: "Set how drivers pay for this listing." },
+    3: { panelTitle: "Pricing", panelCopy: "Choose how each booking is charged, then decide whether drivers can pay in money, points, or both.", panelTone: "mint", title: "Pricing", subtitle: "Pick a charging method that matches how long drivers usually stay." },
     4: { panelTitle: "Availability", panelCopy: "Add one or more date/time slots to describe when the listing is available.", panelTone: "lilac", title: "Availability", subtitle: "Pick two dates, then add a slot for that range." },
     5: { panelTitle: "Location", panelCopy: "Add a searchable address and confirm the exact map pin.", panelTone: "cream", title: "Location", subtitle: "Search once, then fine-tune by tapping on the map." },
     6: { panelTitle: "Images", panelCopy: "A clear image improves trust and click-through for drivers.", panelTone: "sky", title: "Images", subtitle: "Optional, but strongly recommended." },
@@ -99,6 +115,41 @@ export const PRICE_UNIT_HELP: Record<PriceUnit, string> = {
     day: "Charges by day. Shorter bookings are still billed as a full day.",
     week: "Charges by week. Longer stays are rounded up by full weeks.",
 };
+
+export const LISTING_FEATURE_OPTIONS: Array<{
+    id: ListingFeature;
+    label: string;
+    tone: "cool" | "green" | "warm" | "rose";
+}> = [
+    { id: "protected_lot", label: "Protected lot", tone: "cool" },
+    { id: "private_outdoor", label: "Private outdoor", tone: "green" },
+    { id: "private_indoor", label: "Private indoor", tone: "cool" },
+    { id: "gated_access", label: "Gate protected", tone: "warm" },
+    { id: "locked_area", label: "Locked area", tone: "rose" },
+    { id: "ev_friendly", label: "EV friendly", tone: "green" },
+    { id: "cctv", label: "CCTV", tone: "cool" },
+    { id: "covered", label: "Covered", tone: "warm" },
+    { id: "well_lit", label: "Well lit", tone: "warm" },
+    { id: "wide_bay", label: "Wide bay", tone: "cool" },
+    { id: "accessible", label: "Accessible", tone: "green" },
+    { id: "residential", label: "Residential", tone: "rose" },
+    { id: "near_station", label: "Near station", tone: "cool" },
+    { id: "near_airport", label: "Near airport", tone: "warm" },
+];
+
+const LISTING_FEATURE_LOOKUP = new Map(LISTING_FEATURE_OPTIONS.map((feature) => [feature.id, feature]));
+
+export function isListingFeature(value: unknown): value is ListingFeature {
+    return typeof value === "string" && LISTING_FEATURE_LOOKUP.has(value as ListingFeature);
+}
+
+export function listingFeatureLabel(feature: string) {
+    return LISTING_FEATURE_LOOKUP.get(feature as ListingFeature)?.label ?? feature;
+}
+
+export function listingFeatureTone(feature: string) {
+    return LISTING_FEATURE_LOOKUP.get(feature as ListingFeature)?.tone ?? "cool";
+}
 
 export function derivePointsCostFromGbp(value: unknown) {
     return derivedPointsCostFromMoney(value);
@@ -189,7 +240,7 @@ export function validateAvailabilityWindows(windows: AvailabilityWindowInput[]) 
     return "";
 }
 
-export function toAvailabilityPayload(windows: AvailabilityWindowInput[]) {
+export function toAvailabilityPayload(windows: AvailabilityWindowInput[], features: ListingFeature[] = []) {
     return {
         type: "window_slots",
         windows: windows.map((window) => ({
@@ -199,6 +250,7 @@ export function toAvailabilityPayload(windows: AvailabilityWindowInput[]) {
             start: window.start,
             end: window.end,
         })),
+        ...(features.length ? { features } : {}),
     };
 }
 

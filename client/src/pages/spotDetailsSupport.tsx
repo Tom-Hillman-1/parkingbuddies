@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DayButton as DayPickerDayButton, type DayButtonProps } from "react-day-picker";
 import { AppCalendar } from "../components/ui/AppCalendar";
 import { AppDialog } from "../components/ui/AppDialog";
@@ -38,6 +38,7 @@ export type AvailabilityJson = {
         start: string;
         end: string;
     }>;
+    features?: string[];
 };
 
 export type AvailabilitySpot = {
@@ -69,14 +70,12 @@ export function SlotCalendar<TSpot extends AvailabilitySpot>({
     disabled,
 }: SlotCalendarProps<TSpot>) {
     const [visibleMonth, setVisibleMonth] = useState(() => calendarMonthFromYmd(startDate));
-    const selectedSingleDate = startDate && (!endDate || startDate === endDate) ? startDate : "";
     const dayLabels = useMemo(() => buildSlotDayLabels(spot), [spot]);
-    const selectedRange = useMemo(() => {
-        const from = parseYmd(startDate);
-        if (!from) return undefined;
-        const to = endDate ? parseYmd(endDate) : undefined;
-        return to ? { from, to } : { from, to: from };
-    }, [endDate, startDate]);
+
+    useEffect(() => {
+        if (!startDate) return;
+        setVisibleMonth(calendarMonthFromYmd(startDate));
+    }, [startDate]);
 
     return (
         <div className={`slotCal${disabled ? " is-disabled" : ""}`}>
@@ -84,21 +83,26 @@ export function SlotCalendar<TSpot extends AvailabilitySpot>({
                 mode="range"
                 month={visibleMonth}
                 onMonthChange={setVisibleMonth}
-                selected={selectedRange}
                 disabled={(day) => disabled || !isDaySelectable(spot, day)}
                 modifiers={{
+                    draftSingle: (day) => hasDraftSlotDayState(startDate, endDate, day, "single"),
+                    draftStart: (day) => hasDraftSlotDayState(startDate, endDate, day, "start"),
+                    draftMiddle: (day) => hasDraftSlotDayState(startDate, endDate, day, "middle"),
+                    draftEnd: (day) => hasDraftSlotDayState(startDate, endDate, day, "end"),
                     availableSingle: (day) => hasWindowDayState(spot, day, "single"),
                     availableStart: (day) => hasWindowDayState(spot, day, "start"),
                     availableMiddle: (day) => hasWindowDayState(spot, day, "middle"),
                     availableEnd: (day) => hasWindowDayState(spot, day, "end"),
-                    selectedSingle: (day) => !!selectedSingleDate && toLocalDateInput(day) === selectedSingleDate,
                 }}
                 modifiersClassNames={{
+                    draftSingle: "appCalendarDay--draftSingle",
+                    draftStart: "appCalendarDay--draftStart",
+                    draftMiddle: "appCalendarDay--draftMiddle",
+                    draftEnd: "appCalendarDay--draftEnd",
                     availableSingle: "appCalendarDay--availableSingle",
                     availableStart: "appCalendarDay--availableStart",
                     availableMiddle: "appCalendarDay--availableMiddle",
                     availableEnd: "appCalendarDay--availableEnd",
-                    selectedSingle: "appCalendarDay--selectedSingle",
                 }}
                 components={{
                     DayButton: (props) => <SlotDayButton {...props} dayLabels={dayLabels} />,
@@ -239,6 +243,20 @@ function slotCoversDay(window: WindowSlot, day: Date) {
 }
 
 type WindowDayState = "single" | "start" | "middle" | "end";
+
+function getDraftSlotDayState(startDate: string, endDate: string | null | undefined, dayKey: string): WindowDayState | null {
+    if (!startDate) return null;
+    const rangeEnd = endDate || startDate;
+    if (dayKey < startDate || dayKey > rangeEnd) return null;
+    if (startDate === rangeEnd) return "single";
+    if (dayKey === startDate) return "start";
+    if (dayKey === rangeEnd) return "end";
+    return "middle";
+}
+
+function hasDraftSlotDayState(startDate: string, endDate: string | null | undefined, day: Date, state: WindowDayState) {
+    return getDraftSlotDayState(startDate, endDate, toLocalDateInput(day)) === state;
+}
 
 function getWindowDayState(window: WindowSlot, dayKey: string): WindowDayState | null {
     if (dayKey < window.date_from || dayKey > window.date_to) return null;

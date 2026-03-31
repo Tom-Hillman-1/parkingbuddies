@@ -57,6 +57,11 @@ export default function SignupPage() {
 
     const password = useWatch({ control: form.control, name: "password", defaultValue: "" });
     const strength = useMemo(() => getPasswordStrength(password), [password]);
+    const hasTriedSubmit = form.formState.submitCount > 0;
+    const showFieldError = (fieldName: keyof SignupFormValues) => {
+        const fieldState = form.getFieldState(fieldName, form.formState);
+        return hasTriedSubmit || fieldState.isTouched;
+    };
     const requirementChecks = [
         { met: strength.checks.minLength, label: PASSWORD_REQUIREMENT_LABELS.minLength },
         { met: strength.checks.hasUppercase, label: PASSWORD_REQUIREMENT_LABELS.hasUppercase },
@@ -76,23 +81,20 @@ export default function SignupPage() {
 
     return (
         <div className="container authPage">
-            <div className="pageHeader authPageHeader">
-                <div className="heroKicker">GET STARTED</div>
-                <div className="heroTitle">Sign up to ParkingBuddies</div>
-                <div className="heroSub muted">
-                    Set up your profile, list spaces, and start booking in minutes.
-                </div>
-            </div>
-
             <div className="authGrid authGrid--single">
                 <div className="card authCard">
-                    <div className="h2">Sign up</div>
-                    <div className="muted tiny">We'll use this info to personalize your dashboard.</div>
+                    <div className="authCardHero">
+                        <div className="heroKicker">GET STARTED</div>
+                        <div className="heroTitle">Sign up to ParkingBuddies</div>
+                        <div className="heroSub muted">
+                            Set up your profile, list spaces, and start booking in minutes.
+                        </div>
+                    </div>
 
                     {msg && <div className="card formSection" style={{ color: "crimson" }}>{msg}</div>}
 
                     <form onSubmit={onSubmit} className="authForm">
-                        <AppField label="Name" error={form.formState.errors.name?.message}>
+                        <AppField label="Name" error={showFieldError("name") ? form.formState.errors.name?.message : undefined}>
                             <AppInput
                                 autoComplete="name"
                                 placeholder="Jamie Parker"
@@ -100,7 +102,7 @@ export default function SignupPage() {
                             />
                         </AppField>
 
-                        <AppField label="Email" error={form.formState.errors.email?.message}>
+                        <AppField label="Email" error={showFieldError("email") ? form.formState.errors.email?.message : undefined}>
                             <AppInput
                                 type="email"
                                 autoComplete="email"
@@ -133,7 +135,7 @@ export default function SignupPage() {
                                     </div>
                                 </>
                             }
-                            error={form.formState.errors.password?.message}
+                            error={showFieldError("password") ? form.formState.errors.password?.message : undefined}
                         >
                             <div className="authInputRow">
                                 <AppInput
@@ -148,7 +150,10 @@ export default function SignupPage() {
                             </div>
                         </AppField>
 
-                        <AppField label="Confirm password" error={form.formState.errors.confirmPassword?.message}>
+                        <AppField
+                            label="Confirm password"
+                            error={showFieldError("confirmPassword") ? form.formState.errors.confirmPassword?.message : undefined}
+                        >
                             <AppInput
                                 type={showPass ? "text" : "password"}
                                 autoComplete="new-password"
@@ -161,7 +166,9 @@ export default function SignupPage() {
                             <input type="checkbox" {...form.register("agree")} />
                             I agree to the ParkingBuddies terms
                         </label>
-                        {form.formState.errors.agree && <div className="spotAlert">{form.formState.errors.agree.message}</div>}
+                        {showFieldError("agree") && form.formState.errors.agree && (
+                            <div className="spotAlert">{form.formState.errors.agree.message}</div>
+                        )}
 
                         <AppButton type="submit" variant="primary" disabled={form.formState.isSubmitting}>
                             {form.formState.isSubmitting ? "Creating account..." : "Create account"}
@@ -173,7 +180,7 @@ export default function SignupPage() {
                         Already have an account? <Link to="/login">Log in</Link>
                     </div>
                     <div className="tiny muted" style={{ marginTop: 8 }}>
-                        Need help? Please contact <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>
+                        Need help? Please contact <Link to="/about#contact-us">{SUPPORT_EMAIL}</Link>
                     </div>
                 </div>
             </div>

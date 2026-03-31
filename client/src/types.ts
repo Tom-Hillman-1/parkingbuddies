@@ -35,6 +35,7 @@ export type ParkingSpot = {
             end: string;
         }>;
         parking_kind?: string;
+        features?: string[];
     } | null;
 
     is_active: boolean;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { loadStripe } from "@stripe/stripe-js";
@@ -34,6 +34,7 @@ function buildIntentKey(spotId: string, start: string, end: string, amountGbp: n
 
 function BidCardForm({
     spotId,
+    amountGbp,
     paymentIntentId,
     clientSecret,
     start,
@@ -44,6 +45,7 @@ function BidCardForm({
     onError,
 }: {
     spotId: string;
+    amountGbp: number;
     paymentIntentId: string;
     clientSecret: string;
     start: string;
@@ -51,7 +53,7 @@ function BidCardForm({
     token: string;
     onBack: string;
     onDone: (bidId: string) => void;
-    onError: (msg: string) => void;
+    onError: (msg: string | null) => void;
 }) {
     const stripe = useStripe();
     const elements = useElements();
@@ -59,7 +61,7 @@ function BidCardForm({
 
     async function confirm() {
         setBusy(true);
-        onError("");
+        onError(null);
         let bidSubmitted = false;
         try {
             if (!stripe || !elements) {
@@ -80,14 +82,21 @@ function BidCardForm({
             });
             if (result.error) {
                 onError(result.error.message ?? "Card authorization failed");
-                setBusy(false);
+                return;
+            }
+
+            const confirmedPaymentIntentId = result.paymentIntent?.id ?? paymentIntentId;
+            const confirmedStatus = result.paymentIntent?.status ?? null;
+            if (confirmedStatus && confirmedStatus !== "requires_capture") {
+                onError("Card authorization is still being finalized. Please try again in a moment.");
                 return;
             }
 
             const response = await apiPost<{ bid_id: string }>(
                 `/auctions/${spotId}/bid`,
                 {
-                    payment_intent_id: paymentIntentId,
+                    amount_gbp: amountGbp,
+                    payment_intent_id: confirmedPaymentIntentId,
                     start_time: start,
                     end_time: end,
                     pay_method: "money",
@@ -150,20 +159,23 @@ function BidPaymentSection({
     token: string;
     onBack: string;
     onDone: (bidId: string) => void;
-    onError: (msg: string) => void;
+    onError: (msg: string | null) => void;
 }) {
     const [intent, setIntent] = useState<StripeIntentDetails | null>(null);
+    const [intentLoading, setIntentLoading] = useState(true);
     const intentKey = useMemo(() => buildIntentKey(spotId, start, end, amountGbp), [amountGbp, end, spotId, start]);
 
     useEffect(() => {
         if (!Number.isFinite(amountGbp) || amountGbp <= 0) {
             setIntent(null);
+            setIntentLoading(false);
             return;
         }
 
         let active = true;
         setIntent(null);
-        onError("");
+        setIntentLoading(true);
+        onError(null);
 
         apiPost<StripeIntentDetails>(
             "/payments/auction-intent",
@@ -179,6 +191,9 @@ function BidPaymentSection({
             })
             .catch((error: unknown) => {
                 if (active) onError(readErrorMessage(error, "Unable to prepare secure authorization."));
+            })
+            .finally(() => {
+                if (active) setIntentLoading(false);
             });
 
         return () => {
@@ -186,12 +201,22 @@ function BidPaymentSection({
         };
     }, [amountGbp, intentKey, onError, spotId, token]);
 
-    if (!intent) return null;
+    if (!intent) {
+        return (
+            <div className="card formSection" style={{ padding: 16, marginTop: 12 }}>
+                <div className="h3">Secure card authorization</div>
+                <div className="tiny muted" style={{ marginTop: 4 }}>
+                    {intentLoading ? "Preparing Stripe's secure authorization form..." : "The secure authorization form is unavailable right now."}
+                </div>
+            </div>
+        );
+    }
 
     return (
         <Elements stripe={stripePromise} options={buildStripeElementsOptions(intent.client_secret)}>
             <BidCardForm
                 spotId={spotId}
+                amountGbp={amountGbp}
                 paymentIntentId={intent.payment_intent_id}
                 clientSecret={intent.client_secret}
                 start={start}
@@ -222,6 +247,12 @@ export default function BidConfirmPage() {
 
     const [err, setErr] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const handleMoneyBidError = useCallback((message: string | null) => {
+        setErr(message ? message : null);
+    }, []);
+    const handleMoneyBidDone = useCallback((bidId: string) => {
+        navigate(`/bids/${bidId}`);
+    }, [navigate]);
     const spotQuery = useQuery({
         queryKey: ["bid-confirm-spot", spotId],
         enabled: Boolean(spotId),
@@ -312,8 +343,8 @@ export default function BidConfirmPage() {
                     end={end}
                     token={token}
                     onBack={`/spots/${spotId}`}
-                    onDone={(bidId) => navigate(`/bids/${bidId}`)}
-                    onError={(m) => setErr(m)}
+                    onDone={handleMoneyBidDone}
+                    onError={handleMoneyBidError}
                 />
             ) : (
                 <div className="card formSection" style={{ marginTop: 12 }}>

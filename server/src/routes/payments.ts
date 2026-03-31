@@ -668,6 +668,7 @@ router.post("/booking-intent", requireAuth, bookingIntentRateLimit, async (req: 
                     b.driver_user_id,
                     b.pay_method,
                     b.total_price_gbp,
+                    b.payment_provider_ref,
                     b.start_time,
                     b.end_time,
                     ps.title AS spot_title,
@@ -696,6 +697,39 @@ router.post("/booking-intent", requireAuth, bookingIntentRateLimit, async (req: 
         const amountGbp = toMoney(booking.total_price_gbp);
         if (amountGbp <= 0) {
             return res.status(400).json({ ok: false, error: "Invalid booking amount" });
+        }
+
+        const existingPaymentIntentId = asNonEmptyString(booking.payment_provider_ref);
+        if (existingPaymentIntentId?.startsWith("pi_")) {
+            try {
+                const existingIntent = await stripe.paymentIntents.retrieve(existingPaymentIntentId);
+                const normalizedExistingStatus = normalizeStripePaymentStatus(existingIntent.status);
+                const existingAmountGbp = toMoney((existingIntent.amount_received || existingIntent.amount || 0) / 100);
+
+                await syncBookingPaymentFromReceipt(
+                    booking_id,
+                    existingIntent.id,
+                    existingAmountGbp,
+                    normalizedExistingStatus
+                );
+
+                if (
+                    existingIntent.status === "processing" ||
+                    existingIntent.status === "succeeded" ||
+                    existingIntent.status === "requires_payment_method" ||
+                    existingIntent.status === "requires_confirmation" ||
+                    existingIntent.status === "requires_action"
+                ) {
+                    return res.json({
+                        ok: true,
+                        client_secret: existingIntent.client_secret ?? null,
+                        payment_intent_id: existingIntent.id,
+                        payment_intent_status: existingIntent.status,
+                    });
+                }
+            } catch {
+                // If Stripe no longer recognizes the old intent, fall through and create a fresh one.
+            }
         }
 
         const ownerConnect = await resolveOwnerConnectStatus(booking.owner_user_id, booking.stripe_account_id);
@@ -778,6 +812,7 @@ router.post("/booking-intent", requireAuth, bookingIntentRateLimit, async (req: 
             ok: true,
             client_secret: intent.client_secret,
             payment_intent_id: intent.id,
+            payment_intent_status: intent.status,
         });
     } catch (e) {
         return serverError(res, e, "Unable to start payment right now");

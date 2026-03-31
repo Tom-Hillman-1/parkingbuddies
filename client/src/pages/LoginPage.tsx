@@ -39,7 +39,7 @@ export default function LoginPage() {
     const onSubmit = form.handleSubmit(async (values) => {
         setMsg(null);
         try {
-            await login(values.email, values.password);
+            await login(values.email, values.password, values.remember);
             if (values.remember) {
                 localStorage.setItem("pb_remember", "true");
                 localStorage.setItem("pb_email", values.email);
@@ -57,18 +57,15 @@ export default function LoginPage() {
 
     return (
         <div className="container authPage">
-            <div className="pageHeader authPageHeader">
-                <div className="heroKicker">WELCOME BACK</div>
-                <div className="heroTitle">Log in to ParkingBuddies</div>
-                <div className="heroSub muted">
-                    Jump back into your bookings, listings, and rewards.
-                </div>
-            </div>
-
             <div className="authGrid authGrid--single">
                 <div className="card authCard">
-                    <div className="h2">Sign in</div>
-                    <div className="muted tiny">Use the email you signed up with.</div>
+                    <div className="authCardHero">
+                        <div className="heroKicker">WELCOME BACK</div>
+                        <div className="heroTitle">Log in to ParkingBuddies</div>
+                        <div className="heroSub muted">
+                            Jump back into your bookings, listings, and rewards.
+                        </div>
+                    </div>
 
                     {msg && <div className="card formSection" style={{ color: statusTone }}>{msg}</div>}
 
@@ -117,7 +114,7 @@ export default function LoginPage() {
                         No account yet? <Link to="/signup">Create one</Link>
                     </div>
                     <div className="tiny muted" style={{ marginTop: 8 }}>
-                        Need help? Please contact <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>
+                        Need help? Please contact <Link to="/about#contact-us">{SUPPORT_EMAIL}</Link>
                     </div>
                 </div>
             </div>

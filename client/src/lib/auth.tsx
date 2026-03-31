@@ -6,7 +6,7 @@ type AuthContextValue = {
     token: string | null;
     user: User | null;
     isLoading: boolean;
-    login: (email: string, password: string) => Promise<void>;
+    login: (email: string, password: string, remember?: boolean) => Promise<void>;
     signup: (email: string, name: string, password: string) => Promise<void>;
     logout: () => void;
     refreshMe: () => Promise<void>;
@@ -31,21 +31,37 @@ type ConnectActionResult =
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const TOKEN_KEY = "pb_token";
+const REMEMBER_KEY = "pb_remember";
 
-function readStoredToken() {
+function readStoredAuth() {
     try {
-        const token = window.sessionStorage.getItem(TOKEN_KEY);
-        window.localStorage.removeItem(TOKEN_KEY);
-        return token;
+        const sessionToken = window.sessionStorage.getItem(TOKEN_KEY);
+        if (sessionToken) {
+            return { token: sessionToken, remember: false };
+        }
+
+        const localToken = window.localStorage.getItem(TOKEN_KEY);
+        return {
+            token: localToken,
+            remember: localToken ? window.localStorage.getItem(REMEMBER_KEY) === "true" : false,
+        };
     } catch {
-        return null;
+        return { token: null, remember: false };
     }
 }
 
-function writeStoredToken(token: string) {
+function writeStoredToken(token: string, remember = false) {
     try {
+        if (remember) {
+            window.localStorage.setItem(TOKEN_KEY, token);
+            window.localStorage.setItem(REMEMBER_KEY, "true");
+            window.sessionStorage.removeItem(TOKEN_KEY);
+            return;
+        }
+
         window.sessionStorage.setItem(TOKEN_KEY, token);
         window.localStorage.removeItem(TOKEN_KEY);
+        window.localStorage.removeItem(REMEMBER_KEY);
     } catch {
         // Ignore storage failures and keep the in-memory session alive.
     }
@@ -61,14 +77,17 @@ function clearStoredToken() {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-    const [token, setToken] = useState<string | null>(() => readStoredToken());
+    const [storedAuth] = useState(() => readStoredAuth());
+    const [token, setToken] = useState<string | null>(storedAuth.token);
     const [user, setUser] = useState<User | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [rememberSession, setRememberSession] = useState(storedAuth.remember);
 
     const clearAuthState = useCallback(() => {
         clearStoredToken();
         setToken(null);
         setUser(null);
+        setRememberSession(false);
     }, []);
 
     const refreshMe = useCallback(async () => {
@@ -116,9 +135,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
     }, [token, refreshMe, clearAuthState]);
 
-    const login = useCallback(async (email: string, password: string) => {
+    const login = useCallback(async (email: string, password: string, remember = false) => {
         const r = await apiPost<{ token: string }>("/auth/login", { email, password });
-        writeStoredToken(r.token);
+        writeStoredToken(r.token, remember);
+        setRememberSession(remember);
         setToken(r.token);
         const me = await apiGet<{ user: User }>("/me", r.token);
         setUser(me.user);
@@ -126,7 +146,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const signup = useCallback(async (email: string, name: string, password: string) => {
         const r = await apiPost<{ token: string }>("/auth/signup", { email, name, password });
-        writeStoredToken(r.token);
+        writeStoredToken(r.token, false);
+        setRememberSession(false);
         setToken(r.token);
         const me = await apiGet<{ user: User }>("/me", r.token);
         setUser(me.user);
@@ -137,9 +158,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, [clearAuthState]);
 
     const replaceToken = useCallback((nextToken: string) => {
-        writeStoredToken(nextToken);
+        writeStoredToken(nextToken, rememberSession);
         setToken(nextToken);
-    }, []);
+    }, [rememberSession]);
 
     const value = useMemo<AuthContextValue>(
         () => ({ token, user, isLoading, login, signup, logout, refreshMe, replaceToken }),

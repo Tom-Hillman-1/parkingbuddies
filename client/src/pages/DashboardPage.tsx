@@ -306,6 +306,7 @@ export default function DashboardPage() {
     const [selectedTab, setSelectedTab] = useState<DashboardSection>(
         () => SEARCH_PARAM_TO_SECTION[searchParams.get("tab") ?? ""] ?? "manageBookings"
     );
+    const dashboardNotice = searchParams.get("notice");
 
     const payoutsRef = useRef<HTMLDivElement | null>(null);
 
@@ -624,6 +625,12 @@ export default function DashboardPage() {
             )}
             {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
             {msg && <div className="card formSection">{msg}</div>}
+            {dashboardNotice === "bookingConfirmed" && (
+                <div className="paymentSuccessNotice">
+                    <div className="h3">Booking confirmed</div>
+                    <div className="createFieldHint">You're all set. Your new booking is ready below in Manage bookings.</div>
+                </div>
+            )}
 
             <Tabs
                 aria-label="Dashboard sections"

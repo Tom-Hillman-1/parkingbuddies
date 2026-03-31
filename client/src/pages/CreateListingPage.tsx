@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, MouseEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Lottie from "lottie-react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import SpotsMap from "../components/SpotsMap";
-import { AppRadioCards, AppSwitchField } from "../components/ui/AppChoiceControls";
+import { AppMultiToggleGroup, AppRadioCards, AppSwitchField } from "../components/ui/AppChoiceControls";
 import { AppButton, AppField, AppInput, AppTextarea } from "../components/ui/AppForm";
 import { AppTimePicker } from "../components/ui/AppTimePicker";
 import { apiDelete, apiGet, apiPatch, apiPost, readErrorMessage } from "../lib/api";
-import { useAuth } from "../lib/auth";
+import { useAuth, useStripeConnect } from "../lib/auth";
 import successAnimation from "../assets/Success.json";
 import type { ParkingSpot } from "../types";
 import { isTimeHHMM as isTime, toLocalDateInput } from "./pagesShared";
@@ -28,16 +28,20 @@ import {
     formatYmdLabel,
     hasAvailabilityOverlap,
     CREATE_FLOW_COPY,
+    LISTING_FEATURE_OPTIONS,
     LISTING_MODEL_OPTIONS,
     LONDON_VIEWBOX,
     MIN_AUCTION_START_PRICE_GBP,
     MIN_POINTS_COST,
     modeLabel,
+    isListingFeature,
+    listingFeatureLabel,
     normalizeMode,
     normalizePriceUnit,
     normalizeWindow,
     parseCoordinates,
     PRICE_UNIT_CHOICES,
+    PRICE_UNIT_HELP,
     SheetActions,
     SPACE_CHOICES,
     STEP_COUNT,
@@ -51,6 +55,7 @@ import type {
     DraftSnapshot,
     FlowStep,
     GeocodeSuggestion,
+    ListingFeature,
     Mode,
     PriceUnit,
     SpaceChoice,
@@ -63,6 +68,7 @@ type RawAvailabilityForEdit = {
     date_from?: unknown;
     date_to?: unknown;
     windows?: unknown[];
+    features?: unknown[];
 };
 type OwnerContactForEdit = {
     owner_contact_email?: string | null;
@@ -124,6 +130,9 @@ function buildEditSnapshot(listing: ParkingSpot, ownerContact: OwnerContactForEd
     return {
         mode: normalizeMode(listing.mode),
         parkingType: listing.parking_type === "public" ? "public" : "private",
+        features: Array.isArray(av?.features)
+            ? av.features.filter((feature): feature is ListingFeature => isListingFeature(feature))
+            : [],
         title: asString(listing.title),
         description: asString(listing.description),
         ownerContactEmail: asString(ownerContact.owner_contact_email),
@@ -157,6 +166,7 @@ export default function CreateListingPage() {
     const [activeStep, setActiveStep] = useState<WizardStep>(1);
 
     const [mode, setMode] = useState<Mode>("rent");
+    const [features, setFeatures] = useState<ListingFeature[]>([]);
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
     const [ownerContactEmail, setOwnerContactEmail] = useState("");
@@ -194,16 +204,24 @@ export default function CreateListingPage() {
     const [saving, setSaving] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [error, setError] = useState("");
+    const [connectNotice, setConnectNotice] = useState("");
     const [slotSheetError, setSlotSheetError] = useState("");
     const [publishingOverlayOpen, setPublishingOverlayOpen] = useState(false);
     const [showBasicsStepValidation, setShowBasicsStepValidation] = useState(false);
+    const [showPricingStepValidation, setShowPricingStepValidation] = useState(false);
     const successTimerRef = useRef<number | null>(null);
+    const draftReadyRef = useRef(false);
+    const {
+        beginConnectOnboarding,
+        connectBusy,
+    } = useStripeConnect(token);
 
     const imageInputRef = useRef<HTMLInputElement | null>(null);
     const spacesSheetOpen = activeSheet === "spaces";
     const customSheetOpen = activeSheet === "custom";
     const confirmSheetOpen = activeSheet === "confirm";
     const deleteSheetOpen = activeSheet === "delete";
+    const draftStorageKey = isEdit && editId ? `pb_listing_draft:${editId}` : "pb_listing_draft:new";
 
     const parsedCoords = parseCoordinates(lat, lng);
     const mapCenter = parsedCoords ?? { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] };
@@ -236,6 +254,7 @@ export default function CreateListingPage() {
     function applySnapshot(snapshot: DraftSnapshot) {
         setMode(snapshot.mode);
         setParkingType(snapshot.parkingType);
+        setFeatures(snapshot.features ?? []);
         setTitle(snapshot.title);
         setDescription(snapshot.description);
         setOwnerContactEmail(snapshot.ownerContactEmail);
@@ -270,6 +289,83 @@ export default function CreateListingPage() {
         setImageUrl(snapshot.imageUrl);
     }
 
+    function buildDraftSnapshot(): DraftSnapshot {
+        return {
+            mode,
+            parkingType,
+            features,
+            title,
+            description,
+            ownerContactEmail,
+            ownerContactPhone,
+            ownerContactInfo,
+            capacityTotal,
+            priceUnit,
+            price,
+            auctionStartPrice,
+            allowPoints,
+            pointsCost,
+            availabilityWindows,
+            addressText,
+            lat,
+            lng,
+            imageUrl,
+        };
+    }
+
+    function clearSavedDraft() {
+        try {
+            window.localStorage.removeItem(draftStorageKey);
+        } catch {
+        }
+    }
+
+    function saveCurrentDraft() {
+        try {
+            const payload = JSON.stringify({
+                activeStep,
+                snapshot: buildDraftSnapshot(),
+            });
+            window.localStorage.setItem(draftStorageKey, payload);
+        } catch {
+            try {
+                const snapshot = buildDraftSnapshot();
+                window.localStorage.setItem(
+                    draftStorageKey,
+                    JSON.stringify({
+                        activeStep,
+                        snapshot: {
+                            ...snapshot,
+                            imageUrl: "",
+                        },
+                    })
+                );
+            } catch {
+            }
+        }
+    }
+
+    function restoreSavedDraft() {
+        try {
+            const raw = window.localStorage.getItem(draftStorageKey);
+            if (!raw) return false;
+            const parsed = JSON.parse(raw) as { activeStep?: number; snapshot?: DraftSnapshot };
+            if (!parsed?.snapshot) return false;
+            applySnapshot(parsed.snapshot);
+            const nextStep = Number(parsed.activeStep);
+            if (Number.isInteger(nextStep) && nextStep >= 1 && nextStep <= STEP_COUNT) {
+                setActiveStep(nextStep as WizardStep);
+            }
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    function isStripePublishBlock(message: string) {
+        return /complete stripe onboarding/i.test(message) || /money payments/i.test(message);
+    }
+
     useEffect(() => {
         return () => {
             if (successTimerRef.current != null) {
@@ -284,14 +380,50 @@ export default function CreateListingPage() {
     }, [isEdit]);
 
     useEffect(() => {
-        if (!editSnapshotQuery.data) return;
-        applySnapshot(editSnapshotQuery.data);
-    }, [editSnapshotQuery.data]);
+        if (draftReadyRef.current) return;
+        if (!isEdit) {
+            restoreSavedDraft();
+            draftReadyRef.current = true;
+            return;
+        }
+        if (editSnapshotQuery.isPending) return;
+        if (!restoreSavedDraft() && editSnapshotQuery.data) {
+            applySnapshot(editSnapshotQuery.data);
+        }
+        draftReadyRef.current = true;
+    }, [draftStorageKey, editSnapshotQuery.data, editSnapshotQuery.isPending, isEdit]);
 
     useEffect(() => {
         if (!editSnapshotQuery.isError) return;
         setError(readErrorMessage(editSnapshotQuery.error, "Could not load listing for editing."));
     }, [editSnapshotQuery.isError, editSnapshotQuery.error]);
+
+    useEffect(() => {
+        if (!draftReadyRef.current) return;
+        saveCurrentDraft();
+    }, [
+        activeStep,
+        mode,
+        features,
+        title,
+        description,
+        ownerContactEmail,
+        ownerContactPhone,
+        ownerContactInfo,
+        parkingType,
+        capacityTotal,
+        priceUnit,
+        price,
+        auctionStartPrice,
+        allowPoints,
+        pointsCost,
+        availabilityWindows,
+        addressText,
+        lat,
+        lng,
+        imageUrl,
+        draftStorageKey,
+    ]);
 
     useEffect(() => {
         if (mode === "free") {
@@ -406,6 +538,12 @@ export default function CreateListingPage() {
             setPendingSpacesCustom("4");
         }
         setActiveSheet("spaces");
+    }
+
+    function openSpacesSheetFromTile(event: MouseEvent<HTMLButtonElement>) {
+        event.preventDefault();
+        event.stopPropagation();
+        openSpacesSheet();
     }
 
     function applySpacesSheet() {
@@ -565,6 +703,7 @@ export default function CreateListingPage() {
     const normalizedOwnerContactInfo = ownerContactInfo.trim();
     const normalizedAddress = addressText.trim();
     const setupCapacity = Math.max(0, Math.floor(Number(capacityTotal) || 0));
+    const spacesLabel = `${setupCapacity || 1} ${(setupCapacity || 1) === 1 ? "space" : "spaces"}`;
     const priceNum = Number(price || 0);
     const pointsNum = Number(pointsCost || 0);
     const auctionStartNum = Number(auctionStartPrice || 0);
@@ -588,22 +727,23 @@ export default function CreateListingPage() {
         normalizedDescription.length > 0 && normalizedDescription.length < 5
             ? "Description should be at least 5 characters, or leave it empty."
             : "";
-    const pricingIssue =
-        mode !== "free" && !allowMoney && !allowPoints
-            ? "Enable at least one payment method."
-            : allowMoney && mode === "rent" && (!Number.isFinite(priceNum) || priceNum <= 0)
-                    ? "Rent listings need a valid price above 0."
-                    : allowMoney && mode === "auction" && (!Number.isFinite(auctionStartNum) || auctionStartNum < MIN_AUCTION_START_PRICE_GBP)
-                            ? "Auction start price must be at least GBP 0.10."
-                            : allowPoints && (!Number.isFinite(pointsNum) || pointsNum < MIN_POINTS_COST)
-                                ? "Points must be at least 1."
-                                : "";
+    const paymentMethodIssue = mode !== "free" && !allowMoney && !allowPoints ? "Enable at least one payment method." : "";
+    const pricingValueIssue =
+        allowMoney && mode === "rent" && (!Number.isFinite(priceNum) || priceNum <= 0)
+            ? "Rent listings need a valid price above 0."
+            : allowMoney && mode === "auction" && (!Number.isFinite(auctionStartNum) || auctionStartNum < MIN_AUCTION_START_PRICE_GBP)
+                    ? "Auction start price must be at least GBP 0.10."
+                    : allowPoints && (!Number.isFinite(pointsNum) || pointsNum < MIN_POINTS_COST)
+                        ? "Points must be at least 1."
+                        : "";
+    const pricingIssue = paymentMethodIssue || pricingValueIssue;
+    const visiblePricingIssue = paymentMethodIssue && !showPricingStepValidation ? "" : pricingIssue;
 
     const availabilityPayloadResult = useMemo<{ payload: ReturnType<typeof toAvailabilityPayload> | null; issue: string }>(() => {
         const issue = validateAvailabilityWindows(availabilityWindows);
         if (issue) return { payload: null, issue };
-        return { payload: toAvailabilityPayload(availabilityWindows), issue: "" };
-    }, [availabilityWindows]);
+        return { payload: toAvailabilityPayload(availabilityWindows, features), issue: "" };
+    }, [availabilityWindows, features]);
     const availabilityIssue = availabilityPayloadResult.issue;
 
     const locationIssue = !parsedCoords
@@ -662,6 +802,7 @@ export default function CreateListingPage() {
         }
 
         setError("");
+        setConnectNotice("");
         if (!submitPayload) {
             setError(submitIssue || "Please review your listing details.");
             return;
@@ -674,12 +815,30 @@ export default function CreateListingPage() {
                     ? await apiPatch<{ parking_spot: ParkingSpot }>(`/parking-spots/${editId}`, submitPayload, token)
                     : await apiPost<{ parking_spot: ParkingSpot }>("/parking-spots", submitPayload, token);
             const nextId = response.parking_spot?.id || editId;
+            clearSavedDraft();
             closeSheet();
             showPublishSuccess(nextId ? `/spots/${nextId}` : "/dashboard");
         } catch (error: unknown) {
-            setError(readErrorMessage(error, isEdit ? "Failed to save listing." : "Failed to publish listing."));
+            const message = readErrorMessage(error, isEdit ? "Failed to save listing." : "Failed to publish listing.");
+            if (isStripePublishBlock(message)) {
+                saveCurrentDraft();
+                setConnectNotice(
+                    "Please complete Stripe’s official onboarding before publishing a money listing. It usually takes around 5 minutes. Your draft is saved and will be waiting when you come back, or you can switch this listing to points only."
+                );
+                return;
+            }
+            setError(message);
         } finally {
             setSaving(false);
+        }
+    }
+
+    async function handleConnectStripeFromPublish() {
+        saveCurrentDraft();
+        setError("");
+        const result = await beginConnectOnboarding("stripe");
+        if (!result.ok && result.error) {
+            setError(result.error);
         }
     }
 
@@ -720,9 +879,12 @@ export default function CreateListingPage() {
     const availabilitySummary = availabilityWindows.length
         ? `${availabilityWindows.length} slot${availabilityWindows.length === 1 ? "" : "s"} configured`
         : "No availability set";
+    const featuresSummary = features.length
+        ? features.map((feature) => listingFeatureLabel(feature)).join(", ")
+        : "None selected";
     const confirmRows: Array<{ label: string; value: string }> = [
         { label: "Model", value: modeLabel(mode) },
-        { label: "Parking type", value: parkingType === "public" ? "Public lot / shared spaces" : "Private space" },
+        { label: "Features", value: featuresSummary },
         { label: "Spaces", value: `${setupCapacity || 1} ${setupCapacity === 1 ? "space" : "spaces"}` },
         { label: "Pricing", value: priceSummary },
         { label: "Availability", value: availabilitySummary },
@@ -734,6 +896,7 @@ export default function CreateListingPage() {
     function goNext() {
         if (!currentStepReady) {
             if (activeStep === 2) setShowBasicsStepValidation(true);
+            if (activeStep === 3) setShowPricingStepValidation(true);
             return;
         }
         if (activeStep === 6) {
@@ -779,50 +942,52 @@ export default function CreateListingPage() {
                     </AppField>
 
                     <div className="wizardLabelRow wizardLabelRow--small">
-                        <span className="wizardPricingHead">Parking type</span>
+                        <span className="wizardPricingHead">Space features</span>
                     </div>
-                    <AppRadioCards
-                        ariaLabel="Parking type"
-                        className="wizardOptionGrid"
-                        itemClassName="wizardOptionCard"
-                        orientation="horizontal"
-                        value={parkingType}
-                        onChange={(next) => setParkingType(next)}
-                        options={[
-                            { id: "private", content: <span className="wizardOptionTitle">Private</span> },
-                            { id: "public", content: <span className="wizardOptionTitle">Public / shared</span> },
-                        ]}
+                    <AppMultiToggleGroup
+                        ariaLabel="Space features"
+                        className="wizardFeatureGrid"
+                        itemClassName="wizardFeatureChip"
+                        values={features}
+                        onChange={setFeatures}
+                        options={LISTING_FEATURE_OPTIONS.map((feature) => ({
+                            id: feature.id,
+                            className: `wizardFeatureChip--${feature.tone}`,
+                            content: <span className="wizardFeatureChipLabel">{feature.label}</span>,
+                        }))}
                     />
 
-                    <div className="createFieldHint">
-                        The contact details below will only be shared with drivers after booking is complete.
+                    <div className="wizardContactBlock">
+                        <div className="createFieldHint">
+                            These contact details belong to the whole section below and will only be shared with drivers after booking is complete.
+                        </div>
+
+                        <AppField label="Email">
+                            <AppInput
+                                type="email"
+                                value={ownerContactEmail}
+                                onChange={(event) => setOwnerContactEmail(event.target.value)}
+                                placeholder="owner@email.com"
+                            />
+                        </AppField>
+
+                        <AppField label="Phone">
+                            <AppInput
+                                value={ownerContactPhone}
+                                onChange={(event) => setOwnerContactPhone(event.target.value)}
+                                placeholder="07123 456789"
+                            />
+                        </AppField>
+
+                        <AppField label="Additional instructions and information">
+                            <AppTextarea
+                                rows={3}
+                                value={ownerContactInfo}
+                                onChange={(event) => setOwnerContactInfo(event.target.value)}
+                                placeholder="Gate code, where to park, or arrival notes."
+                            />
+                        </AppField>
                     </div>
-
-                    <AppField label="Email">
-                        <AppInput
-                            type="email"
-                            value={ownerContactEmail}
-                            onChange={(event) => setOwnerContactEmail(event.target.value)}
-                            placeholder="owner@email.com"
-                        />
-                    </AppField>
-
-                    <AppField label="Phone">
-                        <AppInput
-                            value={ownerContactPhone}
-                            onChange={(event) => setOwnerContactPhone(event.target.value)}
-                            placeholder="07123 456789"
-                        />
-                    </AppField>
-
-                    <AppField label="Additional instructions and information">
-                        <AppTextarea
-                            rows={3}
-                            value={ownerContactInfo}
-                            onChange={(event) => setOwnerContactInfo(event.target.value)}
-                            placeholder="Gate code, where to park, or arrival notes."
-                        />
-                    </AppField>
                 </div>
             );
             case 3:
@@ -832,7 +997,7 @@ export default function CreateListingPage() {
                         <div className="wizardSubTitle">Pricing setup</div>
                         <Tooltip
                             label="Pricing help"
-                            text="Hourly means pay per hour (best for maximizing profits). Daily means one booking per day. Weekly means one booking per week (least headache)."
+                            text="Hourly works best for shorter flexible stays. Daily charges one full day for each booked day, even if the driver stays for only part of it. Weekly is best for longer stays and charges by full weeks."
                         />
                     </div>
 
@@ -853,6 +1018,12 @@ export default function CreateListingPage() {
                                     content: <span className="wizardOptionTitle">{unit.label}</span>,
                                 }))}
                             />
+                            <div className="wizardInlineText">
+                                {PRICE_UNIT_HELP[priceUnit]}
+                            </div>
+                            <div className="createFieldHint">
+                                Hourly is usually best for short visits, daily works best for day-long parking, and weekly suits longer stays.
+                            </div>
                         </div>
                     )}
 
@@ -930,7 +1101,7 @@ export default function CreateListingPage() {
 
                     {mode === "free" && <div className="wizardInlineText">Free listing selected, so no money price is required.</div>}
 
-                    {pricingIssue && <div className="createInlineError">{pricingIssue}</div>}
+                    {visiblePricingIssue && <div className="createInlineError">{visiblePricingIssue}</div>}
                 </div>
             );
             case 4:
@@ -1097,20 +1268,22 @@ export default function CreateListingPage() {
                                                 </div>
                                                 <span className="wizardTileTitle">{choice.title}</span>
                                                 <span className="wizardTileCopy">{choice.copy}</span>
+                                                {mode === choice.mode && (
+                                                    <div className="wizardTileFooter">
+                                                        <button
+                                                            type="button"
+                                                            className="btn wizardTileSpotsBtn"
+                                                            onClick={openSpacesSheetFromTile}
+                                                        >
+                                                            Edit spaces
+                                                        </button>
+                                                        <span className="wizardTileSpacesValue">{spacesLabel}</span>
+                                                    </div>
+                                                )}
                                             </>
                                         ),
                                     }))}
                                 />
-
-                                <div className="wizardInlineRow wizardInlineRow--intro">
-                                    <AppButton type="button" className="wizardTileSpotsBtn" onClick={openSpacesSheet}>
-                                        Edit spaces
-                                    </AppButton>
-                                    <div className="wizardInlineValue">
-                                        {setupCapacity || 1} {(setupCapacity || 1) === 1 ? "space" : "spaces"}
-                                    </div>
-
-                                </div>
 
                                 <div className="wizardActions wizardActions--intro">
                                     {isEdit && (
@@ -1171,7 +1344,7 @@ export default function CreateListingPage() {
                                                 type="button"
                                                 variant="primary"
                                                 onClick={goNext}
-                                                disabled={(activeStep !== 2 && !currentStepReady) || saving || deleting}
+                                                disabled={(activeStep !== 2 && activeStep !== 3 && !currentStepReady) || saving || deleting}
                                             >
                                                 {activeStep === 6 ? "Publish" : "Next"}
                                             </AppButton>
@@ -1282,6 +1455,33 @@ export default function CreateListingPage() {
                         ))}
                     </div>
                 </div>
+
+                {connectNotice && (
+                    <div className="createConnectNotice">
+                        <div className="h3">Stripe onboarding needed</div>
+                        <div className="createFieldHint">{connectNotice}</div>
+                        <div className="createConnectNoticeActions">
+                            <AppButton
+                                type="button"
+                                variant="primary"
+                                onPress={() => void handleConnectStripeFromPublish()}
+                                disabled={connectBusy}
+                            >
+                                {connectBusy ? "Opening..." : "Complete Stripe onboarding"}
+                            </AppButton>
+                            <AppButton
+                                type="button"
+                                onPress={() => {
+                                    setConnectNotice("");
+                                    closeSheet();
+                                    setActiveStep(3);
+                                }}
+                            >
+                                Go back to pricing
+                            </AppButton>
+                        </div>
+                    </div>
+                )}
 
                 {error && <div className="createInlineError">{error}</div>}
 

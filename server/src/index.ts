@@ -59,7 +59,7 @@ app.use(
     })
 );
 app.post("/payments/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "6mb" }));
 
 app.use("/auth", authRoutes);
 app.use("/me", meRoutes);
