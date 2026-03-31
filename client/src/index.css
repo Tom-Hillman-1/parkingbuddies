@@ -169,8 +169,10 @@ textarea {
     display: block;
     width: min(364px, calc(100% + 1.4rem));
     height: clamp(262px, 56vw, 318px);
-    margin: -1.9rem auto -4.65rem;
+    margin: -2rem auto -5.1rem;
+    transform: translateX(-0.45rem);
     flex-shrink: 0;
+
 }
 
 .app-loader-logo {
@@ -665,7 +667,7 @@ label > span:first-child {
 
 .home-kicker,
 .heroKicker {
-    margin: 0;
+    margin: -20px;
     text-transform: uppercase;
     letter-spacing: 0.09em;
     font-size: 0.78rem;
