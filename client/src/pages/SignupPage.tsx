@@ -65,10 +65,10 @@ export default function SignupPage() {
     };
 
     const requirementChecks = [
-        { met: strength.checks.minLength, label: PASSWORD_REQUIREMENT_LABELS.minLength },
-        { met: strength.checks.hasUppercase, label: PASSWORD_REQUIREMENT_LABELS.hasUppercase },
         { met: strength.checks.hasLowercase, label: PASSWORD_REQUIREMENT_LABELS.hasLowercase },
         { met: strength.checks.hasNumber, label: PASSWORD_REQUIREMENT_LABELS.hasNumber },
+        { met: strength.checks.hasUppercase, label: PASSWORD_REQUIREMENT_LABELS.hasUppercase },
+        { met: strength.checks.minLength, label: PASSWORD_REQUIREMENT_LABELS.minLength }
     ];
 
     const onSubmit = form.handleSubmit(async (values) => {
@@ -166,12 +166,12 @@ export default function SignupPage() {
                                 />
                             </div>
 
-                            
+
                         </div>
 
                         <label className="chip">
                             <input type="checkbox" {...form.register("agree")} />
-                            I agree to the ParkingBuddies terms
+                            I agree to ParkingBuddies terms
                         </label>
 
                         {showFieldError("agree") && form.formState.errors.agree && (
@@ -187,9 +187,7 @@ export default function SignupPage() {
                     <div className="tiny muted">
                         Already have an account? <Link to="/login">Log in</Link>
                     </div>
-                    <div className="tiny muted" style={{ marginTop: 8 }}>
-                        Need help? Please contact <Link to="/about#contact-us">{SUPPORT_EMAIL}</Link>
-                    </div>
+
                 </div>
             </div>
         </div>

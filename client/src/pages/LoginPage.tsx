@@ -98,10 +98,9 @@ export default function LoginPage() {
 
                         <div className="rowInline" style={{ justifyContent: "space-between" }}>
                             <label className="chip">
-                                <input type="checkbox" {...form.register("remember")} />
+                                <input type="checkbox" style={{margin:-1}} {...form.register("remember")} />
                                 Keep me signed in
                             </label>
-                            <span className="tiny muted">Forgot password? Ask support.</span>
                         </div>
 
                         <AppButton type="submit" variant="primary" disabled={form.formState.isSubmitting}>
@@ -113,9 +112,7 @@ export default function LoginPage() {
                     <div className="tiny muted">
                         No account yet? <Link to="/signup">Create one</Link>
                     </div>
-                    <div className="tiny muted" style={{ marginTop: 8 }}>
-                        Need help? Please contact <Link to="/about#contact-us">{SUPPORT_EMAIL}</Link>
-                    </div>
+
                 </div>
             </div>
         </div>

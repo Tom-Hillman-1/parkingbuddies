@@ -5,10 +5,10 @@ export const PASSWORD_REQUIREMENTS_HINT =
     "Use 8+ characters with at least 1 uppercase letter, 1 lowercase letter, and 1 number.";
 
 export const PASSWORD_REQUIREMENT_LABELS = {
-    minLength: "8+ characters",
-    hasUppercase: "uppercase letter",
-    hasLowercase: "lowercase letter",
-    hasNumber: "number",
+    hasNumber: "Number",
+    hasLowercase: "Lowercase",
+    hasUppercase: "Uppercase",
+    minLength: "8+",
 } as const;
 
 export type PasswordChecks = {
@@ -22,7 +22,6 @@ export type PasswordChecks = {
 export type PasswordStrength = {
     checks: PasswordChecks;
     meetsMinimum: boolean;
-    label: "Weak" | "Almost there" | "Good" | "Strong";
     width: string;
     color: string;
 };
@@ -53,7 +52,6 @@ export function getPasswordStrength(password: string): PasswordStrength {
         return {
             checks,
             meetsMinimum,
-            label: "Weak",
             width: "0%",
             color: "rgba(243,107,127,0.9)",
         };
@@ -63,7 +61,6 @@ export function getPasswordStrength(password: string): PasswordStrength {
         return {
             checks,
             meetsMinimum,
-            label: metRequiredCount >= 3 ? "Almost there" : "Weak",
             width: `${Math.max(25, metRequiredCount * 20)}%`,
             color: metRequiredCount >= 3 ? "rgba(255,200,87,0.9)" : "rgba(243,107,127,0.9)",
         };
@@ -72,7 +69,7 @@ export function getPasswordStrength(password: string): PasswordStrength {
     return {
         checks,
         meetsMinimum,
-        label: bonusCount > 0 || password.length >= 12 ? "Strong" : "Good",
+
         width: bonusCount > 0 || password.length >= 12 ? "100%" : "80%",
         color: "rgba(59,186,156,0.9)",
     };
