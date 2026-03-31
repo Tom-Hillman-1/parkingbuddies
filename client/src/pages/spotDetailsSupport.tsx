@@ -71,6 +71,7 @@ export function SlotCalendar<TSpot extends AvailabilitySpot>({
 }: SlotCalendarProps<TSpot>) {
     const [visibleMonth, setVisibleMonth] = useState(() => calendarMonthFromYmd(startDate));
     const dayLabels = useMemo(() => buildSlotDayLabels(spot), [spot]);
+    const selectedDays = useMemo(() => buildSelectedSlotDays(startDate, endDate), [startDate, endDate]);
 
     useEffect(() => {
         if (!startDate) return;
@@ -80,25 +81,18 @@ export function SlotCalendar<TSpot extends AvailabilitySpot>({
     return (
         <div className={`slotCal${disabled ? " is-disabled" : ""}`}>
             <AppCalendar
-                mode="single"
+                mode="multiple"
+                selected={selectedDays}
                 month={visibleMonth}
                 onMonthChange={setVisibleMonth}
                 disabled={(day) => disabled || !isDaySelectable(spot, day)}
                 modifiers={{
-                    draftSingle: (day) => hasDraftSlotDayState(startDate, endDate, day, "single"),
-                    draftStart: (day) => hasDraftSlotDayState(startDate, endDate, day, "start"),
-                    draftMiddle: (day) => hasDraftSlotDayState(startDate, endDate, day, "middle"),
-                    draftEnd: (day) => hasDraftSlotDayState(startDate, endDate, day, "end"),
                     availableSingle: (day) => hasWindowDayState(spot, day, "single"),
                     availableStart: (day) => hasWindowDayState(spot, day, "start"),
                     availableMiddle: (day) => hasWindowDayState(spot, day, "middle"),
                     availableEnd: (day) => hasWindowDayState(spot, day, "end"),
                 }}
                 modifiersClassNames={{
-                    draftSingle: "appCalendarDay--draftSingle",
-                    draftStart: "appCalendarDay--draftStart",
-                    draftMiddle: "appCalendarDay--draftMiddle",
-                    draftEnd: "appCalendarDay--draftEnd",
                     availableSingle: "appCalendarDay--availableSingle",
                     availableStart: "appCalendarDay--availableStart",
                     availableMiddle: "appCalendarDay--availableMiddle",
@@ -244,18 +238,21 @@ function slotCoversDay(window: WindowSlot, day: Date) {
 
 type WindowDayState = "single" | "start" | "middle" | "end";
 
-function getDraftSlotDayState(startDate: string, endDate: string | null | undefined, dayKey: string): WindowDayState | null {
-    if (!startDate) return null;
-    const rangeEnd = endDate || startDate;
-    if (dayKey < startDate || dayKey > rangeEnd) return null;
-    if (startDate === rangeEnd) return "single";
-    if (dayKey === startDate) return "start";
-    if (dayKey === rangeEnd) return "end";
-    return "middle";
-}
+function buildSelectedSlotDays(startDate: string, endDate: string | null | undefined) {
+    const start = parseYmd(startDate);
+    const end = parseYmd(endDate || startDate);
+    if (!start || !end) return [] as Date[];
 
-function hasDraftSlotDayState(startDate: string, endDate: string | null | undefined, day: Date, state: WindowDayState) {
-    return getDraftSlotDayState(startDate, endDate, toLocalDateInput(day)) === state;
+    const startDay = startOfDay(start);
+    const endDay = startOfDay(end);
+    if (endDay < startDay) return [startDay];
+
+    const days: Date[] = [];
+    for (let day = startDay; day <= endDay; day = addDays(day, 1)) {
+        days.push(new Date(day));
+    }
+
+    return days;
 }
 
 function getWindowDayState(window: WindowSlot, dayKey: string): WindowDayState | null {

@@ -346,8 +346,6 @@ export default function SpotDetailsPage() {
             : hasSelectedSlot
                 ? calendarDraftEndDate ?? selectedEndDate
                 : null;
-    const calendarAnchorDate = calendarDraftStartDate ?? selectedStartDate;
-
     async function createBooking() {
         if (!token) return setActionMsg("Please log in to book this listing.");
         if (!spot || spot.mode === "auction") return;
@@ -563,7 +561,7 @@ export default function SpotDetailsPage() {
                         </p>
 
                         <SlotCalendar
-                            key={`${calendarAnchorDate.slice(0, 7)}-${calendarResetNonce}`}
+                            key={`${calendarStartDate || "none"}-${calendarEndDate || "none"}-${calendarResetNonce}`}
                             spot={spot}
                             startDate={calendarStartDate}
                             endDate={calendarEndDate}
@@ -600,10 +598,6 @@ export default function SpotDetailsPage() {
                                             <span>{formatDateDisplay(endAt)}</span>
                                         </div>
                                     </div>
-
-                                    <div className="slotRangeFoot">
-                                        {formatDateTimeCompact(startAt.toISOString())} {" -> "} {formatDateTimeCompact(endAt.toISOString())}
-                                    </div>
                                 </>
                             ) : null}
                         </div>
@@ -623,7 +617,7 @@ export default function SpotDetailsPage() {
                             </p>
 
                             {!token && (
-                                <div className="spotAlert">
+                                <div className="spotAlert spotAlert--danger">
                                     Please <Link to="/login">log in</Link> to bid.
                                 </div>
                             )}
@@ -713,7 +707,7 @@ export default function SpotDetailsPage() {
                             <div className="h3">Book this space</div>
 
                             {!token && (
-                                <div className="spotAlert">
+                                <div className="spotAlert spotAlert--danger">
                                     Please <Link to="/login">log in</Link> to book.
                                 </div>
                             )}
@@ -721,8 +715,10 @@ export default function SpotDetailsPage() {
                             {listingInactive && <div className="spotAlert">This listing is no longer active for new bookings.</div>}
 
                             <div className="spotSimpleInlineMeta">
-                                <span className="tiny muted">Estimated total</span>
-                                <span className="badge">{estimatedBookingTotalLabel}</span>
+                                <span className="badge spotEstimateBadge">
+                                    <span className="spotEstimateBadgeLabel">Total price:</span>
+                                    <strong>{estimatedBookingTotalLabel}</strong>
+                                </span>
                             </div>
                             {bookingMoneyBelowMinimum && (
                                 <div className="tiny" style={{ color: "#a23636", marginTop: 6 }}>

@@ -95,8 +95,19 @@
 .spotSimpleInlineMeta {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 0.65rem;
+}
+
+.spotEstimateBadge {
+    gap: 0.42rem;
+    padding-inline: 0.82rem;
+}
+
+.spotEstimateBadgeLabel {
+    color: #6c7f96;
+    font-size: 0.72rem;
+    font-weight: 700;
 }
 
 .spotSimpleBid {
@@ -135,29 +146,44 @@
     pointer-events: none;
 }
 
-.slotCal .appCalendar .rdp-day.rdp-range_start,
-.slotCal .appCalendar .rdp-day.rdp-range_middle,
-.slotCal .appCalendar .rdp-day.rdp-range_end,
-.slotCal .appCalendar .appCalendarDay--draftSingle,
-.slotCal .appCalendar .appCalendarDay--draftStart,
-.slotCal .appCalendar .appCalendarDay--draftMiddle,
-.slotCal .appCalendar .appCalendarDay--draftEnd,
-.slotCal .appCalendar .appCalendarDay--selectedSingle {
+.slotCal .appCalendar .rdp-day.rdp-selected {
     background: transparent;
 }
 
-.slotCal .appCalendar .rdp-day.rdp-range_start .rdp-day_button,
-.slotCal .appCalendar .rdp-day.rdp-range_middle .rdp-day_button,
-.slotCal .appCalendar .rdp-day.rdp-range_end .rdp-day_button,
-.slotCal .appCalendar .appCalendarDay--draftSingle .rdp-day_button,
-.slotCal .appCalendar .appCalendarDay--draftStart .rdp-day_button,
-.slotCal .appCalendar .appCalendarDay--draftMiddle .rdp-day_button,
-.slotCal .appCalendar .appCalendarDay--draftEnd .rdp-day_button,
-.slotCal .appCalendar .appCalendarDay--selectedSingle .rdp-day_button {
+.slotCal .appCalendar .rdp-day.rdp-selected .rdp-day_button {
     border-color: #1a6cff;
     background: #1a6cff;
     color: #ffffff;
-    box-shadow: 0 0 0 2px rgba(26, 108, 255, 0.18);
+    box-shadow: none;
+}
+
+.slotCal .appCalendar--slots .rdp-month_grid {
+    border-spacing: 0.38rem 0.56rem;
+}
+
+.slotCal .appCalendar--slots .rdp-day {
+    height: 3.98rem;
+}
+
+@media (max-width: 720px) {
+    .slotCal .appCalendar--slots .rdp-month_grid {
+        border-spacing: 0.74rem 0.68rem;
+    }
+
+    .slotCal .appCalendar--slots .rdp-day {
+        height: 4.08rem;
+    }
+
+    .slotCal .appCalendar--slots .rdp-day_button {
+        width: 2.46rem;
+        height: 2.46rem;
+        min-width: 2.46rem;
+        min-height: 2.46rem;
+    }
+
+    .slotCal .appCalendar--slots .rdp-day_button::after {
+        top: calc(100% + 0.3rem);
+    }
 }
 
 .slotRangeSummary {
@@ -251,6 +277,12 @@
     color: #2f4b72;
     font-size: 0.85rem;
     padding: 0.62rem 0.72rem;
+}
+
+.spotAlert--danger {
+    border-color: #efc4cc;
+    background: #fff3f5;
+    color: #9f2f45;
 }
 
 .payToggle {
