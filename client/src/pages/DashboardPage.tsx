@@ -1040,7 +1040,7 @@ export default function DashboardPage() {
                                     </div>
 
                                     <div className="dashboardStripeActions">
-                                        <button className="btn btn-primary" onClick={handleOpenConnectDashboard} disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}>Open Stripe dashboard</button>
+                                        <button className="btn btn-primary" style={{width: "75%", marginLeft: "12.5%"}} onClick={handleOpenConnectDashboard} disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}>Open Stripe dashboard</button>
                                     </div>
                                 </div>
                         </DashboardDisclosureCard>
