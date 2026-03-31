@@ -5,7 +5,6 @@ import { z } from "zod";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AppButton, AppField, AppInput } from "../components/ui/AppForm";
 import { useAuth } from "../lib/auth";
-import { SUPPORT_EMAIL } from "./pagesShared";
 
 const remembered = localStorage.getItem("pb_remember") === "true";
 

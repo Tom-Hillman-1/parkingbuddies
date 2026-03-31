@@ -306,9 +306,7 @@ export default function SettingsPage() {
                                                 style={{ width: passwordStrength.width, background: passwordStrength.color }}
                                             />
                                         </div>
-                                        <div className="tiny muted" style={{ marginTop: 6 }}>
-                                            Strength: {passwordStrength.label}
-                                        </div>
+                                        
                                     </>
                                 }
                                 error={passwordForm.formState.errors.newPassword?.message}
