@@ -1427,25 +1427,15 @@ label > span:first-child {
 }
 
 .spot-card {
-    --spot-accent: #4f6f9e;
-    --spot-soft: rgba(113, 145, 191, 0.14);
-    --spot-glow: rgba(113, 145, 191, 0.12);
-    --spot-border: rgba(191, 203, 223, 0.82);
-    --spot-border-active: rgba(165, 184, 214, 0.92);
     position: relative;
     display: grid;
-    gap: 0.58rem;
-    border: 1px solid var(--spot-border);
-    border-radius: 24px;
-    background:
-        radial-gradient(circle at 100% -10%, var(--spot-glow) 0%, transparent 58%),
-        radial-gradient(circle at -10% 112%, var(--spot-soft) 0%, transparent 62%),
-        rgba(255, 255, 255, 0.72);
-    box-shadow: 0 12px 30px rgba(17, 21, 28, 0.12);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    padding: 0.88rem 0.94rem;
-    min-height: clamp(172px, 18vw, 194px);
+    gap: 0.72rem;
+    border: 1px solid rgba(214, 223, 235, 0.92);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 10px 24px rgba(17, 21, 28, 0.08);
+    padding: 0.78rem 0.82rem;
+    min-height: 0;
     width: 100%;
     max-width: 100%;
     min-width: 0;
@@ -1453,46 +1443,19 @@ label > span:first-child {
     transition: border-color 200ms ease, transform 200ms ease, box-shadow 200ms ease;
 }
 
-.spot-card::before {
-    display: none;
-}
-
-.spot-card--rent {
-    --spot-accent: #4a6fa8;
-    --spot-soft: rgba(122, 164, 224, 0.14);
-    --spot-glow: rgba(78, 126, 196, 0.12);
-    --spot-border: rgba(188, 211, 242, 0.82);
-    --spot-border-active: rgba(157, 187, 229, 0.92);
-}
-
-.spot-card--free {
-    --spot-accent: #4d8b75;
-    --spot-soft: rgba(112, 193, 160, 0.14);
-    --spot-glow: rgba(77, 139, 117, 0.12);
-    --spot-border: rgba(188, 225, 209, 0.84);
-    --spot-border-active: rgba(164, 209, 191, 0.92);
-}
-
-.spot-card--auction {
-    --spot-accent: #7668a6;
-    --spot-soft: rgba(155, 142, 199, 0.14);
-    --spot-glow: rgba(118, 104, 166, 0.12);
-    --spot-border: rgba(210, 201, 234, 0.86);
-    --spot-border-active: rgba(183, 168, 218, 0.92);
-}
-
 .spot-card:hover,
 .spot-card:focus-within,
 .spot-card.is-active {
-    border-color: var(--spot-border-active);
-    transform: translateY(-4px);
-    box-shadow: 0 18px 36px rgba(17, 21, 28, 0.16);
+    border-color: rgba(188, 202, 223, 0.96);
+    transform: translateY(-2px);
+    box-shadow: 0 14px 28px rgba(17, 21, 28, 0.12);
 }
 
 .spot-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 0.6rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 68px;
+    align-items: start;
+    gap: 0.78rem;
     min-width: 0;
     width: 100%;
 }
@@ -1512,37 +1475,85 @@ label > span:first-child {
     overflow: hidden;
 }
 
-.spot-address {
+.spot-summary {
     margin: 0;
     color: #5e6d82;
-    font-size: 0.8rem;
+    font-size: 0.79rem;
     line-height: 1.4;
-    display: block;
-    min-width: 0;
-    width: 100%;
-    max-width: 100%;
-    white-space: nowrap;
-    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
 }
 
-.spot-price {
-    display: inline-grid;
-    justify-items: center;
+.spot-features {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.34rem;
+    margin-top: 0.42rem;
+}
+
+.spot-feature {
+    display: inline-flex;
     align-items: center;
-    align-self: flex-start;
-    border-radius: 16px;
-    border: 1px solid rgba(216, 224, 237, 0.9);
-    background: rgba(255, 255, 255, 0.9);
-    color: var(--spot-accent, #2f6fed);
+    min-height: 1.38rem;
+    padding: 0.12rem 0.48rem;
+    border-radius: 999px;
+    border: 1px solid rgba(219, 226, 236, 0.96);
+    background: #f8fafc;
+    color: #5c6c82;
+    font-size: 0.66rem;
+    font-weight: 700;
+    line-height: 1.1;
+    white-space: nowrap;
+}
+
+.spot-thumb {
+    width: 68px;
+    aspect-ratio: 1;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #eef3f9;
+    border: 1px solid rgba(217, 225, 236, 0.95);
+}
+
+.spot-thumb-img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+}
+
+.spot-thumb-fallback {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    padding: 0.4rem;
+    color: #77859a;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-align: center;
+    background: linear-gradient(180deg, #f7fafe 0%, #edf2f8 100%);
+}
+
+.spot-price {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    align-self: center;
+    border-radius: 999px;
+    border: 1px solid rgba(214, 226, 242, 0.96);
+    background: #eff5ff;
+    color: #244a80;
     line-height: 1.1;
     white-space: nowrap;
     text-align: center;
-    max-width: 10.8rem;
     flex: 0 0 auto;
-    padding: 0.3rem 0.68rem;
-    min-height: 1.82rem;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 2px 8px rgba(17, 21, 28, 0.08);
+    gap: 0.24rem;
+    padding: 0.34rem 0.76rem;
+    min-height: 1.9rem;
+    box-shadow: none;
 }
 
 .spot-price-main,
@@ -1558,50 +1569,30 @@ label > span:first-child {
 }
 
 .spot-price--stacked {
-    gap: 0.04rem;
-    white-space: normal;
-    min-width: 7.2rem;
-    max-width: 10.8rem;
-    padding: 0.32rem 0.62rem;
-}
-
-.spot-divider {
-    height: 1px;
-    width: 80%;
-    background: rgba(146, 169, 202, 0.62);
-    margin-top: -0.8rem;
-    margin-bottom: 0.12rem;
-    margin-left: 1.7rem ;
-    margin-right: 1rem;
+    white-space: nowrap;
+    min-width: 0;
 }
 
 .spot-meta {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.42rem;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.spot-distance {
+    color: #7d8797;
+    font-size: 0.72rem;
+    white-space: nowrap;
 }
 
 .spot-foot {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    justify-content: space-between;
-    gap: 0.7rem;
-}
-
-.spot-meta .badge {
-    border-color: rgba(210, 220, 234, 0.8);
-    background: rgba(255, 255, 255, 0.88);
-    color: #4e6079;
-}
-
-.spot-meta .badge:first-child {
-    border-color: rgba(202, 214, 233, 0.84);
-    background: rgba(248, 250, 255, 0.9);
-    color: var(--spot-accent, #2f6fed);
-}
-
-.spot-meta .badge:not(:first-child) {
-    background: rgba(255, 255, 255, 0.9);
+    gap: 0.75rem;
+    margin-top: 0.42rem;
+    padding-top: 0.24rem;
 }
 
 .spot-actions {
@@ -1612,10 +1603,19 @@ label > span:first-child {
 }
 
 .spot-actions .btn {
-    min-height: 36px;
-    border-radius: 10px;
-    font-size: 0.84rem;
-    padding: 0.4rem 0.82rem;
+    display: inline-flex;
+    align-items: center;
+    min-height: 34px;
+    min-width: 98px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    width: fit-content;
+    padding: 0.44rem 0.82rem;
+    white-space: nowrap;
+    line-height: 1;
+    flex: 0 0 auto;
+    justify-content: center;
+    text-align: center;
 }
 
 .home-map {
@@ -2432,13 +2432,13 @@ label > span:first-child {
 
     .createWizardPage .wizardIntro .wizardTile {
         min-height: auto;
-        padding: 0.86rem 0.82rem;
-        gap: 0.42rem;
+        padding: 0.78rem 0.78rem;
+        gap: 0.34rem;
     }
 
     .createWizardPage .wizardIntro .wizardTileFooter {
-        padding-top: 0.7rem;
-        gap: 0.56rem;
+        padding-top: 0.32rem;
+        gap: 0.48rem;
     }
 
     .createWizardPage .wizardIntro .wizardTileSpotsBtn {
@@ -2580,8 +2580,8 @@ label > span:first-child {
     }
 
     .spot-head {
-        flex-direction: row;
-        align-items: flex-start;
+        grid-template-columns: minmax(0, 1fr) 64px;
+        align-items: start;
     }
 
     .spot-head-main {
@@ -2592,19 +2592,44 @@ label > span:first-child {
     .spot-price,
     .spot-price--stacked {
         max-width: 100%;
-        margin-left: auto;
-    }
-
-    .spot-divider {
-        width: 100%;
-        margin-top: 0;
         margin-left: 0;
-        margin-right: 0;
     }
 
     .spot-foot {
-        flex-direction: column;
-        align-items: stretch;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: end;
+        gap: 0.6rem;
+        margin-top: 0.48rem;
+        padding-top: 0.26rem;
+    }
+
+    .spot-thumb {
+        width: 64px;
+        border-radius: 13px;
+    }
+
+    .spot-summary {
+        font-size: 0.76rem;
+        -webkit-line-clamp: 3;
+    }
+
+    .spot-feature {
+        font-size: 0.62rem;
+        padding-inline: 0.42rem;
+    }
+
+    .spot-meta {
+        gap: 0.42rem;
+    }
+
+    .spot-distance {
+        font-size: 0.69rem;
+    }
+
+    .spot-actions .btn {
+        min-width: 96px;
+        width: fit-content;
+        padding-inline: 0.76rem;
     }
 
     .receiptActions,
@@ -2641,16 +2666,28 @@ label > span:first-child {
     }
 
     .wizardTile {
-        min-height: 152px;
-        padding: 0.72rem 0.62rem;
+        min-height: 154px;
+        padding: 0.76rem 0.66rem;
         border-radius: 18px;
         min-width: 0;
     }
 
+    .homeFilterLocateBadge {
+        top: -6px;
+        right: -6px;
+        width: 18px;
+        height: 18px;
+    }
+
+    .homeFilterLocateBadge svg {
+        width: 10px;
+        height: 10px;
+    }
+
     .createWizardPage .wizardIntro .wizardTile {
-        min-height: auto;
-        padding: 0.68rem 0.7rem 0.76rem;
-        gap: 0.34rem;
+        min-height: 138px;
+        padding: 0.72rem 0.74rem 0.78rem;
+        gap: 0.3rem;
     }
 
     .createWizardPage .wizardIntro .wizardTileHead {
@@ -2676,11 +2713,11 @@ label > span:first-child {
     }
 
     .createWizardPage .wizardIntro .wizardTileFooter {
-        margin-top: 0.28rem;
-        padding-top: 0.22rem;
+        margin-top: 0.18rem;
+        padding-top: 0.14rem;
         justify-content: flex-start;
         align-items: center;
-        gap: 0.44rem;
+        gap: 0.42rem;
     }
 
     .createWizardPage .wizardIntro .wizardTileSpotsBtn {

@@ -10,7 +10,7 @@ import AppPageState from "../components/AppPageState";
 import { ReceiptCard, ReceiptDivider, ReceiptRow } from "../components/ReceiptCard";
 import { buildStripeElementsOptions } from "../lib/stripeElements";
 import loadingAnimation from "../assets/loading.json";
-import { formatDateRangeLocal, formatDateTimeLocal, toFiniteNumber } from "./pagesShared";
+import { formatDateRangeLocal, formatDateTimeLocal, formatGbp, STRIPE_MIN_GBP_PAYMENT, toFiniteNumber } from "./pagesShared";
 
 type Booking = {
     id: string;
@@ -276,6 +276,10 @@ export default function PayBookingPage() {
     const isPointsBooking = booking?.pay_method === "points";
     const isFreeBooking = booking?.pay_method === "money" && toFiniteNumber(booking?.total_price_gbp) <= 0;
     const paymentMarkedSucceeded = String(booking?.payment_status ?? "").toLowerCase() === "succeeded";
+    const bookingMoneyBelowMinimum =
+        booking?.pay_method === "money" &&
+        toFiniteNumber(booking?.total_price_gbp) > 0 &&
+        toFiniteNumber(booking?.total_price_gbp) < STRIPE_MIN_GBP_PAYMENT;
     const paymentPending = useMemo(() => {
         if (!booking) return false;
         return booking.pay_method === "money" && booking.status === "pending" && toFiniteNumber(booking.total_price_gbp) > 0;
@@ -307,7 +311,7 @@ export default function PayBookingPage() {
         Boolean(receiptQuery.data?.receipt_url) ||
         String(booking?.status ?? "").toLowerCase() === "confirmed" ||
         toFiniteNumber(booking?.total_price_gbp) <= 0;
-    const requiresPayment = paymentPending && !paymentComplete;
+    const requiresPayment = paymentPending && !paymentComplete && !bookingMoneyBelowMinimum;
     const shouldPollReceipt =
         Boolean(token) &&
         Boolean(id) &&
@@ -470,9 +474,19 @@ export default function PayBookingPage() {
                             onPaymentSubmitted={refreshPaymentState}
                         />
                     )}
+                    {bookingMoneyBelowMinimum && (
+                        <div className="card formSection" style={{ marginTop: 14, marginBottom: 14 }}>
+                            <div className="h3">Secure card payment</div>
+                            <div className="muted" style={{ marginTop: 6 }}>
+                                Card payments in GBP must be at least {formatGbp(STRIPE_MIN_GBP_PAYMENT)}.
+                                This booking totals {formatGbp(booking.total_price_gbp)}, so Stripe cannot open the payment form for it.
+                                Please return to the listing and pick a longer slot or use points instead.
+                            </div>
+                        </div>
+                    )}
 
                     <div className="receiptActions" style={{ marginTop: 12 }}>
-                        {requiresPayment ? (
+                        {requiresPayment || bookingMoneyBelowMinimum ? (
                             <>
                                 <Link to={listingPath} className="btn">Return to listing</Link>
                                 <Link to="/about#contact-bottom" className="btn">Contact support</Link>

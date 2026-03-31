@@ -34,6 +34,7 @@ export {
     derivedPointsCostFromMoney,
     MIN_POINTS_COST,
     POINTS_PER_GBP,
+    STRIPE_MIN_GBP_PAYMENT,
     toFiniteNumber,
     type PriceUnit,
 } from "../../../shared/domain/pricing";

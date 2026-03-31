@@ -531,7 +531,7 @@ export default function CreateListingPage() {
     function openSpacesSheet() {
         const spaces = Math.max(1, Math.floor(Number(capacityTotal) || 1));
         if (spaces >= 4) {
-            setPendingSpacesChoice("3plus");
+            setPendingSpacesChoice("4plus");
             setPendingSpacesCustom(String(spaces));
         } else {
             setPendingSpacesChoice(String(spaces) as SpaceChoice);
@@ -548,7 +548,7 @@ export default function CreateListingPage() {
 
     function applySpacesSheet() {
         const selectedSpaces =
-            pendingSpacesChoice === "3plus"
+            pendingSpacesChoice === "4plus"
                 ? Math.max(4, Math.floor(Number(pendingSpacesCustom) || 4))
                 : Number(pendingSpacesChoice);
 
@@ -1376,11 +1376,11 @@ export default function CreateListingPage() {
                     }))}
                 />
 
-                {pendingSpacesChoice === "3plus" && (
-                    <AppField label="Custom spaces (3+)">
+                {pendingSpacesChoice === "4plus" && (
+                    <AppField label="Custom spaces (4+)">
                         <AppInput
                             type="number"
-                            min={3}
+                            min={4}
                             step={1}
                             value={pendingSpacesCustom}
                             onChange={(event) => setPendingSpacesCustom(event.target.value)}

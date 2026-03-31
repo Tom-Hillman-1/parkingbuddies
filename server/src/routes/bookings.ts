@@ -3,7 +3,7 @@ import type { Response } from "express";
 import type { PoolClient } from "pg";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
-import { calcBookingUnits, type PriceUnit, toMoney } from "../lib/shared";
+import { calcBookingUnits, type PriceUnit, STRIPE_MIN_GBP_PAYMENT, toMoney } from "../lib/shared";
 import { findSlotAvailabilityIssue } from "../lib/availability";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
@@ -166,6 +166,14 @@ router.post("/", requireAuth, bookingCreateRateLimit, async (req: AuthRequest, r
                 total_price_gbp = "0.00";
                 status = "confirmed";
             } else {
+                if (total < STRIPE_MIN_GBP_PAYMENT) {
+                    return rollbackWithError(
+                        client,
+                        res,
+                        400,
+                        `Card payments in GBP must be at least £${STRIPE_MIN_GBP_PAYMENT.toFixed(2)}. Pick a longer slot or use points instead.`
+                    );
+                }
                 total_price_gbp = total.toFixed(2);
                 status = "pending";
             }

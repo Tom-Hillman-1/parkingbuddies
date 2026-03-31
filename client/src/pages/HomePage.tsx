@@ -27,6 +27,7 @@ import {
     type HomeSearchState,
 } from "./homeSearchUtils";
 import { HomeDatePickerDialog, HomeTimePickerDialog } from "./homeSearchSupport";
+import { listingFeatureLabel } from "./createListingSupport";
 import {
     isSlotAllowed as isSpotSlotAllowed,
     nextWholeQuarterHour,
@@ -196,6 +197,16 @@ function priceLabel(spot: ParkingSpot) {
     }
 
     return { main, pointsLabel };
+}
+
+function cardFeatures(spot: ParkingSpot) {
+    const rawFeatures = Array.isArray(spot.availability_json?.features)
+        ? spot.availability_json.features
+        : [];
+
+    return rawFeatures
+        .filter((feature): feature is string => typeof feature === "string" && feature.trim().length > 0)
+        .slice(0, 3);
 }
 
 function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
@@ -687,13 +698,14 @@ export default function HomePage() {
                             const { spot, distKm } = entry;
                             const active = selectedId === spot.id;
                             const price = priceLabel(spot);
+                            const features = cardFeatures(spot);
 
                             return (
                                 <article
                                     key={spot.id}
                                     role="listitem"
                                     tabIndex={0}
-                                    className={`spot-card spot-card--${spot.mode}${active ? " is-active" : ""}`}
+                                    className={`spot-card${active ? " is-active" : ""}`}
                                     onFocus={() => setSelectedId(spot.id)}
                                     onMouseEnter={() => {
                                         setHoveredId(spot.id);
@@ -710,25 +722,40 @@ export default function HomePage() {
                                     <div className="spot-head">
                                         <div className="spot-head-main">
                                             <h3 className="h3">{spot.title}</h3>
-                                            <p className="spot-address" title={spot.address_text}>{spot.address_text}</p>
-                                        </div>
-                                        <span className={`spot-price${price.pointsLabel ? " spot-price--stacked" : ""}`}>
-                                            <span className="spot-price-main">{price.main}</span>
-                                            {price.pointsLabel && (
-                                                <>
-                                                    <span className="spot-price-or">or</span>
-                                                    <span className="spot-price-points">{price.pointsLabel}</span>
-                                                </>
+                                            <p className="spot-summary" title={spot.description || spot.address_text}>
+                                                {spot.description || spot.address_text}
+                                            </p>
+                                            {features.length > 0 && (
+                                                <div className="spot-features">
+                                                    {features.map((feature) => (
+                                                        <span key={feature} className="spot-feature">
+                                                            {listingFeatureLabel(feature)}
+                                                        </span>
+                                                    ))}
+                                                </div>
                                             )}
-                                        </span>
+                                        </div>
+                                        <div className="spot-thumb" aria-hidden="true">
+                                            {spot.image_url ? (
+                                                <img src={spot.image_url} alt="" className="spot-thumb-img" />
+                                            ) : (
+                                                <div className="spot-thumb-fallback">No image</div>
+                                            )}
+                                        </div>
                                     </div>
-
-                                    <div className="spot-divider" aria-hidden="true" />
 
                                     <div className="spot-foot">
                                         <div className="spot-meta">
-                                            <span className="badge">{capitalizeLabel(spot.mode)}</span>
-                                            <span className="badge">{distKm.toFixed(1)} km</span>
+                                            <span className={`spot-price${price.pointsLabel ? " spot-price--stacked" : ""}`}>
+                                                <span className="spot-price-main">{price.main}</span>
+                                                {price.pointsLabel && (
+                                                    <>
+                                                        <span className="spot-price-or">or</span>
+                                                        <span className="spot-price-points">{price.pointsLabel}</span>
+                                                    </>
+                                                )}
+                                            </span>
+                                            <span className="spot-distance">{distKm.toFixed(1)} km</span>
                                         </div>
 
                                         <div className="spot-actions">
@@ -737,7 +764,7 @@ export default function HomePage() {
                                                 className="btn btn-primary"
                                                 onClick={(event) => event.stopPropagation()}
                                             >
-                                                View details
+                                                Book now
                                             </Link>
                                         </div>
                                     </div>

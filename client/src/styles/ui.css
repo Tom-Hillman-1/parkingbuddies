@@ -101,6 +101,10 @@
     outline: none;
 }
 
+.uiTooltipRoot {
+    display: inline-grid;
+}
+
 .uiTooltipTrigger {
     width: 1.4rem;
     height: 1.4rem;
@@ -544,12 +548,21 @@
 .appCalendar .rdp-day_button {
     position: relative;
     z-index: 1;
+    display: grid;
+    place-items: center;
     width: var(--app-calendar-day-size);
     height: var(--app-calendar-day-size);
     min-width: var(--app-calendar-day-size);
     min-height: var(--app-calendar-day-size);
     margin-inline: auto;
     padding: 0;
+    appearance: none;
+    box-sizing: border-box;
+    border: 1px solid transparent;
+    border-radius: 50%;
+    overflow: hidden;
+    background-clip: padding-box;
+    -webkit-background-clip: padding-box;
     color: #284766;
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 248, 255, 0.96) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
@@ -784,47 +797,51 @@
     }
 
     .appCalendar .rdp-month_grid {
-        border-spacing: 0.14rem 0.18rem;
+        border-spacing: 0.2rem 0.28rem;
     }
 
     .appCalendar--home .rdp-day_button,
     .appCalendar--availability .rdp-day_button {
-        width: 2.35rem;
-        height: 2.35rem;
-        min-width: 2.35rem;
-        min-height: 2.35rem;
+        width: 2.4rem;
+        height: 2.4rem;
+        min-width: 2.4rem;
+        min-height: 2.4rem;
         font-size: 0.84rem;
     }
 
     .appCalendar--slots .rdp-day_button {
-        width: 2.55rem;
-        height: 2.55rem;
-        min-width: 2.55rem;
-        min-height: 2.55rem;
+        width: 2.6rem;
+        height: 2.6rem;
+        min-width: 2.6rem;
+        min-height: 2.6rem;
         font-size: 0.88rem;
     }
 
+    .appCalendar--home .rdp-month_grid {
+        border-spacing: 0.24rem 0.34rem;
+    }
+
     .appCalendar--availability.appCalendar--slots .rdp-month_grid {
-        border-spacing: 0.22rem 0.92rem;
+        border-spacing: 0.64rem 1.64rem;
     }
 
     .appCalendar--availability.appCalendar--slots .rdp-day {
-        height: 4rem;
+        height: 5.35rem;
     }
 
     .appCalendar--availability.appCalendar--slots .rdp-day_button {
-        width: 2.26rem;
-        height: 2.26rem;
-        min-width: 2.26rem;
-        min-height: 2.26rem;
-        font-size: 0.82rem;
+        width: 2.22rem;
+        height: 2.22rem;
+        min-width: 2.22rem;
+        min-height: 2.22rem;
+        font-size: 0.8rem;
     }
 
     .appCalendar--availability.appCalendar--slots .rdp-day_button::after {
-        top: calc(100% + 0.22rem);
-        width: 3.35rem;
-        font-size: 0.5rem;
-        line-height: 1.08;
+        top: calc(100% + 0.46rem);
+        width: 3.95rem;
+        font-size: 0.48rem;
+        line-height: 1.2;
     }
 
     .appTimePickerDialogFooter {

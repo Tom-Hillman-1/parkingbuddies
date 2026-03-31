@@ -14,6 +14,7 @@ export {
     derivedPointsCostFromMoney,
     gbpToPoints,
     MIN_POINTS_COST,
+    STRIPE_MIN_GBP_PAYMENT,
     moneyBookingRewardPoints,
     moneyHostingRewardPoints,
     POINTS_PER_GBP,

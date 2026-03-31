@@ -13,6 +13,7 @@ import {
     calcAuctionUnitsForRange,
     formatDateTimeCompact,
     formatGbp,
+    STRIPE_MIN_GBP_PAYMENT,
     type PriceUnit,
 } from "./pagesShared";
 
@@ -309,6 +310,7 @@ export default function BidConfirmPage() {
     const totalLabel = pay === "points" ? `${totalPoints} pts` : formatGbp(totalMoney);
     const perUnitLabel =
         pay === "points" ? `${Number(pointsPerUnit || 0)} pts` : formatGbp(moneyPerUnit);
+    const moneyBidBelowMinimum = pay === "money" && totalMoney > 0 && totalMoney < STRIPE_MIN_GBP_PAYMENT;
 
     return (
         <div className="container">
@@ -336,16 +338,27 @@ export default function BidConfirmPage() {
             </ReceiptCard>
 
             {pay === "money" ? (
-                <BidPaymentSection
-                    amountGbp={totalMoney}
-                    spotId={spotId}
-                    start={start}
-                    end={end}
-                    token={token}
-                    onBack={`/spots/${spotId}`}
-                    onDone={handleMoneyBidDone}
-                    onError={handleMoneyBidError}
-                />
+                moneyBidBelowMinimum ? (
+                    <div className="card formSection" style={{ padding: 16, marginTop: 12 }}>
+                        <div className="h3">Secure card authorization</div>
+                        <div className="tiny muted" style={{ marginTop: 4 }}>
+                            Card payments in GBP must be at least {formatGbp(STRIPE_MIN_GBP_PAYMENT)}.
+                            This bid totals {formatGbp(totalMoney)}, so Stripe cannot create the authorization for this slot.
+                            Increase the bid or use points instead.
+                        </div>
+                    </div>
+                ) : (
+                    <BidPaymentSection
+                        amountGbp={totalMoney}
+                        spotId={spotId}
+                        start={start}
+                        end={end}
+                        token={token}
+                        onBack={`/spots/${spotId}`}
+                        onDone={handleMoneyBidDone}
+                        onError={handleMoneyBidError}
+                    />
+                )
             ) : (
                 <div className="card formSection" style={{ marginTop: 12 }}>
                     <div className="h3">Confirm points bid</div>

@@ -20,7 +20,7 @@ export type { PriceUnit };
 export type Mode = "free" | "rent" | "auction";
 export type WizardStep = 1 | 2 | 3 | 4 | 5 | 6;
 export type FlowStep = Exclude<WizardStep, 1>;
-export type SpaceChoice = "1" | "2" | "3plus";
+export type SpaceChoice = "1" | "2" | "3" | "4plus";
 export type Tone = "blue" | "lilac" | "mint" | "cream" | "sky";
 export type WizardSheetName = "spaces" | "custom" | "confirm" | "delete";
 export type ListingFeature =
@@ -92,7 +92,8 @@ export const DEFAULT_SLOT_END = "17:00";
 export const SPACE_CHOICES: Array<{ id: SpaceChoice; label: string; value: number }> = [
     { id: "1", label: "1 space", value: 1 },
     { id: "2", label: "2 spaces", value: 2 },
-    { id: "3plus", label: "3+ spaces", value: 4 },
+    { id: "3", label: "3 spaces", value: 3 },
+    { id: "4plus", label: "4+ spaces", value: 4 },
 ];
 
 export const LISTING_MODEL_OPTIONS: Array<{ mode: Mode; title: string; copy: string; tone: Tone; help: string }> = [

@@ -6,7 +6,7 @@ import { randomUUID } from "crypto";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import { stripe } from "../stripe";
-import { moneyBookingRewardPoints, moneyHostingRewardPoints, toMoney } from "../lib/shared";
+import { moneyBookingRewardPoints, moneyHostingRewardPoints, STRIPE_MIN_GBP_PAYMENT, toMoney } from "../lib/shared";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
 import { serverError } from "../lib/errors";
@@ -698,6 +698,12 @@ router.post("/booking-intent", requireAuth, bookingIntentRateLimit, async (req: 
         if (amountGbp <= 0) {
             return res.status(400).json({ ok: false, error: "Invalid booking amount" });
         }
+        if (amountGbp < STRIPE_MIN_GBP_PAYMENT) {
+            return res.status(400).json({
+                ok: false,
+                error: `Card payments in GBP must be at least £${STRIPE_MIN_GBP_PAYMENT.toFixed(2)}. Pick a longer slot or use points instead.`,
+            });
+        }
 
         const existingPaymentIntentId = asNonEmptyString(booking.payment_provider_ref);
         if (existingPaymentIntentId?.startsWith("pi_")) {
@@ -827,6 +833,12 @@ router.post("/auction-intent", requireAuth, auctionIntentRateLimit, async (req: 
     const amount = toMoney(amount_gbp);
     if (amount <= 0) {
         return res.status(400).json({ ok: false, error: "amount_gbp is invalid" });
+    }
+    if (amount < STRIPE_MIN_GBP_PAYMENT) {
+        return res.status(400).json({
+            ok: false,
+            error: `Money bids in GBP must be at least £${STRIPE_MIN_GBP_PAYMENT.toFixed(2)} for this slot. Increase the bid or use points instead.`,
+        });
     }
 
     try {

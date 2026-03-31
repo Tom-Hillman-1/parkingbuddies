@@ -15,6 +15,7 @@ import {
     formatDateDisplay,
     formatDateTimeCompact,
     formatGbp,
+    STRIPE_MIN_GBP_PAYMENT,
     formatTimeDisplay,
     parseYmd,
     toFiniteNumber,
@@ -253,6 +254,10 @@ export default function SpotDetailsPage() {
     const bidTotalPoints = useMemo(() => {
         return calcAuctionPointsTotal(bidPointsPerHour, bidUnits);
     }, [bidPointsPerHour, bidUnits]);
+    const bookingMoneyBelowMinimum =
+        payMethod === "money" && estimatedTotal > 0 && estimatedTotal < STRIPE_MIN_GBP_PAYMENT;
+    const bidMoneyBelowMinimum =
+        bidPayMethod === "money" && bidTotalMoney > 0 && bidTotalMoney < STRIPE_MIN_GBP_PAYMENT;
     const auctionMoneyStartLabel =
         auctionMinPerUnit > 0 ? `Starting bid: ${formatGbp(auctionMinPerUnit)} / ${listingUnit}` : null;
     const auctionPointsStartPerUnit = toFiniteNumber(spot?.points_cost);
@@ -349,6 +354,11 @@ export default function SpotDetailsPage() {
         if (isOwner) return setActionMsg("You cannot book your own listing.");
         if (!slotStatus.ok) return setActionMsg(slotStatus.label);
         if (payMethod === "money" && !canUseMoneyBooking) return setActionMsg("This listing accepts points only.");
+        if (bookingMoneyBelowMinimum) {
+            return setActionMsg(
+                `Card payments in GBP must be at least ${formatGbp(STRIPE_MIN_GBP_PAYMENT)}. Pick a longer slot or use points instead.`
+            );
+        }
         if (payMethod === "points" && pointsMinTotal <= 0) return setActionMsg("Points pricing is not available for this slot.");
         if (pointsBookingInsufficient) return setActionMsg(`You need ${pointsMinTotal} pts, you have ${userPoints}.`);
 
@@ -405,6 +415,11 @@ export default function SpotDetailsPage() {
             if (!canUseMoneyBids) return setBidMsg("This auction accepts points only.");
             const value = Number(bidMoneyPerHour);
             if (!Number.isFinite(value) || value <= 0) return setBidMsg(`Enter a valid GBP amount per ${listingUnit}.`);
+            if (bidMoneyBelowMinimum) {
+                return setBidMsg(
+                    `Money bids in GBP must be at least ${formatGbp(STRIPE_MIN_GBP_PAYMENT)} for this slot. Increase the bid or use points instead.`
+                );
+            }
         } else {
             const value = Number(bidPointsPerHour);
             if (!Number.isFinite(value) || value <= 0) return setBidMsg(`Enter a valid points amount per ${listingUnit}.`);
@@ -642,6 +657,11 @@ export default function SpotDetailsPage() {
                                     <div className="tiny muted">
                                         Estimated total: {bidTotalMoney > 0 ? formatGbp(bidTotalMoney) : "-"}
                                     </div>
+                                    {bidMoneyBelowMinimum && (
+                                        <div className="tiny" style={{ color: "#a23636", marginTop: 4 }}>
+                                            Card payments in GBP must be at least {formatGbp(STRIPE_MIN_GBP_PAYMENT)} for this slot.
+                                        </div>
+                                    )}
                                 </label>
                             ) : (
                                 <label style={{ display: "grid", gap: 6 }}>
@@ -698,6 +718,11 @@ export default function SpotDetailsPage() {
                                 <span className="tiny muted">Estimated total</span>
                                 <span className="badge">{estimatedBookingTotalLabel}</span>
                             </div>
+                            {bookingMoneyBelowMinimum && (
+                                <div className="tiny" style={{ color: "#a23636", marginTop: 6 }}>
+                                    Card payments in GBP must be at least {formatGbp(STRIPE_MIN_GBP_PAYMENT)} for this slot.
+                                </div>
+                            )}
                             {pointsBookingInsufficient && (
                                 <div className="tiny" style={{ color: "#a23636", marginTop: 6 }}>
                                     Not enough points ({userPoints} available).

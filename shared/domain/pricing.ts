@@ -2,6 +2,7 @@ export type PriceUnit = "hour" | "day" | "week";
 
 export const POINTS_PER_GBP = 10;
 export const MIN_POINTS_COST = 1;
+export const STRIPE_MIN_GBP_PAYMENT = 0.3;
 
 export function toFiniteNumber(value: unknown, fallback = 0) {
     const numeric = Number(value ?? fallback);

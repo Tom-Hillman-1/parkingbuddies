@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, OverlayArrow, Tooltip, TooltipTrigger } from "react-aria-components";
 
 type InfoTooltipProps = {
@@ -28,6 +28,7 @@ export function InfoTooltip({
 }: InfoTooltipProps) {
     const [isTouchMode, setIsTouchMode] = useState(false);
     const [isTouchOpen, setIsTouchOpen] = useState(false);
+    const rootRef = useRef<HTMLSpanElement | null>(null);
 
     useEffect(() => {
         if (typeof window === "undefined" || typeof window.matchMedia !== "function") return undefined;
@@ -51,42 +52,55 @@ export function InfoTooltip({
         }
     }, [isTouchMode]);
 
+    useEffect(() => {
+        if (!isTouchMode || !isTouchOpen) return undefined;
+
+        const handlePointerDown = (event: PointerEvent) => {
+            if (!rootRef.current?.contains(event.target as Node)) {
+                setIsTouchOpen(false);
+            }
+        };
+
+        document.addEventListener("pointerdown", handlePointerDown);
+        return () => document.removeEventListener("pointerdown", handlePointerDown);
+    }, [isTouchMode, isTouchOpen]);
+
     return (
-        <TooltipTrigger
-            delay={isTouchMode ? 0 : 120}
-            closeDelay={isTouchMode ? 0 : 60}
-            isOpen={isTouchMode ? isTouchOpen : undefined}
-            onOpenChange={isTouchMode ? setIsTouchOpen : undefined}
-            shouldCloseOnPress={!isTouchMode}
-        >
-            <Button
-                type="button"
-                className={`uiTooltipTrigger ${triggerClassName}`.trim()}
-                aria-label={label}
-                onPress={() => {
-                    if (isTouchMode) setIsTouchOpen((open) => !open);
-                }}
-                onBlur={() => {
-                    if (isTouchMode) setIsTouchOpen(false);
-                }}
-                onClick={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
+        <span ref={rootRef} className="uiTooltipRoot">
+            <TooltipTrigger
+                delay={isTouchMode ? 0 : 120}
+                closeDelay={isTouchMode ? 0 : 60}
+                isOpen={isTouchMode ? isTouchOpen : undefined}
+                onOpenChange={isTouchMode ? setIsTouchOpen : undefined}
+                shouldCloseOnPress={!isTouchMode}
             >
-                {icon ?? <span className="uiTooltipMark" aria-hidden="true">?</span>}
-            </Button>
-            <Tooltip
-                placement={side}
-                offset={8}
-                crossOffset={ALIGN_OFFSET[align]}
-                className={`uiTooltipContent ${contentClassName}`.trim()}
-            >
-                {text}
-                <OverlayArrow className="uiTooltipArrow">
-                    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-                        <path d="M0 0 L5 5 L10 0" />
-                    </svg>
-                </OverlayArrow>
-            </Tooltip>
-        </TooltipTrigger>
+                <Button
+                    type="button"
+                    className={`uiTooltipTrigger ${triggerClassName}`.trim()}
+                    aria-label={label}
+                    onPress={() => {
+                        if (isTouchMode) setIsTouchOpen((open) => !open);
+                    }}
+                    onClick={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onTouchStart={(event) => event.stopPropagation()}
+                >
+                    {icon ?? <span className="uiTooltipMark" aria-hidden="true">?</span>}
+                </Button>
+                <Tooltip
+                    placement={side}
+                    offset={8}
+                    crossOffset={ALIGN_OFFSET[align]}
+                    className={`uiTooltipContent ${contentClassName}`.trim()}
+                >
+                    {text}
+                    <OverlayArrow className="uiTooltipArrow">
+                        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                            <path d="M0 0 L5 5 L10 0" />
+                        </svg>
+                    </OverlayArrow>
+                </Tooltip>
+            </TooltipTrigger>
+        </span>
     );
 }
