@@ -157,6 +157,21 @@
     box-shadow: none;
 }
 
+.slotCal .appCalendar .appCalendarDay--availableStart,
+.slotCal .appCalendar .appCalendarDay--availableMiddle,
+.slotCal .appCalendar .appCalendarDay--availableEnd {
+    background: transparent;
+}
+
+.slotCal .appCalendar .appCalendarDay--availableSingle .rdp-day_button,
+.slotCal .appCalendar .appCalendarDay--availableStart .rdp-day_button,
+.slotCal .appCalendar .appCalendarDay--availableMiddle .rdp-day_button,
+.slotCal .appCalendar .appCalendarDay--availableEnd .rdp-day_button {
+    border-color: #a8d8bc;
+    background: linear-gradient(180deg, #ecfbf3 0%, #ddf5e7 100%);
+    color: #146244;
+}
+
 .slotCal .appCalendar--slots .rdp-month_grid {
     border-spacing: 0.38rem 0.56rem;
 }
