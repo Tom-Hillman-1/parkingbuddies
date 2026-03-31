@@ -41,6 +41,7 @@ type SeenNotificationCounts = Record<string, number>;
 
 const NOTIFICATION_SEEN_STORAGE_KEY = "parkingbuddies.notification-seen";
 const NOTIFICATION_SEEN_EVENT = "parkingbuddies:notification-seen";
+const PERSISTENT_NOTIFICATION_IDS = new Set(["owner-pending-bids"]);
 
 export const EMPTY_NOTIFICATION_SUMMARY: NotificationSummary = {
     total: 0,
@@ -88,6 +89,9 @@ function applySeenNotificationCounts(summary: NotificationSummary, seenCounts: S
 
     const items = summary.items
         .map((item) => {
+            if (PERSISTENT_NOTIFICATION_IDS.has(item.id)) {
+                return item;
+            }
             const seenCount = Math.max(0, seenCounts[item.id] ?? 0);
             const count = Math.max(0, item.count - seenCount);
             return count > 0 ? { ...item, count } : null;
@@ -118,6 +122,7 @@ export function markNotificationsSeen(items: NotificationItem[]) {
     let changed = false;
 
     for (const item of items) {
+        if (PERSISTENT_NOTIFICATION_IDS.has(item.id)) continue;
         const seenCount = Math.max(0, seenCounts[item.id] ?? 0);
         if (item.count > seenCount) {
             seenCounts[item.id] = item.count;

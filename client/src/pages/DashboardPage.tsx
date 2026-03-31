@@ -300,6 +300,7 @@ export default function DashboardPage() {
 
     const [err, setErr] = useState<string | null>(null);
     const [msg, setMsg] = useState<string | null>(null);
+    const [ownerBidNotice, setOwnerBidNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
     const [busyId, setBusyId] = useState<string | null>(null);
     const [receiptLoadingId, setReceiptLoadingId] = useState<string | null>(null);
     const [paymentReceiptErrors, setPaymentReceiptErrors] = useState<Record<string, string | null>>({});
@@ -468,18 +469,17 @@ export default function DashboardPage() {
         }
     };
 
-    const runBusyAction = async (id: string, successMessage: string, fallbackError: string, action: (authToken: string) => Promise<void>) => {
+    const runOwnerBidAction = async (id: string, successMessage: string, fallbackError: string, action: (authToken: string) => Promise<void>) => {
         if (!token) return;
         setBusyId(id);
-        setErr(null);
-        setMsg(null);
+        setOwnerBidNotice(null);
         try {
             await action(token);
-            setMsg(successMessage);
+            setOwnerBidNotice({ tone: "success", text: successMessage });
             await dashboardQuery.refetch();
             await queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
         } catch (error: unknown) {
-            setErr(readErrorMessage(error, fallbackError));
+            setOwnerBidNotice({ tone: "error", text: readErrorMessage(error, fallbackError) });
         } finally {
             setBusyId(null);
         }
@@ -518,13 +518,13 @@ export default function DashboardPage() {
     };
 
     const acceptBid = async (spotId: string, bidId: string) => {
-        await runBusyAction(bidId, "Bid accepted.", "Accept failed", async (authToken) => {
+        await runOwnerBidAction(bidId, "Booking confirmed. The accepted bid is now in Booked Slots.", "Accept failed", async (authToken) => {
             await apiPost(`/auctions/${spotId}/accept`, { bid_id: bidId }, authToken);
         });
     };
 
     const rejectBid = async (spotId: string, bidId: string) => {
-        await runBusyAction(bidId, "Bid rejected.", "Reject failed", async (authToken) => {
+        await runOwnerBidAction(bidId, "Bid rejected.", "Reject failed", async (authToken) => {
             await apiPost(`/auctions/${spotId}/reject`, { bid_id: bidId }, authToken);
         });
     };
@@ -822,19 +822,18 @@ export default function DashboardPage() {
                                                 <div className="dashboardStripBody">
                                                     <div className="dashboardStripTop">
                                                         <div className="dashboardStripTitle">{title}</div>
-                                                        <div className={`dashboardStripAmount ${isPoints ? "" : "dashboardChipAmount--in"}`}>
-                                                            {bookingAmountLabel(booking, "+")}
-                                                        </div>
                                                     </div>
                                                     <div className="tiny muted dashboardStripMeta">{address}</div>
                                                     <div className="tiny muted dashboardStripMeta">{slotTime(booking.start_time, booking.end_time)}</div>
                                                     <div className="dashboardStripBottom">
                                                         <div className="rowInline" style={{ gap: 6 }}>
                                                             <span className="badge badge--green">Confirmed</span>
-                                                            <span className="badge">{capitalizeLabel(booking.pay_method)}</span>
+                                                            <span className={`badge dashboardStripAmountBadge ${isPoints ? "" : "dashboardStripAmountBadge--in"}`}>
+                                                                {bookingAmountLabel(booking, "+")}
+                                                            </span>
                                                         </div>
-                                                        <Link to={`/spots/${booking.parking_spot_id}`} className="dashboardTextAction">View &gt;</Link>
                                                     </div>
+                                                    <Link to={`/spots/${booking.parking_spot_id}`} className="dashboardMiniBtn dashboardStripLinkBtn">View listing</Link>
                                                 </div>
                                             </div>
                                         );
@@ -888,6 +887,12 @@ export default function DashboardPage() {
                                     })}
                                 </DashboardCollection>
                             </DashboardDisclosureCard>
+
+                            {ownerBidNotice ? (
+                                <div className={`dashboardInlineNotice dashboardInlineNotice--${ownerBidNotice.tone}`}>
+                                    {ownerBidNotice.text}
+                                </div>
+                            ) : null}
 
                             <DashboardDisclosureCard
                                 tone="owner"

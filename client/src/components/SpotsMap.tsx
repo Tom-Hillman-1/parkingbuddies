@@ -103,26 +103,11 @@ export default function SpotsMap({
     showPopupDetails?: boolean;
 }) {
     const markerRefs = useRef<Record<string, LeafletMarker | null>>({});
-    const previousHoveredId = useRef<string | null>(null);
 
     useEffect(() => {
         if (!showPopupDetails || !selectedId) return;
         markerRefs.current[selectedId]?.openPopup();
     }, [selectedId, spots, showPopupDetails]);
-
-    useEffect(() => {
-        const previous = previousHoveredId.current;
-
-        if (previous && previous !== hoveredId && previous !== selectedId) {
-            markerRefs.current[previous]?.closePopup();
-        }
-
-        if (showPopupDetails && hoveredId && hoveredId !== selectedId) {
-            markerRefs.current[hoveredId]?.openPopup();
-        }
-
-        previousHoveredId.current = hoveredId ?? null;
-    }, [hoveredId, selectedId, showPopupDetails]);
 
     return (
         <div className="leafletShell">
@@ -197,15 +182,11 @@ export default function SpotsMap({
                                     onHover?.(spot.id);
                                     if (showPopupDetails) event.target.openPopup();
                                 },
-                                mouseover: (event) => {
+                                mouseover: () => {
                                     onHover?.(spot.id);
-                                    if (showPopupDetails) event.target.openPopup();
                                 },
-                                mouseout: (event) => {
+                                mouseout: () => {
                                     onHover?.(null);
-                                    if (showPopupDetails && !isSelected) {
-                                        event.target.closePopup();
-                                    }
                                 },
                             }}
                         >

@@ -706,10 +706,9 @@ export default function HomePage() {
                                     role="listitem"
                                     tabIndex={0}
                                     className={`spot-card${active ? " is-active" : ""}`}
-                                    onFocus={() => setSelectedId(spot.id)}
-                                    onMouseEnter={() => {
-                                        setHoveredId(spot.id);
-                                    }}
+                                    onFocus={() => setHoveredId(spot.id)}
+                                    onBlur={() => setHoveredId((prev) => (prev === spot.id ? null : prev))}
+                                    onMouseEnter={() => setHoveredId(spot.id)}
                                     onMouseLeave={() => setHoveredId((prev) => (prev === spot.id ? null : prev))}
                                     onClick={() => focusSpotOnMap(spot.id, isSmallLayout())}
                                     onKeyDown={(event) => {

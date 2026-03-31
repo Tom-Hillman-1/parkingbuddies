@@ -283,6 +283,29 @@
     min-width: 0;
 }
 
+.dashboardModern .dashboardInlineNotice {
+    border: 1px solid #d7e1ee;
+    border-radius: 12px;
+    padding: 0.58rem 0.76rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1.35;
+    background: #f8fbff;
+    color: #36506d;
+}
+
+.dashboardModern .dashboardInlineNotice--success {
+    border-color: #bfe5ce;
+    background: #eefaf2;
+    color: #18784e;
+}
+
+.dashboardModern .dashboardInlineNotice--error {
+    border-color: #efc9cf;
+    background: #fff4f6;
+    color: #9f2f45;
+}
+
 .dashboardModern .dashboardScrollRow,
 .dashboardModern .dashboardChipRow,
 .dashboardModern .dashboardRailRow {
@@ -453,14 +476,12 @@
 }
 
 .dashboardModern .dashboardStripBottom {
-    margin-top: 2px;
+    margin-top: 4px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 8px;
 }
 
-.dashboardModern .dashboardTextAction,
 .dashboardModern .dashboardTxLink {
     border: 0;
     background: none;
@@ -472,17 +493,32 @@
     cursor: pointer;
 }
 
-.dashboardModern .dashboardTextAction {
-    font-size: 11px;
-}
-
 .dashboardModern .dashboardTxLink {
     font-size: 10px;
 }
 
-.dashboardModern .dashboardTextAction:hover,
 .dashboardModern .dashboardTxLink:hover {
     text-decoration: underline;
+}
+
+.dashboardModern .dashboardStripLinkBtn {
+    width: 100%;
+    min-height: 28px;
+    padding: 0.32rem 0.6rem;
+    margin-top: 0.42rem;
+    white-space: nowrap;
+    justify-content: center;
+}
+
+.dashboardModern .dashboardStripAmountBadge {
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.dashboardModern .dashboardStripAmountBadge--in {
+    color: #15803d;
 }
 
 .dashboardModern .dashboardListingMiniCard {
@@ -661,13 +697,11 @@
     grid-column: 1 / -1;
 }
 
-.dashboardModern .dashboardTextAction:disabled,
 .dashboardModern .dashboardTxLink:disabled {
     color: #94a2d5;
     cursor: default;
 }
 
-.dashboardModern .dashboardTextAction:disabled:hover,
 .dashboardModern .dashboardTxLink:disabled:hover {
     text-decoration: none;
 }
