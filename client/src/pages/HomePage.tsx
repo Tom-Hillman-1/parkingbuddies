@@ -746,7 +746,7 @@ export default function HomePage() {
 
                                     <div className="spot-foot">
                                         <div className="spot-meta">
-                                            <span className={`spot-price${price.pointsLabel ? " spot-price--stacked" : ""}`}>
+                                            <span className={`spot-price spot-price--${spot.mode}${price.pointsLabel ? " spot-price--stacked" : ""}`}>
                                                 <span className="spot-price-main">{price.main}</span>
                                                 {price.pointsLabel && (
                                                     <>

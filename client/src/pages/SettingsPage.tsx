@@ -134,7 +134,7 @@ export default function SettingsPage() {
     }
 
     const connectLabel = connect?.demo_bypass
-        ? "Demo mode active"
+        ? "Demo mode"
         : !connect?.account_id
             ? "Not connected"
             : connect.onboarding_complete
@@ -404,7 +404,7 @@ export default function SettingsPage() {
                             </div>
                             <div className="tiny muted">
                                 {connect?.demo_bypass
-                                    ? "Demo bypass mode is active. Owner payouts are simulated and no Stripe onboarding is required."
+                                    ? "Demo payouts only. No Stripe setup needed."
                                     : "Connect Stripe to receive booking money as an owner. In test mode, payouts are simulated."}
                             </div>
                             <div className="settingRow">

@@ -25,7 +25,7 @@ export function ReceiptCard({
     return (
         <div className={`card receiptCard ${className ?? ""}`.trim()}>
             <div className="receiptHeader">
-                <div className="heroKicker">{kicker}</div>
+                {kicker ? <div className="heroKicker">{kicker}</div> : null}
                 <div className="h2">{title}</div>
                 {subtitle ? <div className="tiny muted">{subtitle}</div> : null}
             </div>

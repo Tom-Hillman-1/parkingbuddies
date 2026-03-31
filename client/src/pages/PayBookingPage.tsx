@@ -357,7 +357,7 @@ export default function PayBookingPage() {
     const ownerContactInfo = String(booking?.owner_contact_info ?? "").trim();
     const contactLockedByPayment = booking?.pay_method === "money" && requiresPayment;
     const ownerContactPendingCopy = "Details will be shown after payment is complete.";
-    const dashboardPath = "/dashboard?tab=myBookings&notice=bookingConfirmed";
+    const dashboardPath = "/dashboard?tab=myBookings";
 
     function getOwnerContactValue(value: string) {
         if (contactLockedByPayment) {
@@ -375,6 +375,7 @@ export default function PayBookingPage() {
             { label: "Booked at", value: bookedAt },
         ]
         : [];
+    const showPaymentSuccessNotice = !requiresPayment && booking?.pay_method === "money" && paymentComplete;
     const pageKicker = requiresPayment ? "PAYMENT" : isPointsBooking ? "POINTS" : "BOOKING";
     const pageTitle = requiresPayment ? "Complete booking" : "Booking confirmed";
     const pageSubtitle = requiresPayment
@@ -391,11 +392,18 @@ export default function PayBookingPage() {
 
     return (
         <div className="container">
-            <div className="pageHeader">
-                <div className="heroKicker">{pageKicker}</div>
-                <div className="heroTitle">{pageTitle}</div>
-                <div className="heroSub muted">{pageSubtitle}</div>
-            </div>
+            {showPaymentSuccessNotice ? (
+                <div className="paymentSuccessNotice">
+                    <div className="h3">Booking confirmed</div>
+                    <div className="createFieldHint">You're all set. Your new booking is ready below in Manage bookings.</div>
+                </div>
+            ) : (
+                <div className="pageHeader">
+                    <div className="heroKicker">{pageKicker}</div>
+                    <div className="heroTitle">{pageTitle}</div>
+                    <div className="heroSub muted">{pageSubtitle}</div>
+                </div>
+            )}
 
             {loadErr && (
                 <AppPageState
@@ -409,7 +417,7 @@ export default function PayBookingPage() {
             {!loadErr && booking && (
                 <>
                     <ReceiptCard
-                        kicker="PARKINGBUDDIES"
+                        kicker={showPaymentSuccessNotice ? "" : "PARKINGBUDDIES"}
                         title={
                             requiresPayment
                                 ? "Booking summary"
@@ -422,7 +430,7 @@ export default function PayBookingPage() {
                                 ? "Your booking details are saved locally while payment is still pending."
                                 : booking.pay_method === "money" && hasStripeReceipt
                                     ? "Booking details recorded locally with Stripe payment confirmation."
-                                : localSummarySubtitle
+                                    : localSummarySubtitle
                         }
                         className="receiptCard--confirm payReceiptCard"
                     >
@@ -470,16 +478,30 @@ export default function PayBookingPage() {
                         </div>
                     )}
 
-                    <div className="receiptActions" style={{ marginTop: 12 }}>
-                        {requiresPayment || bookingMoneyBelowMinimum ? (
-                            <>
-                                <Link to={listingPath} className="btn">Return to listing</Link>
-                                <Link to="/about#contact-bottom" className="btn">Contact support</Link>
-                            </>
-                        ) : (
-                            <Link to={dashboardPath} className="btn">View booking in dashboard</Link>
-                        )}
-                    </div>
+                    {(requiresPayment || bookingMoneyBelowMinimum) && (
+                        <div className="receiptActions" style={{ marginTop: 12 }}>
+                            <Link to={listingPath} className="btn">Return to listing</Link>
+                            <Link to="/about#contact-bottom" className="btn">Contact support</Link>
+                        </div>
+                    )}
+
+                    {!requiresPayment && !bookingMoneyBelowMinimum && (
+                        <div className="receiptActions" style={{ marginTop: 12 }}>
+                            <div className="actionInlineGrid">
+                                <Link to={dashboardPath} className="btn">View booking</Link>
+                                {hasStripeReceipt ? (
+                                    <a
+                                        href={receipt?.receipt_url ?? undefined}
+                                        className="btn"
+                                        target="_blank"
+                                        rel="noreferrer"
+                                    >
+                                        Stripe receipt
+                                    </a>
+                                ) : null}
+                            </div>
+                        </div>
+                    )}
 
                 </>
             )}

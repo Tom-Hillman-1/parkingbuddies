@@ -491,20 +491,42 @@ export default function SpotDetailsPage() {
     return (
         <div className="container">
             <div className="spotSimple">
-                <div className={`card spotSimpleHeader ${auctionClosed ? "spotSimpleHeader--closed" : ""}`}>
-                    <div className="spotSimpleHeaderTop">
-                        <div className="spotSimpleHeaderCopy">
-                            <div className="heroKicker">ParkingBuddies</div>
-                            <div className="heroTitle">{spot.title}</div>
-                            <p className="muted spotSimpleHeaderDesc">{spot.description}</p>
+                <div className="spotSimpleHeaderStack">
+                    <div className={`card spotSimpleHeader ${auctionClosed ? "spotSimpleHeader--closed" : ""}`}>
+                        <div className="spotSimpleHeaderTop">
+                            <div className="spotSimpleHeaderCopy">
+                                <div className="heroKicker">ParkingBuddies</div>
+                                <div className="heroTitle">{spot.title}</div>
+                                <p className="muted spotSimpleHeaderDesc">{spot.description}</p>
+                            </div>
+
+                            <div className="spotHeaderThumb" aria-hidden="true">
+                                {spot.image_url ? (
+                                    <img src={spot.image_url} alt={spot.title} className="spotHeaderThumbImg" />
+                                ) : (
+                                    <div className="spotHeaderThumbFallback">No image</div>
+                                )}
+                            </div>
                         </div>
 
-                        <div className="spotHeaderThumb" aria-hidden="true">
-                            {spot.image_url ? (
-                                <img src={spot.image_url} alt={spot.title} className="spotHeaderThumbImg" />
-                            ) : (
-                                <div className="spotHeaderThumbFallback">No image</div>
+                        <div className="spotSimpleBadges">
+                            <span className="badge">{modeLabel}</span>
+                            <span className="badge badge--cool">{priceLabel}</span>
+                            <span className="badge">{formatAvailability(spot)}</span>
+                            {listingInactive && <span className="badge badge--rose">Inactive</span>}
+                            {capacity > 1 && (
+                                <span className={`badge ${spotsLeft > 0 ? "badge--green" : "badge--rose"}`}>
+                                    {spotsLeft}/{capacity} available
+                                </span>
                             )}
+                            {auctionClosed && (
+                                <span className="badge badge--rose">No slots left</span>
+                            )}
+                            {featureBadges.map((feature) => (
+                                <span key={feature} className={`badge badge--${listingFeatureTone(feature)}`}>
+                                    {listingFeatureLabel(feature)}
+                                </span>
+                            ))}
                         </div>
                     </div>
 
@@ -517,26 +539,6 @@ export default function SpotDetailsPage() {
                             </div>
                         </div>
                     )}
-
-                    <div className="spotSimpleBadges">
-                        <span className="badge">{modeLabel}</span>
-                        <span className="badge badge--cool">{priceLabel}</span>
-                        <span className="badge">{formatAvailability(spot)}</span>
-                        {listingInactive && <span className="badge badge--rose">Inactive</span>}
-                        {capacity > 1 && (
-                            <span className={`badge ${spotsLeft > 0 ? "badge--green" : "badge--rose"}`}>
-                                {spotsLeft}/{capacity} available
-                            </span>
-                        )}
-                        {auctionClosed && (
-                            <span className="badge badge--rose">No slots left</span>
-                        )}
-                        {featureBadges.map((feature) => (
-                            <span key={feature} className={`badge badge--${listingFeatureTone(feature)}`}>
-                                {listingFeatureLabel(feature)}
-                            </span>
-                        ))}
-                    </div>
                 </div>
 
                 <aside className="spotSimpleSide">

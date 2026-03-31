@@ -74,7 +74,7 @@ type DashboardData = {
 const NAV_SECTIONS: Array<{ key: DashboardSection; title: string; tone: "driver" | "owner" | "payments" }> = [
     { key: "manageBookings", title: "Manage bookings", tone: "driver" },
     { key: "manageListings", title: "Manage listings", tone: "owner" },
-    { key: "transactions", title: "Transactions", tone: "payments" },
+    { key: "transactions", title: "Manage Transactions", tone: "payments" },
 ];
 const SEARCH_PARAM_TO_SECTION: Record<string, DashboardSection> = {
     myBookings: "manageBookings",
@@ -306,11 +306,9 @@ export default function DashboardPage() {
     const [selectedTab, setSelectedTab] = useState<DashboardSection>(
         () => SEARCH_PARAM_TO_SECTION[searchParams.get("tab") ?? ""] ?? "manageBookings"
     );
-    const dashboardNotice = searchParams.get("notice");
-
     const payoutsRef = useRef<HTMLDivElement | null>(null);
 
-    const { connect, connectBusy, refreshConnectStatus, beginConnectOnboarding, openConnectDashboard } = useStripeConnect(token);
+    const { connect, connectBusy, refreshConnectStatus, openConnectDashboard } = useStripeConnect(token);
     const dashboardQuery = useQuery<DashboardData>({
         queryKey: ["dashboard-data", token],
         enabled: Boolean(token),
@@ -430,7 +428,7 @@ export default function DashboardPage() {
         [ownerBookings]
     );
 
-    const connectLabel = connect?.demo_bypass ? "Demo mode active" : !connect?.account_id ? "Not connected" : connect.onboarding_complete ? "Stripe Connected" : "Onboarding incomplete";
+    const connectLabel = connect?.demo_bypass ? "Demo mode" : !connect?.account_id ? "Not connected" : connect.onboarding_complete ? "Stripe Connected" : "Onboarding incomplete";
     const connectBadgeClass = connect?.demo_bypass ? "badge badge--cool" : !connect?.account_id ? "badge badge--rose" : connect.onboarding_complete ? "badge badge--green" : "badge badge--warm";
 
     const headerStats = [
@@ -552,18 +550,6 @@ export default function DashboardPage() {
         }
     };
 
-    const handleBeginConnectOnboarding = async (mode: "stripe" | "demo" = "stripe") => {
-        setErr(null);
-        setMsg(null);
-        const result = await beginConnectOnboarding(mode);
-        if (!result.ok && result.error) {
-            setErr(result.error);
-            return;
-        }
-        if (result.ok && result.message) setMsg(result.message);
-        await queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
-    };
-
     const handleOpenConnectDashboard = async () => {
         setErr(null);
         const result = await openConnectDashboard();
@@ -605,7 +591,7 @@ export default function DashboardPage() {
                         <div className="heroSub muted">Bookings, listings, payouts, and points in one place.</div>
                         <div className="dashboardHeroActions">
                             <AppButton variant="primary" onPress={handleTopStripeDashboard} disabled={connectBusy}>
-                                {connectBusy ? "Opening..." : "Open Stripe dashboard"}
+                                {connectBusy ? "Opening..." : "Stripe Dashboard"}
                             </AppButton>
                         </div>
                     </div>
@@ -640,13 +626,6 @@ export default function DashboardPage() {
             )}
             {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
             {msg && <div className="card formSection">{msg}</div>}
-            {dashboardNotice === "bookingConfirmed" && (
-                <div className="paymentSuccessNotice">
-                    <div className="h3">Booking confirmed</div>
-                    <div className="createFieldHint">You're all set. Your new booking is ready below in Manage bookings.</div>
-                </div>
-            )}
-
             <Tabs
                 aria-label="Dashboard sections"
                 className="dashboardPanel"
@@ -1006,18 +985,18 @@ export default function DashboardPage() {
                                                     <span className="dashboardTxMetaValue">{providerText}</span>
                                                 </div>
                                                 <div className="dashboardTxLinks">
-                                                    {isOutgoing ? (
-                                                        <>
-                                                            <button className="dashboardTxLink" onClick={() => openPaymentReceipt(payment.booking_id)} disabled={receiptLoadingId === payment.booking_id} aria-busy={receiptLoadingId === payment.booking_id}>
-                                                                Stripe receipt
-                                                            </button>
-                                                            <Link to={`/pay/${payment.booking_id}`} className="dashboardTxLink">Local receipt</Link>
-                                                        </>
-                                                    ) : (
-                                                        <button className="dashboardTxLink" onClick={handleOpenConnectDashboard} disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}>
-                                                            Stripe dashboard {">"}
-                                                        </button>
-                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        className="dashboardTxLink dashboardMiniBtn is-dark"
+                                                        onClick={() => openPaymentReceipt(payment.booking_id)}
+                                                        disabled={receiptLoadingId === payment.booking_id}
+                                                        aria-busy={receiptLoadingId === payment.booking_id}
+                                                    >
+                                                        Stripe receipt
+                                                    </button>
+                                                    <Link to={`/pay/${payment.booking_id}`} className="dashboardTxLink dashboardMiniBtn">
+                                                        Local receipt
+                                                    </Link>
                                                 </div>
                                                 {paymentReceiptErrors[payment.booking_id] && (
                                                     <div className="dashboardTxMetaValue">{paymentReceiptErrors[payment.booking_id]}</div>
@@ -1032,7 +1011,7 @@ export default function DashboardPage() {
                             <DashboardDisclosureCard
                                 tone="payments"
                                 title="Stripe Account"
-                                subtitle={connect?.demo_bypass ? "Demo payouts are simulated. No Stripe onboarding required." : "Connect Stripe to withdraw your earnings."}
+                                subtitle={connect?.demo_bypass ? "Demo payouts only. No Stripe setup needed." : "Connect Stripe to withdraw your earnings."}
                                 count={connectLabel}
                                 countClassName={connectBadgeClass}
                                 notificationCount={selectedTab === "transactions" ? 0 : payoutSetupNotificationCount}
@@ -1056,13 +1035,7 @@ export default function DashboardPage() {
                                     </div>
 
                                     <div className="dashboardStripeActions">
-                                        {connect?.demo_available && !connect?.demo_bypass && !connect?.account_id && (
-                                            <button className="btn" onClick={() => handleBeginConnectOnboarding("demo")} disabled={connectBusy}>Use demo payouts</button>
-                                        )}
                                         <button className="btn btn-primary" onClick={handleOpenConnectDashboard} disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}>Open Stripe dashboard</button>
-                                        <button className="btn" onClick={() => handleBeginConnectOnboarding("stripe")} disabled={connectBusy}>
-                                            {connectBusy ? "Opening..." : connect?.demo_bypass ? "Connect Stripe instead" : !connect?.account_id ? "Connect Stripe" : connect.onboarding_complete ? "Update Stripe details" : "Continue onboarding"}
-                                        </button>
                                     </div>
                                 </div>
                         </DashboardDisclosureCard>
@@ -1072,4 +1045,3 @@ export default function DashboardPage() {
         </div>
     );
 }
-
