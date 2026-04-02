@@ -1264,72 +1264,89 @@ export default function CreateListingPage() {
             ) : (
                 <form className="wizardFlow" onSubmit={(event) => event.preventDefault()}>
                     {activeStep === 1 && (
-                        <section className="wizardIntro" key="wizard-step-1">
-                            <div className="wizardIntroCard">
-                                <div className="wizardIntroKicker">{isEdit ? "EDIT LISTING" : "CREATE LISTING"}</div>
-                                <h1 className="wizardIntroTitle">What kind of listing are you creating?</h1>
-                                <p className="wizardIntroSub">
-                                    Pick your model first, then complete the setup in guided steps. Creating for {user?.name ?? "you"}.
+                        <section className="wizardSplit wizardSplit--intro" key="wizard-step-1">
+                            <aside className="wizardLeft wizardLeft--cream">
+                                <div className="wizardLeftLogo">ParkingBuddies</div>
+                                <div className="wizardLeftStep">Step 1 of {STEP_COUNT}</div>
+                                <h2 className="wizardLeftTitle">Choose model</h2>
+                                <p className="wizardLeftCopy">
+                                    Pick rent, auction, or free first. Once that is set, we will guide the rest of the listing setup.
                                 </p>
+                            </aside>
 
-                                <AppRadioCards
-                                    ariaLabel="Listing model"
-                                    className="wizardTileGrid"
-                                    itemClassName="wizardTile"
-                                    orientation="horizontal"
-                                    value={mode}
-                                    onChange={setMode}
-                                    options={LISTING_MODEL_OPTIONS.map((choice) => ({
-                                        id: choice.mode,
-                                        className: `wizardTile--${choice.tone}`,
-                                        content: (
-                                            <>
-                                                <div className="wizardTileHead">
-                                                    <span className="wizardTileTitle">{choice.title}</span>
-                                                    <Tooltip label={`${choice.title} mode help`} text={choice.help} />
-                                                </div>
-                                                <span className="wizardTileCopy">{choice.copy}</span>
-                                                {mode === choice.mode && (
-                                                    <div className="wizardTileFooter">
-                                                        <button
+                            <section className="wizardRight wizardRight--intro">
+                                <div className="wizardIntro">
+                                    <div className="wizardIntroCard">
+                                        <h1 className="wizardIntroTitle">What kind of listing are you creating?</h1>
+                                        <p className="wizardIntroSub">
+                                            Pick your model first, then choose the spaces and details for {user?.name ?? "you"}.
+                                        </p>
+
+                                        <AppRadioCards
+                                            ariaLabel="Listing model"
+                                            className="wizardTileGrid"
+                                            itemClassName="wizardTile"
+                                            orientation="horizontal"
+                                            value={mode}
+                                            onChange={setMode}
+                                            options={LISTING_MODEL_OPTIONS.map((choice) => ({
+                                                id: choice.mode,
+                                                className: `wizardTile--${choice.tone}`,
+                                                content: (
+                                                    <>
+                                                        <div className="wizardTileHead">
+                                                            <span className="wizardTileTitle">{choice.title}</span>
+                                                            <Tooltip label={`${choice.title} mode help`} text={choice.help} />
+                                                        </div>
+                                                        <span className="wizardTileCopy">{choice.copy}</span>
+                                                        {mode === choice.mode && (
+                                                            <div className="wizardTileFooter">
+                                                                <button
+                                                                    type="button"
+                                                                    className="btn wizardTileSpotsBtn"
+                                                                    onClick={openSpacesSheetFromTile}
+                                                                >
+                                                                    {`Edit spaces: ${setupCapacity || 1}`}
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                ),
+                                            }))}
+                                        />
+
+                                        <footer className="wizardCardFoot">
+                                            <div className="wizardActions">
+                                                <div className="wizardActionsLead">
+                                                    {isEdit ? (
+                                                        <AppButton
                                                             type="button"
-                                                            className="btn wizardTileSpotsBtn"
-                                                            onClick={openSpacesSheetFromTile}
+                                                            variant="ghost"
+                                                            onPress={openDeleteSheet}
+                                                            disabled={saving || deleting}
                                                         >
-                                                            {`Edit spaces: ${setupCapacity || 1}`}
-                                                        </button>
-                                                    </div>
-                                                )}
-                                            </>
-                                        ),
-                                    }))}
-                                />
-
-                                <div className="wizardActions wizardActions--intro">
-                                    <Link className="btn" to={isEdit && editId ? `/spots/${editId}` : "/dashboard"}>
-                                        Cancel
-                                    </Link>
-                                    {isEdit && (
-                                        <AppButton
-                                            type="button"
-                                            variant="ghost"
-                                            onPress={openDeleteSheet}
-                                            disabled={saving || deleting}
-                                        >
-                                            Delete listing
-                                        </AppButton>
-                                    )}
-                                    <AppButton
-                                        type="button"
-                                        variant="primary"
-                                        onClick={goNext}
-                                        disabled={!stepReady[1] || saving}
-                                    >
-                                        Next
-                                    </AppButton>
+                                                            Delete listing
+                                                        </AppButton>
+                                                    ) : (
+                                                        <Link className="btn" to="/dashboard">
+                                                            Cancel
+                                                        </Link>
+                                                    )}
+                                                </div>
+                                                <div className="wizardActionHint">{actionHint}</div>
+                                                <AppButton
+                                                    type="button"
+                                                    variant="primary"
+                                                    onClick={goNext}
+                                                    disabled={!stepReady[1] || saving}
+                                                >
+                                                    Next
+                                                </AppButton>
+                                            </div>
+                                        </footer>
+                                    </div>
                                 </div>
-                                {error && <div className="createInlineError">{error}</div>}
-                            </div>
+                            </section>
                         </section>
                     )}
 
@@ -1566,6 +1583,7 @@ export default function CreateListingPage() {
         </div>
     );
 }
+
 
 
 
