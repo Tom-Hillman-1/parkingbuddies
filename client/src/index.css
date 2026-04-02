@@ -3028,3 +3028,10 @@ label > span:first-child {
 
 
 
+@media (max-width: 1080px) {
+    .appNotifyBadge--nav-shell {
+        top: 0.18rem !important;
+        right: 0.18rem !important;
+        transform: translate(8%, -8%) !important;
+    }
+}
