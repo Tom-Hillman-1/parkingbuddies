@@ -746,8 +746,8 @@
 
     .wizardAvailabilityCal .appCalendar--slots .rdp-day_button::after {
         top: calc(100% + 0.24rem);
-        width: 2.78rem;
-        font-size: 0.41rem;
+        width: 2.88rem;
+        font-size: 0.38rem;
         line-height: 1;
     }
 
