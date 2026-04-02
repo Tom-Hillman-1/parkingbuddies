@@ -232,6 +232,9 @@
 
     .slotCal .appCalendar--slots .rdp-day_button::after {
         top: calc(100% + 0.36rem);
+        width: 3.1rem;
+        font-size: 0.42rem;
+        line-height: 1;
     }
 }
 

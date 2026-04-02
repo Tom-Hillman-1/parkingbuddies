@@ -821,9 +821,9 @@
     }
 
     .appCalendar--slots .rdp-day_button::after {
-        width: 4rem;
-        font-size: 0.5rem;
-        line-height: 1.08;
+        width: 3.7rem;
+        font-size: 0.46rem;
+        line-height: 1.02;
     }
 
     .appCalendar--home .rdp-month_grid {
@@ -848,9 +848,9 @@
 
     .appCalendar--availability.appCalendar--slots .rdp-day_button::after {
         top: calc(100% + 0.28rem);
-        width: 3.2rem;
-        font-size: 0.48rem;
-        line-height: 1.06;
+        width: 2.95rem;
+        font-size: 0.43rem;
+        line-height: 1.01;
     }
 
     .appTimePickerDialogFooter {
