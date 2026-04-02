@@ -932,7 +932,7 @@ router.post("/auction-intent", requireAuth, auctionIntentRateLimit, async (req: 
     if (amount < STRIPE_MIN_GBP_PAYMENT) {
         return res.status(400).json({
             ok: false,
-            error: `Money bids in GBP must be at least £${STRIPE_MIN_GBP_PAYMENT.toFixed(2)} for this slot. Increase the bid or use points instead.`,
+            error: `Money bids in GBP must total at least \u00A3${STRIPE_MIN_GBP_PAYMENT.toFixed(2)} for this slot. Increase the bid or use points instead.`,
         });
     }
 

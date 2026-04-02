@@ -5,7 +5,7 @@ import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
 import { stripe } from "../stripe";
 import { findSlotAvailabilityIssue, occupiedBookingWhereClause, remainingMinutes } from "../lib/availability";
-import { calcAuctionUnits, expandRangeToBillableEnd, type PriceUnit, toMoney } from "../lib/shared";
+import { calcAuctionUnits, calcMinimumAuctionMoneyTotal, expandRangeToBillableEnd, type PriceUnit, toMoney } from "../lib/shared";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
 import { serverError } from "../lib/errors";
@@ -480,9 +480,9 @@ router.post("/:spotId/bid", requireAuth, bidSubmitRateLimit, async (req: AuthReq
                 return rollbackWith(400, "This auction does not accept money bids", true);
             }
             const units = calcAuctionUnits(minutes, unit);
-            const minTotal = Math.round(startPrice * units * 100) / 100;
-            if (amount < minTotal) {
-                return rollbackWith(400, `Bid must be at least GBP ${minTotal.toFixed(2)} for this ${unit} slot`, true);
+            const minimumTotal = calcMinimumAuctionMoneyTotal(startPrice, units);
+            if (amount < minimumTotal) {
+                return rollbackWith(400, `Bid must total at least GBP ${minimumTotal.toFixed(2)} for this ${unit} slot`, true);
             }
             const authorizationRef =
                 wantsDemoAuthorization && DEMO_MONEY_AUTH_ENABLED
@@ -965,4 +965,3 @@ router.post("/bids/:bidId/cancel", requireAuth, bidderBidActionRateLimit, async 
 });
 
 export default router;
-

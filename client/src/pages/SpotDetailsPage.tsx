@@ -9,6 +9,8 @@ import { useAuth } from "../lib/auth";
 import type { Booking as SharedBooking, ParkingSpot as SharedParkingSpot } from "../types";
 import {
     calcAuctionMoneyTotal,
+    calcMinimumAuctionMoneyPerUnit,
+    calcMinimumAuctionMoneyTotal,
     calcAuctionPointsTotal,
     calcUnitsForMinutes,
     capitalizeLabel,
@@ -257,6 +259,15 @@ export default function SpotDetailsPage() {
     const bidTotalMoney = useMemo(() => {
         return calcAuctionMoneyTotal(bidMoneyPerHour, bidUnits);
     }, [bidMoneyPerHour, bidUnits]);
+    const auctionBaseMinimumTotal = useMemo(() => calcAuctionMoneyTotal(auctionMinPerUnit, bidUnits), [auctionMinPerUnit, bidUnits]);
+    const auctionRequiredMinimumTotal = useMemo(
+        () => calcMinimumAuctionMoneyTotal(auctionMinPerUnit, bidUnits),
+        [auctionMinPerUnit, bidUnits]
+    );
+    const auctionRequiredMinPerUnit = useMemo(
+        () => calcMinimumAuctionMoneyPerUnit(auctionMinPerUnit, bidUnits),
+        [auctionMinPerUnit, bidUnits]
+    );
 
     const bidTotalPoints = useMemo(() => {
         return calcAuctionPointsTotal(bidPointsPerHour, bidUnits);
@@ -264,9 +275,11 @@ export default function SpotDetailsPage() {
     const bookingMoneyBelowMinimum =
         payMethod === "money" && estimatedTotal > 0 && estimatedTotal < STRIPE_MIN_GBP_PAYMENT;
     const bidMoneyBelowMinimum =
-        bidPayMethod === "money" && bidTotalMoney > 0 && bidTotalMoney < STRIPE_MIN_GBP_PAYMENT;
-    const auctionMoneyStartLabel =
-        auctionMinPerUnit > 0 ? `Starting bid: ${formatGbp(auctionMinPerUnit)} / ${listingUnit}` : null;
+        bidPayMethod === "money" && bidTotalMoney > 0 && bidTotalMoney < auctionRequiredMinimumTotal;
+    const auctionMoneyMinimumLabel =
+        auctionMinPerUnit > 0
+            ? `Minimum ${formatGbp(auctionRequiredMinPerUnit)} / ${listingUnit}${auctionRequiredMinimumTotal > auctionBaseMinimumTotal ? " for this slot" : ""}`
+            : null;
     const auctionPointsStartPerUnit = toFiniteNumber(spot?.points_cost);
     const auctionPointsStartLabel =
         auctionPointsStartPerUnit > 0 ? `Starting bid: ${auctionPointsStartPerUnit} pts / ${listingUnit}` : null;
@@ -425,7 +438,7 @@ export default function SpotDetailsPage() {
             if (!Number.isFinite(value) || value <= 0) return setBidMsg(`Enter a valid GBP amount per ${listingUnit}.`);
             if (bidMoneyBelowMinimum) {
                 return setBidMsg(
-                    `Money bids in GBP must be at least ${formatGbp(STRIPE_MIN_GBP_PAYMENT)} for this slot. Increase the bid or use points instead.`
+                    `Money bids for this slot must be at least ${formatGbp(auctionRequiredMinPerUnit)} / ${listingUnit}, which totals ${formatGbp(auctionRequiredMinimumTotal)}. Increase the bid or use points instead.`
                 );
             }
         } else {
@@ -645,16 +658,16 @@ export default function SpotDetailsPage() {
 
                             {bidPayMethod === "money" ? (
                                 <label style={{ display: "grid", gap: 6 }}>
-                                    {auctionMoneyStartLabel ? (
+                                    {auctionMoneyMinimumLabel ? (
                                         <div className="tiny muted" style={{ paddingLeft: "5px" }}>
-                                            Minimum {formatGbp(auctionMinPerUnit)} / {listingUnit}
+                                            {auctionMoneyMinimumLabel}
                                         </div>
                                     ) : null}
                                     <input
                                         className="input"
                                         type="number"
-                                        min={0.01}
-                                        step={0.25}
+                                        min={auctionRequiredMinPerUnit > 0 ? auctionRequiredMinPerUnit : 0.01}
+                                        step={0.01}
                                         value={bidMoneyPerHour}
                                         onChange={(e) => setBidMoneyPerHour(e.target.value)}
                                         placeholder={`Your bid per ${listingUnit} (GBP)`}

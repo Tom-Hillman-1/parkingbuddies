@@ -77,6 +77,23 @@ export function calcAuctionMoneyTotal(amountPerUnit: unknown, units: number) {
     return Math.round(amount * units * 100) / 100;
 }
 
+export function roundMoneyUp(value: unknown) {
+    return Math.ceil(toFiniteNumber(value, 0) * 100) / 100;
+}
+
+export function calcMinimumAuctionMoneyTotal(amountPerUnit: unknown, units: number) {
+    if (!Number.isFinite(units) || units <= 0) return 0;
+    const listingMinimum = calcAuctionMoneyTotal(amountPerUnit, units);
+    return Math.max(listingMinimum, STRIPE_MIN_GBP_PAYMENT);
+}
+
+export function calcMinimumAuctionMoneyPerUnit(amountPerUnit: unknown, units: number) {
+    const baseAmount = Math.max(0, toFiniteNumber(amountPerUnit));
+    if (!Number.isFinite(units) || units <= 0) return baseAmount;
+    const minimumTotal = calcMinimumAuctionMoneyTotal(baseAmount, units);
+    return Math.max(baseAmount, roundMoneyUp(minimumTotal / units));
+}
+
 export function calcAuctionPointsTotal(amountPerUnit: unknown, units: number) {
     const amount = toFiniteNumber(amountPerUnit);
     if (amount <= 0 || !Number.isFinite(units) || units <= 0) return 0;
@@ -106,3 +123,4 @@ export function moneyBookingRewardPoints(totalPriceGbp: unknown) {
 export function moneyHostingRewardPoints(totalPriceGbp: unknown) {
     return minimumPositivePoints(totalPriceGbp, 0.05);
 }
+

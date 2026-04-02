@@ -27,6 +27,8 @@ const monthChipStamp = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
 
 export {
     calcAuctionMoneyTotal,
+    calcMinimumAuctionMoneyPerUnit,
+    calcMinimumAuctionMoneyTotal,
     calcAuctionPointsTotal,
     calcAuctionUnitsForRange,
     calcRangeMinutes,
@@ -175,3 +177,4 @@ function formatCalendarMinutes(totalMinutes: number) {
     const minutes = normalized % 60;
     return `${pad2(hours)}:${pad2(minutes)}`;
 }
+

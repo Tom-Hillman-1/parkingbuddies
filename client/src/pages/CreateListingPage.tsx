@@ -227,6 +227,13 @@ export default function CreateListingPage() {
     const parsedCoords = parseCoordinates(lat, lng);
     const mapCenter = parsedCoords ?? { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] };
 
+    useEffect(() => {
+        window.requestAnimationFrame(() => {
+            window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+            document.querySelector<HTMLElement>(".app-main")?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+        });
+    }, [activeStep]);
+
     const editSnapshotQuery = useQuery({
         queryKey: ["listing-edit-snapshot", editId, token],
         enabled: Boolean(isEdit && token && editId),
@@ -898,7 +905,7 @@ export default function CreateListingPage() {
     const confirmRows: Array<{ label: string; value: string }> = [
         { label: "Model", value: modeLabel(mode) },
         { label: "Features", value: featuresSummary },
-        { label: "Spaces", value: `${setupCapacity || 1} ${setupCapacity === 1 ? "space" : "spaces"}` },
+        { label: "Listed spaces", value: `${setupCapacity || 1} ${setupCapacity === 1 ? "space" : "spaces"}` },
         { label: "Pricing", value: priceSummary },
         { label: "Availability", value: availabilitySummary },
         { label: "Address", value: addressText.trim() || "Address not set" },
@@ -1299,6 +1306,9 @@ export default function CreateListingPage() {
                                 />
 
                                 <div className="wizardActions wizardActions--intro">
+                                    <Link className="btn" to={isEdit && editId ? `/spots/${editId}` : "/dashboard"}>
+                                        Cancel
+                                    </Link>
                                     {isEdit && (
                                         <AppButton
                                             type="button"
@@ -1309,9 +1319,6 @@ export default function CreateListingPage() {
                                             Delete listing
                                         </AppButton>
                                     )}
-                                    <Link className="btn" to={isEdit && editId ? `/spots/${editId}` : "/dashboard"}>
-                                        Cancel
-                                    </Link>
                                     <AppButton
                                         type="button"
                                         variant="primary"
@@ -1372,12 +1379,12 @@ export default function CreateListingPage() {
 
             <WizardSheet
                 open={spacesSheetOpen}
-                title="Choose spaces"
-                subtitle="Select how many spaces drivers can book at once."
+                title="Listing spaces"
+                subtitle="Select how many spaces this listing can offer at the same time."
                 onClose={closeSheet}
             >
                 <AppRadioCards
-                    ariaLabel="Choose spaces"
+                    ariaLabel="Choose listing spaces"
                     className="createSheetSpaceGrid"
                     itemClassName="createSheetSpaceBtn"
                     orientation="horizontal"
@@ -1390,7 +1397,7 @@ export default function CreateListingPage() {
                 />
 
                 {pendingSpacesChoice === "4plus" && (
-                    <AppField label="Custom spaces (4+)">
+                    <AppField label="Custom listed spaces (4+)">
                         <AppInput
                             type="number"
                             min={4}
@@ -1456,8 +1463,9 @@ export default function CreateListingPage() {
                     closeSheet();
                     setError("");
                 }}
+                wide
             >
-                <div className="receiptCard card">
+                <div className="createConfirmSummary">
                     <div className="h3">{title || "Untitled listing"}</div>
                     <div className="receiptBody">
                         {confirmRows.map((row) => (
@@ -1491,7 +1499,7 @@ export default function CreateListingPage() {
                     </div>
                 ) : (
                     <SheetActions
-                        secondaryLabel="Back"
+                        secondaryLabel="Cancel"
                         onSecondary={() => {
                             closeSheet();
                             setError("");
@@ -1558,5 +1566,6 @@ export default function CreateListingPage() {
         </div>
     );
 }
+
 
 

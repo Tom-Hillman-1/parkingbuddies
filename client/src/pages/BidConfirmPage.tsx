@@ -11,9 +11,10 @@ import {
     calcAuctionMoneyTotal,
     calcAuctionPointsTotal,
     calcAuctionUnitsForRange,
+    calcMinimumAuctionMoneyTotal,
     formatDateTimeCompact,
     formatGbp,
-    STRIPE_MIN_GBP_PAYMENT,
+    toFiniteNumber,
     type PriceUnit,
 } from "./pagesShared";
 
@@ -24,7 +25,7 @@ const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as 
         },
     },
 });
-type SpotSummary = { id: string; title: string; address_text: string; price_unit?: PriceUnit };
+type SpotSummary = { id: string; title: string; address_text: string; price_unit?: PriceUnit; auction_start_price_gbp?: number | string | null };
 type StripeIntentDetails = { client_secret: string; payment_intent_id: string };
 
 function useQueryValue(key: string, fallback = "") {
@@ -345,6 +346,8 @@ export default function BidConfirmPage() {
     const totalPoints = useMemo(() => {
         return calcAuctionPointsTotal(pointsPerUnit, units);
     }, [pointsPerUnit, units]);
+    const auctionStartPerUnit = toFiniteNumber(spot?.auction_start_price_gbp);
+    const minimumMoneyTotal = useMemo(() => calcMinimumAuctionMoneyTotal(auctionStartPerUnit, units), [auctionStartPerUnit, units]);
 
     if (!token) return <Navigate to="/login" replace />;
     if (!spotId || !start || !end) {
@@ -383,7 +386,7 @@ export default function BidConfirmPage() {
     const totalLabel = pay === "points" ? `${totalPoints} pts` : formatGbp(totalMoney);
     const perUnitLabel =
         pay === "points" ? `${Number(pointsPerUnit || 0)} pts` : formatGbp(moneyPerUnit);
-    const moneyBidBelowMinimum = pay === "money" && totalMoney > 0 && totalMoney < STRIPE_MIN_GBP_PAYMENT;
+    const moneyBidBelowMinimum = pay === "money" && totalMoney > 0 && totalMoney < minimumMoneyTotal;
 
     return (
         <div className="container">
@@ -411,7 +414,7 @@ export default function BidConfirmPage() {
             {pay === "money" ? (
                 moneyBidBelowMinimum ? (
                     <div className="spotAlert spotAlert--danger" style={{ marginTop: 12 }}>
-                        Card payments in GBP must be at least {formatGbp(STRIPE_MIN_GBP_PAYMENT)}.
+                        Card payments for this slot must total at least {formatGbp(minimumMoneyTotal)}.
                         This bid totals {formatGbp(totalMoney)}, so Stripe cannot create the authorization for this slot.
                         Increase the bid or use points instead.
                     </div>

@@ -735,8 +735,8 @@ export default function HomePage() {
                                     <div className="spot-head">
                                         <div className="spot-head-main">
                                             <h3 className="h3">{spot.title}</h3>
-                                            <p className="spot-summary" title={spot.description || spot.address_text}>
-                                                {spot.description || spot.address_text}
+                                            <p className="spot-summary" title={spot.address_text}>
+                                                {spot.address_text}
                                             </p>
                                             {features.length > 0 && (
                                                 <div className="spot-features">

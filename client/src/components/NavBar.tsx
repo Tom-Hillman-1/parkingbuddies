@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { EMPTY_NOTIFICATION_SUMMARY, useNotificationSummary, useSeenNotificationSummary } from "../lib/notifications";
 import logoMark from "../assets/logo_logo_blue.png";
@@ -7,8 +7,7 @@ import logoMark from "../assets/logo_logo_blue.png";
 const linkClassName = ({ isActive }: { isActive: boolean }) => `nav-link${isActive ? " active" : ""}`;
 
 export default function NavBar() {
-    const { user, token, isLoading, logout } = useAuth();
-    const navigate = useNavigate();
+    const { user, token, isLoading } = useAuth();
     const location = useLocation();
     const [open, setOpen] = useState(false);
     const shellRef = useRef<HTMLDivElement | null>(null);
@@ -16,13 +15,7 @@ export default function NavBar() {
     const notificationQuery = useNotificationSummary(token);
     const notificationSummary = useSeenNotificationSummary(notificationQuery.data ?? EMPTY_NOTIFICATION_SUMMARY);
     const dashboardNotificationTotal = notificationSummary.total;
-    const accountName = user?.name ?? "Account";
     const closeMenu = () => setOpen(false);
-    const handleLogout = () => {
-        closeMenu();
-        logout();
-        navigate("/", { replace: true });
-    };
 
     useEffect(() => {
         closeMenu();
@@ -84,27 +77,17 @@ export default function NavBar() {
                             <NavLink to="/create-listing" className={linkClassName} onClick={closeMenu}>Create listing</NavLink>
                             <NavLink
                                 to="/dashboard"
-                                className={({ isActive }) => `nav-link nav-link--notify${isActive ? " active" : ""}`}
+                                className={({ isActive }) => `nav-link nav-link--notify nav-link--dashboard${isActive ? " active" : ""}`}
                                 onClick={closeMenu}
                             >
                                 <span className="nav-link-label">Dashboard</span>
+                                <span className="nav-user-points">{user?.points_balance ?? 0} pts</span>
                                 {dashboardNotificationTotal > 0 ? (
                                     <span className="appNotifyBadge appNotifyBadge--nav-link">+{dashboardNotificationTotal}</span>
                                 ) : null}
                             </NavLink>
-                            <NavLink to="/about" className={linkClassName} onClick={closeMenu}>About</NavLink>
                             <NavLink to="/settings" className={linkClassName} onClick={closeMenu}>Settings</NavLink>
-
-                            <Link to="/dashboard" className="nav-user" title={accountName} onClick={closeMenu}>
-                                <span className="nav-user-main">
-                                    <span className="nav-user-name">{accountName}</span>
-                                </span>
-                                <span className="nav-user-points">{user?.points_balance ?? 0} pts</span>
-                            </Link>
-
-                            <button type="button" className="btn btn-ghost" onClick={handleLogout}>
-                                Log out
-                            </button>
+                            <NavLink to="/about" className={linkClassName} onClick={closeMenu}>About</NavLink>
                         </>
                     ) : (
                         <>
@@ -118,5 +101,3 @@ export default function NavBar() {
         </header>
     );
 }
-
-

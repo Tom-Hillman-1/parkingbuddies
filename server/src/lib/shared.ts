@@ -5,6 +5,8 @@ export const MAX_LISTING_PUBLISH_REWARDS = 3;
 
 export {
     calcAuctionMoneyTotal,
+    calcMinimumAuctionMoneyPerUnit,
+    calcMinimumAuctionMoneyTotal,
     calcAuctionPointsTotal,
     calcAuctionUnits,
     calcAuctionUnitsForRange,
@@ -40,3 +42,4 @@ export function isValidEmail(email: string) {
 export function isValidName(name: string, min = 2, max = 120) {
     return name.length >= min && name.length <= max;
 }
+

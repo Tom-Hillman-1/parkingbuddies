@@ -37,8 +37,12 @@
 .createSheetActions {
     display: flex;
     flex-wrap: wrap;
-    justify-content: flex-end;
+    align-items: center;
     gap: 0.56rem;
+}
+
+.createSheetActions > :first-child {
+    margin-right: auto;
 }
 
 .createConnectNotice,
@@ -60,6 +64,17 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.56rem;
+}
+
+.createConfirmSummary {
+    display: grid;
+    gap: 0.72rem;
+}
+
+.createSheet.appDialogSurface {
+    border-color: #dbe6f3;
+    background: #ffffff;
+    box-shadow: 0 24px 48px rgba(12, 22, 40, 0.16);
 }
 
 .slotSheet {
@@ -120,23 +135,20 @@
 }
 
 .wizardIntro {
-    border-radius: 28px;
-    background: linear-gradient(135deg, rgba(222, 235, 248, 0.78) 0%, rgba(244, 247, 252, 0.94) 60%, rgba(232, 240, 250, 0.82) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.82);
-    box-shadow: var(--shadow-sm);
-    padding: clamp(1.1rem, 2.6vw, 1.8rem);
-    min-height: clamp(480px, 70vh, 760px);
+    padding: 0;
+    min-height: 0;
     display: grid;
     place-items: center;
     animation: wizardStepIn 220ms ease both;
 }
 
 .wizardIntroCard {
-    width: min(980px, 100%);
+    width: min(1180px, 100%);
     border-radius: 28px;
-    border: 1px solid rgba(255, 255, 255, 0.86);
-    background: rgba(255, 255, 255, 0.9);
-    box-shadow: 0 24px 46px rgba(16, 24, 40, 0.1);
+    border: 1px solid rgba(233, 240, 248, 0.98);
+    background: #ffffff;
+    box-shadow: 0 18px 38px rgba(16, 24, 40, 0.08);
+    min-height: clamp(520px, 72vh, 760px);
     padding: clamp(1rem, 2.4vw, 1.7rem);
     display: grid;
     gap: 1rem;
@@ -836,9 +848,9 @@
 }
 
 .wizardActions--intro {
-    grid-template-columns: repeat(3, auto);
-    justify-content: flex-end;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
+    width: 100%;
     border: 0;
     border-radius: 0;
     box-shadow: none;
@@ -921,3 +933,5 @@
         transform: none;
     }
 }
+
+
