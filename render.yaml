@@ -37,6 +37,19 @@ services:
     rootDir: client
     buildCommand: npm install && npm run build
     staticPublishPath: dist
+    headers:
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' https://js.stripe.com https://*.stripe.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://*.onrender.com https://*.stripe.com; frame-src 'self' https://*.stripe.com; form-action 'self' https://*.stripe.com; manifest-src 'self'"
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Permissions-Policy
+        value: "camera=(), microphone=(), geolocation=(self)"
     routes:
       - type: rewrite
         source: /*
