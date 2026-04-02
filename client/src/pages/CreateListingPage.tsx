@@ -1325,7 +1325,7 @@ export default function CreateListingPage() {
                                                             onPress={openDeleteSheet}
                                                             disabled={saving || deleting}
                                                         >
-                                                            Delete 
+                                                            Delete listing
                                                         </AppButton>
                                                     ) : (
                                                         <Link className="btn" to="/dashboard">
