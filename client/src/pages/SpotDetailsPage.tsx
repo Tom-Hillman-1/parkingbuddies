@@ -219,7 +219,6 @@ export default function SpotDetailsPage() {
         return getRangeCapacityState(bookings, startAt, effectiveSlotEnd, capacity);
     }, [bookings, capacity, effectiveSlotEnd, slotRangeValid, startAt]);
     const slotFull = selectedCapacity.isFull;
-    const headerSpacesLeft = hasSelectedSlot && slotFull ? 0 : capacity;
 
     const isOwner = !!user && !!spot && user.id === spot.owner_user_id;
     const listingInactive = !!spot && !spot.is_active;
@@ -523,11 +522,7 @@ export default function SpotDetailsPage() {
                             <span className="badge badge--cool">{priceLabel}</span>
                             <span className="badge">{formatAvailability(spot)}</span>
                             {listingInactive && <span className="badge badge--rose">Inactive</span>}
-                            {capacity > 1 && (
-                                <span className={`badge ${headerSpacesLeft > 0 ? "badge--green" : "badge--rose"}`}>
-                                    {headerSpacesLeft}/{capacity} available
-                                </span>
-                            )}
+                            {capacity > 1 && <span className="badge badge--green">{capacity}/{capacity} available</span>}
                             {auctionClosed && (
                                 <span className="badge badge--rose">No slots left</span>
                             )}

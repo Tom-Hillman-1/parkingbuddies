@@ -5,15 +5,16 @@ import { AppDialog } from "../components/ui/AppDialog";
 import { AppButton } from "../components/ui/AppForm";
 import { AppTimePicker } from "../components/ui/AppTimePicker";
 import {
+    expandRangeToBillableEnd,
     formatDateDisplay,
     formatDateTimeCompact,
-    formatCalendarWindowLabelForDay,
     mergeCalendarDayLabels,
     pad2,
     parseYmd,
     timeToMinutes,
     toFiniteNumber,
     toLocalDateInput,
+    type PriceUnit,
 } from "./pagesShared";
 
 type WindowSlot = {
@@ -114,11 +115,12 @@ export function SlotCalendar<TSpot extends AvailabilitySpot>({
     disabled,
 }: SlotCalendarProps<TSpot>) {
     const [visibleMonth, setVisibleMonth] = useState(() => calendarMonthFromYmd(startDate));
-    const fullyBookedDays = useMemo(
-        () => buildFullyBookedDaySet(spot, bookings, Math.max(1, capacity)),
+    const dayAvailability = useMemo(
+        () => buildDayAvailabilityState(spot, bookings, Math.max(1, capacity)),
         [spot, bookings, capacity]
     );
-    const dayLabels = useMemo(() => buildSlotDayLabels(spot, fullyBookedDays), [spot, fullyBookedDays]);
+    const fullyBookedDays = dayAvailability.fullyBookedDays;
+    const dayLabels = dayAvailability.dayLabels;
     const selectedDays = useMemo(() => buildSelectedSlotDays(startDate, endDate), [startDate, endDate]);
 
     useEffect(() => {
@@ -342,7 +344,7 @@ function getDayKey(day: Date) {
     return toLocalDateInput(startOfDay(day));
 }
 
-function buildFullyBookedDaySet(spot: AvailabilitySpot, bookings: SlotBookingLike[], capacity: number) {
+function buildDayAvailabilityState(spot: AvailabilitySpot, bookings: SlotBookingLike[], capacity: number) {
     const dayWindows = new Map<string, Array<{ start: Date; end: Date }>>();
     const bookedRanges = bookings
         .map((booking) => {
@@ -353,6 +355,8 @@ function buildFullyBookedDaySet(spot: AvailabilitySpot, bookings: SlotBookingLik
             return { start, end };
         })
         .filter((range): range is { start: Date; end: Date } => Boolean(range));
+    const safeCapacity = Math.max(1, capacity);
+    const priceUnit = getSpotPriceUnit(spot);
 
     for (const window of readSavedSlots(spot)) {
         const start = parseYmd(window.date_from);
@@ -373,50 +377,159 @@ function buildFullyBookedDaySet(spot: AvailabilitySpot, bookings: SlotBookingLik
     }
 
     const fullDays = new Set<string>();
+    const dayLabels = new Map<string, string>();
+
     for (const [key, segments] of dayWindows.entries()) {
-        if (segments.length > 0 && segments.every((segment) => isSegmentFullyBooked(segment.start, segment.end, bookedRanges, capacity))) {
-            fullDays.add(key);
-        }
-    }
+        let hasAvailability = false;
 
-    return fullDays;
-}
+        for (const segment of segments) {
+            const availableSegments =
+                priceUnit === "hour"
+                    ? subtractBlockedRanges(segment.start, segment.end, bookedRanges, safeCapacity)
+                    : buildBillableStartRanges(spot, bookings, segment.start, segment.end, safeCapacity, priceUnit);
 
-function isSegmentFullyBooked(
-    segmentStart: Date,
-    segmentEnd: Date,
-    bookings: Array<{ start: Date; end: Date }>,
-    capacity: number
-) {
-    const points = [segmentStart.getTime(), segmentEnd.getTime()];
-
-    for (const booking of bookings) {
-        const overlapStart = Math.max(segmentStart.getTime(), booking.start.getTime());
-        const overlapEnd = Math.min(segmentEnd.getTime(), booking.end.getTime());
-        if (overlapStart < overlapEnd) {
-            points.push(overlapStart, overlapEnd);
-        }
-    }
-
-    const sorted = Array.from(new Set(points)).sort((a, b) => a - b);
-    for (let i = 0; i < sorted.length - 1; i += 1) {
-        const left = sorted[i];
-        const right = sorted[i + 1];
-        if (right <= left) continue;
-
-        const sample = left + (right - left) / 2;
-        let active = 0;
-        for (const booking of bookings) {
-            if (booking.start.getTime() < sample && booking.end.getTime() > sample) {
-                active += 1;
-                if (active >= capacity) break;
+            for (const available of availableSegments) {
+                const nextLabel = formatDaySegmentLabel(available.start, available.end);
+                if (!nextLabel) continue;
+                hasAvailability = true;
+                dayLabels.set(key, mergeCalendarDayLabels(dayLabels.get(key), nextLabel));
             }
         }
 
-        if (active < capacity) return false;
+        if (!hasAvailability) {
+            fullDays.add(key);
+            dayLabels.set(key, "Full");
+        }
     }
 
-    return true;
+    return { fullyBookedDays: fullDays, dayLabels };
+}
+
+function getSpotPriceUnit(spot: AvailabilitySpot) {
+    const rawUnit = (spot as { price_unit?: unknown }).price_unit;
+    return rawUnit === "day" || rawUnit === "week" ? rawUnit : "hour";
+}
+
+function subtractBlockedRanges(
+    rangeStart: Date,
+    rangeEnd: Date,
+    bookings: Array<{ start: Date; end: Date }>,
+    capacity: number
+) {
+    if (!(rangeStart < rangeEnd)) return [] as Array<{ start: Date; end: Date }>;
+
+    const safeCapacity = Math.max(1, capacity);
+    const blocked: Array<{ start: Date; end: Date }> = [];
+    const events: Array<{ at: number; delta: number }> = [];
+
+    for (const booking of bookings) {
+        if (booking.end <= rangeStart || booking.start >= rangeEnd) continue;
+        const overlapStart = Math.max(rangeStart.getTime(), booking.start.getTime());
+        const overlapEnd = Math.min(rangeEnd.getTime(), booking.end.getTime());
+        if (overlapEnd <= overlapStart) continue;
+        events.push({ at: overlapStart, delta: 1 });
+        events.push({ at: overlapEnd, delta: -1 });
+    }
+
+    if (events.length > 0) {
+        events.sort((a, b) => (a.at === b.at ? a.delta - b.delta : a.at - b.at));
+        let active = 0;
+        let blockedStart: number | null = null;
+
+        for (const event of events) {
+            const before = active;
+            active += event.delta;
+            if (before < safeCapacity && active >= safeCapacity) {
+                blockedStart = event.at;
+            }
+            if (before >= safeCapacity && active < safeCapacity && blockedStart != null && event.at > blockedStart) {
+                blocked.push({ start: new Date(blockedStart), end: new Date(event.at) });
+                blockedStart = null;
+            }
+        }
+
+        if (blockedStart != null) {
+            blocked.push({ start: new Date(blockedStart), end: new Date(rangeEnd) });
+        }
+    }
+
+    if (!blocked.length) return [{ start: rangeStart, end: rangeEnd }];
+
+    let segments = [{ start: rangeStart, end: rangeEnd }];
+    for (const block of blocked) {
+        const next: Array<{ start: Date; end: Date }> = [];
+        for (const segment of segments) {
+            if (block.end <= segment.start || block.start >= segment.end) {
+                next.push(segment);
+                continue;
+            }
+            if (block.start > segment.start) next.push({ start: segment.start, end: block.start });
+            if (block.end < segment.end) next.push({ start: block.end, end: segment.end });
+        }
+        segments = next;
+    }
+
+    return segments.filter((segment) => segment.start < segment.end);
+}
+
+function buildBillableStartRanges(
+    spot: AvailabilitySpot,
+    bookings: SlotBookingLike[],
+    segmentStart: Date,
+    segmentEnd: Date,
+    capacity: number,
+    unit: Exclude<PriceUnit, "hour">
+) {
+    const stepMinutes = 15;
+    const stepMs = stepMinutes * 60000;
+    const ranges: Array<{ start: Date; end: Date }> = [];
+    let rangeStart: Date | null = null;
+    let previousStart: Date | null = null;
+
+    for (let at = segmentStart.getTime(); at + stepMs <= segmentEnd.getTime(); at += stepMs) {
+        const candidateStart = new Date(at);
+        const candidateEnd = new Date(at + stepMs);
+        const reservedEnd = expandRangeToBillableEnd(candidateStart, candidateEnd, unit, "booking");
+        const canBook =
+            !!reservedEnd &&
+            isSlotAllowed(spot, candidateStart, reservedEnd) &&
+            !getRangeCapacityState(bookings, candidateStart, reservedEnd, capacity).isFull;
+
+        if (!canBook) {
+            if (rangeStart && previousStart) {
+                ranges.push({ start: rangeStart, end: new Date(previousStart.getTime() + stepMs) });
+            }
+            rangeStart = null;
+            previousStart = null;
+            continue;
+        }
+
+        if (!rangeStart) {
+            rangeStart = candidateStart;
+        }
+        previousStart = candidateStart;
+    }
+
+    if (rangeStart && previousStart) {
+        ranges.push({ start: rangeStart, end: new Date(previousStart.getTime() + stepMs) });
+    }
+
+    return ranges;
+}
+
+function formatDaySegmentLabel(start: Date, end: Date) {
+    if (!(start < end)) return "";
+
+    const dayStart = startOfDay(start);
+    const nextDay = addDays(dayStart, 1);
+    const startMinutes = Math.max(0, Math.round((start.getTime() - dayStart.getTime()) / 60000));
+    if (startMinutes <= 0 && end >= nextDay) return "All day";
+
+    const startText = startMinutes <= 0 ? "00:00" : `${pad2(start.getHours())}:${pad2(start.getMinutes())}`;
+    const endText = end >= nextDay ? "00:00" : `${pad2(end.getHours())}:${pad2(end.getMinutes())}`;
+
+    if (startText === "00:00" && endText === "00:00") return "All day";
+    return `${startText}-${endText}`;
 }
 
 export function getAutoStartForDate(spot: AvailabilitySpot | null, ymd: string) {
@@ -482,32 +595,6 @@ function SlotDayButton({
             {day.date.getDate()}
         </DayPickerDayButton>
     );
-}
-
-function buildSlotDayLabels(spot: AvailabilitySpot, fullyBookedDays = new Set<string>()) {
-    const labels = new Map<string, string>();
-
-    for (const key of fullyBookedDays) {
-        labels.set(key, "Full");
-    }
-
-    // The listing stores availability as date windows, so the picker expands
-    // them here into day-level hints for the calendar grid.
-    for (const window of readSavedSlots(spot)) {
-        const start = parseYmd(window.date_from);
-        const end = parseYmd(window.date_to);
-        if (!start || !end) continue;
-
-        for (let day = startOfDay(start); day <= end; day = addDays(day, 1)) {
-            const key = toLocalDateInput(day);
-            if (fullyBookedDays.has(key)) continue;
-            const nextLabel = formatCalendarWindowLabelForDay(key, window.date_from, window.date_to, window.start, window.end);
-            if (!nextLabel) continue;
-            labels.set(key, mergeCalendarDayLabels(labels.get(key), nextLabel));
-        }
-    }
-
-    return labels;
 }
 
 export function parseDurationQuery(raw: string) {
