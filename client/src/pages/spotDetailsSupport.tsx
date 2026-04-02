@@ -8,7 +8,6 @@ import {
     expandRangeToBillableEnd,
     formatDateDisplay,
     formatDateTimeCompact,
-    mergeCalendarDayLabels,
     pad2,
     parseYmd,
     timeToMinutes,
@@ -392,7 +391,7 @@ function buildDayAvailabilityState(spot: AvailabilitySpot, bookings: SlotBooking
                 const nextLabel = formatDaySegmentLabel(available.start, available.end);
                 if (!nextLabel) continue;
                 hasAvailability = true;
-                dayLabels.set(key, mergeCalendarDayLabels(dayLabels.get(key), nextLabel));
+                dayLabels.set(key, keepLongestDayLabel(dayLabels.get(key), nextLabel));
             }
         }
 
@@ -530,6 +529,39 @@ function formatDaySegmentLabel(start: Date, end: Date) {
 
     if (startText === "00:00" && endText === "00:00") return "All day";
     return `${startText}-${endText}`;
+}
+
+function keepLongestDayLabel(currentLabel: string | undefined, nextLabel: string) {
+    if (!currentLabel) return nextLabel;
+    if (currentLabel === "All day" || nextLabel === "All day") return "All day";
+
+    const currentRange = parseDayLabelRange(currentLabel);
+    const nextRange = parseDayLabelRange(nextLabel);
+    if (!currentRange) return nextLabel;
+    if (!nextRange) return currentLabel;
+
+    const currentLength = currentRange.end - currentRange.start;
+    const nextLength = nextRange.end - nextRange.start;
+    if (nextLength > currentLength) return nextLabel;
+    if (nextLength < currentLength) return currentLabel;
+    return nextRange.start < currentRange.start ? nextLabel : currentLabel;
+}
+
+function parseDayLabelRange(label: string) {
+    if (label === "All day") {
+        return { start: 0, end: 24 * 60 };
+    }
+
+    const match = /^(\d{2}:\d{2})-(\d{2}:\d{2})$/.exec(label);
+    if (!match) return null;
+
+    const start = timeToMinutes(match[1]);
+    let end = timeToMinutes(match[2]);
+    if (match[2] === "00:00" && match[1] !== "00:00") {
+        end = 24 * 60;
+    }
+
+    return end > start ? { start, end } : null;
 }
 
 export function getAutoStartForDate(spot: AvailabilitySpot | null, ymd: string) {
