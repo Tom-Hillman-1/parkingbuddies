@@ -43,7 +43,13 @@ type StripeIntentDetails = {
     payment_intent_status?: string | null;
 };
 
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string);
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string, {
+    developerTools: {
+        assistant: {
+            enabled: false,
+        },
+    },
+});
 const POUND = String.fromCharCode(163);
 const SECURE_PAYMENT_NOTICE = "Enter your details in Stripe's secure payment form. Once payment succeeds, you will be sent straight to the Stripe receipt.";
 

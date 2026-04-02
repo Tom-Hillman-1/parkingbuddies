@@ -17,7 +17,13 @@ import {
     type PriceUnit,
 } from "./pagesShared";
 
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string);
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string, {
+    developerTools: {
+        assistant: {
+            enabled: false,
+        },
+    },
+});
 type SpotSummary = { id: string; title: string; address_text: string; price_unit?: PriceUnit };
 type StripeIntentDetails = { client_secret: string; payment_intent_id: string };
 
