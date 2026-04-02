@@ -209,6 +209,7 @@ export function SlotDialog({
                 <span>Start time on {formattedStartDate}</span>
                 <AppTimePicker
                     className="input"
+                    dialogClassName="slotTimeDialog"
                     value={normalizeTimeInput(startTime)}
                     onChange={(value) => setStartTime(normalizeTimeInput(value))}
                 />
@@ -218,6 +219,7 @@ export function SlotDialog({
                 <span>End time on {formattedEndDate}</span>
                 <AppTimePicker
                     className="input"
+                    dialogClassName="slotTimeDialog"
                     value={normalizeTimeInput(endTime)}
                     onChange={(value) => setEndTime(normalizeTimeInput(value))}
                 />

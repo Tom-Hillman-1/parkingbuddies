@@ -24,6 +24,7 @@ type AppTimePickerProps = {
     value: string;
     onChange: (value: string) => void;
     className?: string;
+    dialogClassName?: string;
     disabled?: boolean;
     id?: string;
     name?: string;
@@ -136,6 +137,7 @@ export function AppTimePicker({
     value,
     onChange,
     className = "",
+    dialogClassName = "",
     disabled,
     id,
     name,
@@ -174,6 +176,7 @@ export function AppTimePicker({
                     onClose={() => setOpen(false)}
                     title="Choose time"
                     subtitle="Pick the time for this field."
+                    className={dialogClassName}
                 />
             ) : null}
         </>

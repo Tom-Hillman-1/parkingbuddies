@@ -315,6 +315,31 @@
     justify-content: flex-end;
 }
 
+.slotTimeDialog {
+    display: grid;
+    gap: 0.82rem;
+}
+
+.slotTimeDialog .appTimePickerInline {
+    gap: 0.55rem;
+}
+
+.slotTimeDialog .tp-ui--inline .tp-ui-wrapper {
+    --tp-size-clock: 220px;
+    --tp-size-input: 84px;
+    --tp-size-input-height: 68px;
+    --tp-font-size-xl: 2.55rem;
+    --tp-spacing-xl: 18px;
+    --tp-spacing-2xl: 26px;
+    margin: 0 auto !important;
+    max-width: 304px !important;
+    min-height: auto !important;
+}
+
+.slotTimeDialog .appTimePickerSummary {
+    padding: 0.76rem 0.84rem;
+}
+
 .spotInfoValue {
     color: #111827;
     font-weight: 700;
@@ -484,6 +509,35 @@
     .slotDialogFooter .btn {
         width: 100%;
         justify-content: center;
+    }
+
+    .slotTimeDialog {
+        gap: 0.72rem;
+    }
+
+    .slotTimeDialog .tp-ui--inline .tp-ui-wrapper {
+        --tp-size-clock: 196px;
+        --tp-size-input: 72px;
+        --tp-size-input-height: 58px;
+        --tp-font-size-xl: 2.1rem;
+        --tp-spacing-xl: 14px;
+        --tp-spacing-2xl: 18px;
+        max-width: 256px !important;
+    }
+
+    .slotTimeDialog .appTimePickerDialogFooter {
+        position: static;
+        bottom: auto;
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        border-top: 0;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+
+    .slotTimeDialog .appTimePickerDialogFooter > .rowInline:last-child {
+        gap: 0.55rem;
     }
 }
 
