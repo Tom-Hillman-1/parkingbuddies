@@ -439,7 +439,7 @@ export default function DashboardPage() {
 
     const summaryRows = [
         { label: "Bookings", value: String(bookings.length) },
-        { label: "Pending bids", value: String(pendingOwnerBids.length + myAuctionBids.length), alert: pendingOwnerBids.length + myAuctionBids.length > 0 },
+        { label: "Pending bids", value: String(pendingOwnerBids.length), alert: pendingOwnerBids.length > 0 },
         { label: "Listings", value: String(myListings.length) },
         { label: "Points", value: `${me?.points_balance ?? 0} pts`, points: true },
         { label: "Total earned", value: formatGbp(totalEarned) },
@@ -1082,6 +1082,7 @@ export default function DashboardPage() {
         </div>
     );
 }
+
 
 
 

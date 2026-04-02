@@ -21,8 +21,8 @@ function getChosenDay(search: HomeSearchState) {
 }
 
 function getSearchStart(day: Date, search: HomeSearchState) {
-    // Search uses the same time-normalising helpers as the booking screen so
-    // "09:00" means the same thing in both places.
+    // Search uses the same time nrmalising helpers as the booking screen so
+    // time basical-y 0" means the same thing in both places
     return setTime(day, normalizeTimeInput(search.startTime));
 }
 
