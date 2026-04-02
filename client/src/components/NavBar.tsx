@@ -87,7 +87,7 @@ export default function NavBar() {
 
                             <Link to="/dashboard" className="nav-user" title={accountName} onClick={closeMenu}>
                                 <span className="nav-user-main">
-                                    <span className="nav-user-name">Owner details</span>
+                                    <span className="nav-user-name">{accountName}</span>
                                 </span>
                                 <span className="nav-user-points">{user?.points_balance ?? 0} pts</span>
                             </Link>
@@ -108,3 +108,4 @@ export default function NavBar() {
         </header>
     );
 }
+

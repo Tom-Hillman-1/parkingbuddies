@@ -2414,14 +2414,14 @@ label > span:first-child {
     }
 
     .nav-shell-alertBadge {
-        top: 50%;
-        right: 3.85rem;
-        min-width: 21px;
-        height: 17px;
-        padding: 0 0.32rem;
+        top: 0.42rem;
+        right: 0.72rem;
+        min-width: 19px;
+        height: 16px;
+        padding: 0 0.28rem;
         border-radius: 999px;
-        font-size: 0.59rem;
-        transform: translateY(-50%);
+        font-size: 0.56rem;
+        transform: none;
         box-shadow: 0 0 0 1px rgba(226, 86, 110, 0.16), 0 6px 14px rgba(217, 63, 86, 0.14);
     }
 
@@ -3014,3 +3014,4 @@ label > span:first-child {
     display: flex;
     justify-content: center;
 }
+

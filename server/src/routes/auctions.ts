@@ -4,7 +4,7 @@ import { requireAuth, AuthRequest } from "../middleware/auth";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
 import { stripe } from "../stripe";
-import { findSlotAvailabilityIssue, remainingMinutes } from "../lib/availability";
+import { findSlotAvailabilityIssue, occupiedBookingWhereClause, remainingMinutes } from "../lib/availability";
 import { calcAuctionUnits, expandRangeToBillableEnd, type PriceUnit, toMoney } from "../lib/shared";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
@@ -317,16 +317,13 @@ router.get("/:spotId", async (req, res) => {
         );
 
         const bookingWindowsR = await pool.query(
-            `SELECT start_time, end_time
-             FROM bookings
-             WHERE parking_spot_id = $1
-               AND (
-                   status = 'confirmed'
-                   OR (status = 'pending' AND created_at >= now() - ($2 * interval '1 minute'))
-               )
-               AND start_time IS NOT NULL
-               AND end_time IS NOT NULL`,
-            [spotId, PENDING_BOOKING_HOLD_MINUTES]
+            `SELECT b.start_time, b.end_time
+             FROM bookings b
+             WHERE b.parking_spot_id = $1
+               AND ${occupiedBookingWhereClause("b")}
+               AND b.start_time IS NOT NULL
+               AND b.end_time IS NOT NULL`,
+            [spotId]
         );
         const occupied = bookingWindowsR.rows.map((b: any) => ({ start: new Date(b.start_time), end: new Date(b.end_time) }));
         const remaining = remainingMinutes(spot, occupied);
@@ -968,5 +965,4 @@ router.post("/bids/:bidId/cancel", requireAuth, bidderBidActionRateLimit, async 
 });
 
 export default router;
-
 

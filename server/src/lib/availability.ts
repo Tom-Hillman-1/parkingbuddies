@@ -2,7 +2,6 @@ type AvailabilityWindow = { start: Date; end: Date };
 type Queryable = {
     query: (text: string, params?: unknown[]) => Promise<{ rows: Array<{ count?: number | string }> }>;
 };
-const PENDING_BOOKING_HOLD_MINUTES = 30;
 const LONDON_TIME_ZONE = "Europe/London";
 const londonDateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
     timeZone: LONDON_TIME_ZONE,
@@ -222,24 +221,43 @@ export function availabilityDateRange(availability: any) {
     return { dateFrom, dateTo };
 }
 
+export function occupiedBookingWhereClause(alias = "b") {
+    return `(
+        ${alias}.status = 'confirmed'
+        OR (
+            ${alias}.status = 'pending'
+            AND EXISTS (
+                SELECT 1
+                FROM auction_bids ab
+                WHERE ab.parking_spot_id = ${alias}.parking_spot_id
+                  AND ab.bidder_user_id = ${alias}.driver_user_id
+                  AND ab.pay_method = 'money'
+                  AND ab.status = 'accepted'
+                  AND ab.start_time = ${alias}.start_time
+                  AND ab.end_time = ${alias}.end_time
+            )
+        )
+    )`;
+}
+
 export async function countOverlappingBookings(
     db: Queryable,
     parkingSpotId: unknown,
     startIso: string,
-    endIso: string
+    endIso: string,
+    options: { excludeBookingId?: string | null } = {}
 ) {
     const spotId = Array.isArray(parkingSpotId) ? parkingSpotId[0] : parkingSpotId;
     if (typeof spotId !== "string" || !spotId.trim()) return 0;
+    const excludeBookingId = typeof options.excludeBookingId === "string" ? options.excludeBookingId : null;
     const overlapR = await db.query(
-        `SELECT start_time, end_time
-         FROM bookings
-         WHERE parking_spot_id = $1
-           AND (
-                status = 'confirmed'
-                OR (status = 'pending' AND created_at >= now() - ($4 * interval '1 minute'))
-            )
-            AND NOT (end_time <= $2 OR start_time >= $3)`,
-        [spotId, startIso, endIso, PENDING_BOOKING_HOLD_MINUTES]
+        `SELECT b.start_time, b.end_time
+         FROM bookings b
+         WHERE b.parking_spot_id = $1
+           AND ${occupiedBookingWhereClause("b")}
+           AND ($4::uuid IS NULL OR b.id <> $4)
+           AND NOT (b.end_time <= $2 OR b.start_time >= $3)`,
+        [spotId, startIso, endIso, excludeBookingId]
     );
     const rangeStart = new Date(startIso);
     const rangeEnd = new Date(endIso);
@@ -278,6 +296,7 @@ type SlotAvailabilityIssueOptions = {
     end: Date;
     outsideMessage?: string;
     fullMessage?: string;
+    excludeBookingId?: string | null;
 };
 
 export async function findSlotAvailabilityIssue({
@@ -288,12 +307,15 @@ export async function findSlotAvailabilityIssue({
     end,
     outsideMessage = "Requested slot is outside listing availability",
     fullMessage = "No spaces available for that time slot",
+    excludeBookingId = null,
 }: SlotAvailabilityIssueOptions) {
     if (!isSlotAllowed(spot, start, end)) {
         return outsideMessage;
     }
 
-    const overlapCount = await countOverlappingBookings(db, parkingSpotId, start.toISOString(), end.toISOString());
+    const overlapCount = await countOverlappingBookings(db, parkingSpotId, start.toISOString(), end.toISOString(), {
+        excludeBookingId,
+    });
     const capacity = Math.max(1, Number(spot?.capacity_total ?? 1));
     if (overlapCount >= capacity) {
         return fullMessage;
@@ -301,3 +323,4 @@ export async function findSlotAvailabilityIssue({
 
     return null;
 }
+

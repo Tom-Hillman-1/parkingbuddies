@@ -7,6 +7,7 @@ import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import { stripe } from "../stripe";
 import { moneyBookingRewardPoints, moneyHostingRewardPoints, STRIPE_MIN_GBP_PAYMENT, toMoney } from "../lib/shared";
+import { findSlotAvailabilityIssue } from "../lib/availability";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
 import { serverError } from "../lib/errors";
@@ -290,7 +291,7 @@ async function upsertLatestPaymentRow(
     bookingId: string,
     paymentIntentId: string,
     amountGbp: number,
-    status: "pending" | "succeeded" | "failed"
+    status: "pending" | "succeeded" | "failed" | "refunded"
 ) {
     const updateR = await client.query(
         `UPDATE payments
@@ -376,19 +377,113 @@ async function awardMoneyBookingRewardsIfNeeded(client: PoolClient, booking: any
     );
 }
 
+async function updateBookingPaymentStatus(
+    bookingId: string,
+    paymentIntentId: string,
+    amountGbp: number,
+    status: "pending" | "succeeded" | "failed" | "refunded"
+) {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        await upsertLatestPaymentRow(client, bookingId, paymentIntentId, amountGbp, status);
+        await client.query("COMMIT");
+    } catch (e) {
+        await client.query("ROLLBACK");
+        throw e;
+    } finally {
+        client.release();
+    }
+}
+
+async function settleSuccessfulMoneyBooking(client: PoolClient, booking: any, paymentIntentId: string, amountGbp: number) {
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [booking.parking_spot_id]);
+    await upsertLatestPaymentRow(client, booking.id, paymentIntentId, amountGbp, "succeeded");
+
+    if (booking.status === "cancelled") {
+        return { refundRequired: true };
+    }
+
+    if (booking.status === "pending") {
+        const slotIssue = await findSlotAvailabilityIssue({
+            db: client,
+            parkingSpotId: booking.parking_spot_id,
+            spot: booking,
+            start: new Date(booking.start_time),
+            end: new Date(booking.end_time),
+            excludeBookingId: booking.id,
+            fullMessage: "No spaces available for that time slot",
+        });
+
+        if (slotIssue) {
+            await client.query(
+                `UPDATE bookings
+                 SET status = 'cancelled', updated_at = now()
+                 WHERE id = $1`,
+                [booking.id]
+            );
+            return { refundRequired: true };
+        }
+
+        await client.query(
+            `UPDATE bookings
+             SET status = 'confirmed', updated_at = now()
+             WHERE id = $1`,
+            [booking.id]
+        );
+    }
+
+    if (booking.status === "pending" || booking.status === "confirmed") {
+        await awardMoneyBookingRewardsIfNeeded(client, booking);
+    }
+
+    return { refundRequired: false };
+}
+
+async function refundConflictedMoneyBooking(bookingId: string, paymentIntentId: string, amountGbp: number) {
+    if (!paymentIntentId.startsWith("pi_")) {
+        await updateBookingPaymentStatus(bookingId, paymentIntentId, amountGbp, "refunded");
+        return;
+    }
+
+    try {
+        await stripe.refunds.create({ payment_intent: paymentIntentId });
+        await updateBookingPaymentStatus(bookingId, paymentIntentId, amountGbp, "refunded");
+    } catch (error: unknown) {
+        console.error("Failed to refund conflicted booking payment", {
+            bookingId,
+            paymentIntentId,
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
+}
+
+
 async function finalizePaymentIntent(paymentIntent: Stripe.PaymentIntent) {
     const bookingId = paymentIntent.metadata?.booking_id;
     if (!bookingId) return;
 
     const paidAmountGbp = toMoney((paymentIntent.amount_received || paymentIntent.amount || 0) / 100);
+    let refundRequired = false;
     const client = await pool.connect();
     try {
         await client.query("BEGIN");
 
         const bookingR = await client.query(
-            `SELECT id, driver_user_id, parking_spot_id, pay_method, status, total_price_gbp
-             FROM bookings
-             WHERE id = $1
+            `SELECT b.id,
+                    b.driver_user_id,
+                    b.parking_spot_id,
+                    b.pay_method,
+                    b.status,
+                    b.total_price_gbp,
+                    b.start_time,
+                    b.end_time,
+                    ps.owner_user_id,
+                    ps.availability_json,
+                    ps.capacity_total
+             FROM bookings b
+             JOIN parking_spots ps ON ps.id = b.parking_spot_id
+             WHERE b.id = $1
              FOR UPDATE`,
             [bookingId]
         );
@@ -404,20 +499,8 @@ async function finalizePaymentIntent(paymentIntent: Stripe.PaymentIntent) {
             return;
         }
 
-        await upsertLatestPaymentRow(client, bookingId, paymentIntent.id, paidAmountGbp, "succeeded");
-
-        if (booking.status === "pending") {
-            await client.query(
-                `UPDATE bookings
-                 SET status = 'confirmed', updated_at = now()
-                 WHERE id = $1`,
-                [bookingId]
-            );
-        }
-
-        if (booking.status === "pending" || booking.status === "confirmed") {
-            await awardMoneyBookingRewardsIfNeeded(client, booking);
-        }
+        const settlement = await settleSuccessfulMoneyBooking(client, booking, paymentIntent.id, paidAmountGbp);
+        refundRequired = settlement.refundRequired;
         await client.query("COMMIT");
     } catch (e) {
         await client.query("ROLLBACK");
@@ -425,6 +508,11 @@ async function finalizePaymentIntent(paymentIntent: Stripe.PaymentIntent) {
     } finally {
         client.release();
     }
+
+    if (refundRequired) {
+        await refundConflictedMoneyBooking(bookingId, paymentIntent.id, paidAmountGbp);
+    }
+
 }
 
 async function markPaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
@@ -459,11 +547,22 @@ async function syncBookingPaymentFromReceipt(
     amountGbp: number,
     status: "pending" | "succeeded" | "failed"
 ) {
+    let refundRequired = false;
     const client = await pool.connect();
     try {
         await client.query("BEGIN");
         const bookingR = await client.query(
-            `SELECT b.id, b.driver_user_id, b.parking_spot_id, b.pay_method, b.status, b.total_price_gbp, ps.owner_user_id
+            `SELECT b.id,
+                    b.driver_user_id,
+                    b.parking_spot_id,
+                    b.pay_method,
+                    b.status,
+                    b.total_price_gbp,
+                    b.start_time,
+                    b.end_time,
+                    ps.owner_user_id,
+                    ps.availability_json,
+                    ps.capacity_total
              FROM bookings b
              JOIN parking_spots ps ON ps.id = b.parking_spot_id
              WHERE b.id = $1
@@ -481,20 +580,11 @@ async function syncBookingPaymentFromReceipt(
             return;
         }
 
-        await upsertLatestPaymentRow(client, bookingId, paymentIntentId, amountGbp, status);
-
         if (status === "succeeded") {
-            if (booking.status === "pending") {
-                await client.query(
-                    `UPDATE bookings
-                     SET status = 'confirmed', updated_at = now()
-                     WHERE id = $1`,
-                    [bookingId]
-                );
-            }
-            if (booking.status === "pending" || booking.status === "confirmed") {
-                await awardMoneyBookingRewardsIfNeeded(client, booking);
-            }
+            const settlement = await settleSuccessfulMoneyBooking(client, booking, paymentIntentId, amountGbp);
+            refundRequired = settlement.refundRequired;
+        } else {
+            await upsertLatestPaymentRow(client, bookingId, paymentIntentId, amountGbp, status);
         }
 
         await client.query("COMMIT");
@@ -504,7 +594,12 @@ async function syncBookingPaymentFromReceipt(
     } finally {
         client.release();
     }
+
+    if (refundRequired) {
+        await refundConflictedMoneyBooking(bookingId, paymentIntentId, amountGbp);
+    }
 }
+
 
 router.post("/connect/onboard", requireAuth, connectActionRateLimit, async (req: AuthRequest, res) => {
     const userId = requireUserId(req, res);

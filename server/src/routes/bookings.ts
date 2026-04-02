@@ -4,7 +4,7 @@ import type { PoolClient } from "pg";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import { calcBookingUnits, expandRangeToBillableEnd, type PriceUnit, STRIPE_MIN_GBP_PAYMENT, toMoney } from "../lib/shared";
-import { findSlotAvailabilityIssue } from "../lib/availability";
+import { findSlotAvailabilityIssue, occupiedBookingWhereClause } from "../lib/availability";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
 import { serverError } from "../lib/errors";
@@ -268,28 +268,22 @@ router.get("/spot/:id", async (req, res) => {
         let r;
         if (start && end && isIsoDateString(start) && isIsoDateString(end)) {
             r = await pool.query(
-                `SELECT start_time, end_time
-                 FROM bookings
-                 WHERE parking_spot_id = $1
-                   AND (
-                       status = 'confirmed'
-                       OR (status = 'pending' AND created_at >= now() - ($4 * interval '1 minute'))
-                   )
-                   AND NOT (end_time <= $2 OR start_time >= $3)
-                 ORDER BY start_time ASC`,
-                [spotId, start, end, PENDING_BOOKING_HOLD_MINUTES]
+                `SELECT b.start_time, b.end_time
+                 FROM bookings b
+                 WHERE b.parking_spot_id = $1
+                   AND ${occupiedBookingWhereClause("b")}
+                   AND NOT (b.end_time <= $2 OR b.start_time >= $3)
+                 ORDER BY b.start_time ASC`,
+                [spotId, start, end]
             );
         } else {
             r = await pool.query(
-                `SELECT start_time, end_time
-                 FROM bookings
-                 WHERE parking_spot_id = $1
-                   AND (
-                       status = 'confirmed'
-                       OR (status = 'pending' AND created_at >= now() - ($2 * interval '1 minute'))
-                   )
-                 ORDER BY start_time ASC`,
-                [spotId, PENDING_BOOKING_HOLD_MINUTES]
+                `SELECT b.start_time, b.end_time
+                 FROM bookings b
+                 WHERE b.parking_spot_id = $1
+                   AND ${occupiedBookingWhereClause("b")}
+                 ORDER BY b.start_time ASC`,
+                [spotId]
             );
         }
         return res.json({ ok: true, bookings: r.rows });
@@ -493,7 +487,4 @@ router.get("/:id", requireAuth, async (req: AuthRequest, res) => {
 });
 
 export default router;
-
-
-
 
