@@ -2413,6 +2413,18 @@ label > span:first-child {
         display: grid;
     }
 
+    .nav-shell-alertBadge {
+        top: 50%;
+        right: 3.85rem;
+        min-width: 21px;
+        height: 17px;
+        padding: 0 0.32rem;
+        border-radius: 999px;
+        font-size: 0.59rem;
+        transform: translateY(-50%);
+        box-shadow: 0 0 0 1px rgba(226, 86, 110, 0.16), 0 6px 14px rgba(217, 63, 86, 0.14);
+    }
+
     .nav-links {
         position: absolute;
         top: calc(100% + 0.34rem);
