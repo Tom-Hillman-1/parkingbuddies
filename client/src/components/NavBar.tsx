@@ -80,14 +80,14 @@ export default function NavBar() {
 
                     {isLoading ? null : isSignedIn ? (
                         <>
-                            <NavLink to="/about" className={linkClassName} onClick={closeMenu}>About</NavLink>
-                            <NavLink to="/dashboard" className={linkClassName} onClick={closeMenu}>Dashboard</NavLink>
                             <NavLink to="/create-listing" className={linkClassName} onClick={closeMenu}>Create listing</NavLink>
+                            <NavLink to="/dashboard" className={linkClassName} onClick={closeMenu}>Dashboard</NavLink>
+                            <NavLink to="/about" className={linkClassName} onClick={closeMenu}>About</NavLink>
                             <NavLink to="/settings" className={linkClassName} onClick={closeMenu}>Settings</NavLink>
 
-                            <Link to="/dashboard" className="nav-user" title="Open dashboard" onClick={closeMenu}>
+                            <Link to="/dashboard" className="nav-user" title={accountName} onClick={closeMenu}>
                                 <span className="nav-user-main">
-                                    <span className="nav-user-name">{accountName}</span>
+                                    <span className="nav-user-name">Owner details</span>
                                 </span>
                                 <span className="nav-user-points">{user?.points_balance ?? 0} pts</span>
                             </Link>

@@ -375,7 +375,7 @@
 }
 
 .wizardCardFoot {
-    padding-top: 0.18rem;
+    padding-top: 0.28rem;
 }
 
 .wizardInlineRow {
@@ -505,7 +505,9 @@
 .wizardOptionHead {
     display: inline-flex;
     align-items: center;
-    gap: 0.42rem;
+    justify-content: space-between;
+    width: 100%;
+    gap: 0.5rem;
 }
 
 .wizardFeatureGrid {
@@ -706,6 +708,14 @@
     justify-content: flex-end;
 }
 
+.wizardAvailabilityCal + .createFieldHint {
+    margin-top: 0.12rem;
+}
+
+.wizardAvailabilityCal + .createFieldHint + .wizardAvailabilityActions {
+    margin-top: -0.12rem;
+}
+
 .wizardTooltipBtn {
     width: 1.28rem;
     height: 1.28rem;
@@ -726,29 +736,29 @@
     }
 
     .wizardAvailabilityCal {
-        padding: 0.54rem 0.08rem;
+        padding: 0.5rem 0.06rem 0;
     }
 
     .wizardAvailabilityCal .appCalendar--slots .rdp-month_grid {
-        border-spacing: 0.6rem 0.38rem;
+        border-spacing: 0.78rem 0.28rem;
     }
 
     .wizardAvailabilityCal .appCalendar--slots .rdp-day {
-        height: 3.46rem;
+        height: 3.24rem;
     }
 
     .wizardAvailabilityCal .appCalendar--slots .rdp-day_button {
-        width: 2.2rem;
-        height: 2.2rem;
-        min-width: 2.2rem;
-        min-height: 2.2rem;
+        width: 1.9rem;
+        height: 1.9rem;
+        min-width: 1.9rem;
+        min-height: 1.9rem;
     }
 
     .wizardAvailabilityCal .appCalendar--slots .rdp-day_button::after {
         top: calc(100% + 0.24rem);
-        width: 2.88rem;
-        font-size: 0.38rem;
-        line-height: 1;
+        width: 2.38rem;
+        font-size: 0.32rem;
+        line-height: 0.96;
     }
 
     .wizardAvailabilityRow {
@@ -769,6 +779,41 @@
         padding: 0.22rem 0.48rem;
         font-size: 0.72rem;
     }
+
+    .wizardAvailabilityCal + .createFieldHint {
+        margin-top: 0.04rem;
+    }
+
+    .wizardAvailabilityCal + .createFieldHint + .wizardAvailabilityActions {
+        margin-top: -0.2rem;
+    }
+}
+
+@media (max-width: 390px) {
+    .wizardAvailabilityCal {
+        padding-inline: 0;
+    }
+
+    .wizardAvailabilityCal .appCalendar--slots .rdp-month_grid {
+        border-spacing: 0.58rem 0.26rem;
+    }
+
+    .wizardAvailabilityCal .appCalendar--slots .rdp-day {
+        height: 3.1rem;
+    }
+
+    .wizardAvailabilityCal .appCalendar--slots .rdp-day_button {
+        width: 1.74rem;
+        height: 1.74rem;
+        min-width: 1.74rem;
+        min-height: 1.74rem;
+    }
+
+    .wizardAvailabilityCal .appCalendar--slots .rdp-day_button::after {
+        width: 2.18rem;
+        font-size: 0.3rem;
+        line-height: 0.94;
+    }
 }
 
 .wizardMap {
@@ -788,11 +833,11 @@
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
-    gap: 0.74rem;
-    border: 1px solid #e1e9f5;
-    border-radius: 24px;
-    box-shadow: 0 10px 24px rgba(16, 24, 40, 0.06);
-    padding: 0.78rem 0.9rem;
+    gap: 0.9rem;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
 }
 
 .wizardActionsLead {
@@ -800,6 +845,11 @@
     flex-wrap: nowrap;
     align-items: center;
     gap: 0.56rem;
+    justify-self: start;
+}
+
+.wizardActions > :last-child {
+    justify-self: end;
 }
 
 .wizardActions--intro {
@@ -816,6 +866,8 @@
     min-height: 32px;
     display: grid;
     align-content: center;
+    justify-items: center;
+    text-align: center;
     color: #587090;
     font-size: 0.82rem;
     font-weight: 700;
