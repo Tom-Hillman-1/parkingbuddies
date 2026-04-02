@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tab, TabList, TabPanel, Tabs } from "react-aria-components";
@@ -118,6 +118,11 @@ const isMoneyBookingSettled = (booking: Booking) => {
     return paymentStatus === "succeeded" || String(booking.status ?? "").toLowerCase() === "confirmed";
 };
 
+const isApprovedBooking = (booking: Booking) => {
+    const value = String(booking.status ?? "").toLowerCase();
+    return value === "confirmed" || value === "approved" || value === "accepted" || (value === "pending" && isMoneyBookingSettled(booking));
+};
+
 const bookingStatusView = (booking: Booking) => {
     const value = String(booking.status ?? "").toLowerCase();
     if (value === "pending" && isMoneyBookingSettled(booking)) {
@@ -136,6 +141,7 @@ function DashboardDisclosureCard({
     count,
     countClassName = "badge",
     notificationCount,
+    onTriggerPress,
     isLast,
     children,
 }: {
@@ -145,6 +151,7 @@ function DashboardDisclosureCard({
     count: ReactNode;
     countClassName?: string;
     notificationCount?: number;
+    onTriggerPress?: () => void;
     isLast?: boolean;
     children: ReactNode;
 }) {
@@ -153,6 +160,7 @@ function DashboardDisclosureCard({
             className={`dashboardDisclosure dashboardDisclosure--${tone}${isLast ? " is-last" : ""}`}
             triggerClassName="dashboardDisclosureTrigger"
             panelClassName="dashboardDisclosurePanel"
+            onTriggerPress={onTriggerPress}
             trigger={(isExpanded) => (
                 <div className="dashboardDisclosureHeader">
                     <div className="dashboardDisclosureLeft">
@@ -168,7 +176,7 @@ function DashboardDisclosureCard({
                             {">"}
                         </span>
                     </div>
-                    {notificationCount ? <span className="dashboardNotifyBubble dashboardNotifyBubble--card">+{notificationCount}</span> : null}
+                    {notificationCount ? <span className="appNotifyBadge appNotifyBadge--dashboard-card">+{notificationCount}</span> : null}
                 </div>
             )}
         >
@@ -176,7 +184,6 @@ function DashboardDisclosureCard({
         </AppDisclosure>
     );
 }
-
 function SlotCard({
     tone,
     imageUrl,
@@ -391,28 +398,28 @@ export default function DashboardPage() {
     const sortedRewards = useMemo(() => sortNewest(rewards), [rewards]);
 
     const pendingOwnerBids = useMemo(() => auctionBids.filter((bid) => String(bid.status ?? "").toLowerCase() === "pending"), [auctionBids]);
-    const confirmedOwnerBookings = useMemo(() => ownerBookings.filter((booking) => String(booking.status ?? "").toLowerCase() === "confirmed"), [ownerBookings]);
+    const confirmedOwnerBookings = useMemo(() => ownerBookings.filter(isApprovedBooking), [ownerBookings]);
     const rawNotificationSummary = useMemo(
         () =>
             summarizeNotifications({
                 bookings,
+                ownerBookings,
                 myListings,
                 auctionBids,
                 myAuctionBids,
+                payments,
                 connect: connectState,
             }),
-        [bookings, myListings, auctionBids, myAuctionBids, connectState]
+        [bookings, ownerBookings, myListings, auctionBids, myAuctionBids, payments, connectState]
     );
     const notificationSummary = useSeenNotificationSummary(rawNotificationSummary);
-    const notificationCountById = useMemo(
-        () => new Map(notificationSummary.items.map((item) => [item.id, item.count])),
-        [notificationSummary.items]
-    );
-    const bookingPaymentNotificationCount = notificationCountById.get("booking-payments") ?? 0;
-    const myPendingBidsNotificationCount = notificationCountById.get("my-pending-bids") ?? 0;
-    const ownerPendingBidsNotificationCount = notificationCountById.get("owner-pending-bids") ?? 0;
-    const payoutSetupNotificationCount = notificationCountById.get("stripe-payouts") ?? 0;
-
+    const notificationCounts = notificationSummary.byTarget;
+    const markSectionNotificationsSeen = (section: DashboardSection) => {
+        markNotificationsSeen(rawNotificationSummary.items.filter((item) => item.section === section));
+    };
+    const markTargetNotificationsSeen = (...targets: string[]) => {
+        markNotificationsSeen(rawNotificationSummary.items.filter((item) => targets.includes(item.target)));
+    };
     const ownerUpcoming = useMemo(() => {
         const now = Date.now();
         return ownerBookings
@@ -629,7 +636,7 @@ export default function DashboardPage() {
                 onSelectionChange={(key) => {
                     const nextSection = key as DashboardSection;
                     setSelectedTab(nextSection);
-                    markNotificationsSeen(rawNotificationSummary.items.filter((item) => item.section === nextSection));
+                    markSectionNotificationsSeen(nextSection);
                 }}
             >
                 <TabList className="appTabList dashboardTabList">
@@ -640,12 +647,13 @@ export default function DashboardPage() {
                             className={({ isSelected }) =>
                                 `appTab dashboardTab dashboardTab--${section.tone}${isSelected ? " is-active" : ""}`.trim()
                             }
+                            onPress={() => markSectionNotificationsSeen(section.key)}
                         >
                             <span className="dashboardTabInner">
                                 <span>{section.title}</span>
                             </span>
                             {notificationSummary.bySection[section.key] > 0 && (
-                                <span className="dashboardNotifyBubble dashboardNotifyBubble--tab">
+                                <span className="appNotifyBadge appNotifyBadge--dashboard-tab">
                                     +{notificationSummary.bySection[section.key]}
                                 </span>
                             )}
@@ -661,7 +669,8 @@ export default function DashboardPage() {
                                 subtitle="Your bookings as a driver."
                                 count={bookings.length}
                                 countClassName="badge badge--cool"
-                                notificationCount={selectedTab === "manageBookings" ? 0 : bookingPaymentNotificationCount}
+                                notificationCount={notificationCounts.myBookings}
+                                onTriggerPress={() => markTargetNotificationsSeen("myBookings")}
                             >
                                 <DashboardCollection isEmpty={sortedMyBookings.length === 0} emptyText={DASHBOARD_EMPTY_COPY} className="dashboardScrollRow">
                                     {sortedMyBookings.map((booking) => {
@@ -746,7 +755,8 @@ export default function DashboardPage() {
                                 subtitle="Pending bids waiting for owner approval."
                                 count={myAuctionBids.length}
                                 countClassName="badge badge--warm"
-                                notificationCount={selectedTab === "manageBookings" ? 0 : myPendingBidsNotificationCount}
+                                notificationCount={notificationCounts.myPendingBids}
+                                onTriggerPress={() => markTargetNotificationsSeen("myPendingBids")}
                             >
                                 <DashboardCollection isEmpty={sortedMyAuctionBids.length === 0} emptyText={DASHBOARD_EMPTY_COPY} className="dashboardScrollRow">
                                     {sortedMyAuctionBids.map((bid) => {
@@ -788,6 +798,8 @@ export default function DashboardPage() {
                                 subtitle="Parking spaces you've published."
                                 count={myListings.length}
                                 countClassName="badge badge--cool"
+                                notificationCount={notificationCounts.myListings}
+                                onTriggerPress={() => markTargetNotificationsSeen("myListings")}
                             >
                             {sortedMyListings.length === 0 ? (
                                 <div className="dashboardEmptyState">{DASHBOARD_EMPTY_COPY}</div>
@@ -825,6 +837,8 @@ export default function DashboardPage() {
                                 subtitle="Confirmed bookings from drivers."
                                 count={confirmedOwnerBookings.length}
                                 countClassName="badge badge--green"
+                                notificationCount={notificationCounts.bookedSlots}
+                                onTriggerPress={() => markTargetNotificationsSeen("bookedSlots")}
                             >
                                 <DashboardCollection isEmpty={confirmedOwnerBookings.length === 0} emptyText={DASHBOARD_EMPTY_COPY} className="dashboardChipRow dashboardChipRow--booked">
                                     {confirmedOwnerBookings.map((booking) => {
@@ -861,7 +875,8 @@ export default function DashboardPage() {
                                 subtitle="Approve or reject offers on your listings."
                                 count={pendingOwnerBids.length}
                                 countClassName={pendingOwnerBids.length > 0 ? "badge badge--rose" : "badge badge--warm"}
-                                notificationCount={ownerPendingBidsNotificationCount}
+                                notificationCount={notificationCounts.ownerPending}
+                                onTriggerPress={() => markTargetNotificationsSeen("ownerPending")}
                             >
                                 <DashboardCollection isEmpty={pendingOwnerBids.length === 0} emptyText={DASHBOARD_EMPTY_COPY} className="dashboardScrollRow">
                                     {pendingOwnerBids.map((bid) => {
@@ -976,6 +991,8 @@ export default function DashboardPage() {
                                 subtitle="Incoming and outgoing payment records."
                                 count={payments.length}
                                 countClassName="badge badge--green"
+                                notificationCount={notificationCounts.transactionHistory}
+                                onTriggerPress={() => markTargetNotificationsSeen("transactionHistory")}
                             >
                             <DashboardCollection isEmpty={payments.length === 0} emptyText={DASHBOARD_EMPTY_COPY} className="dashboardRailRow dashboardRailRow--transactions">
                                 {payments.map((payment) => {
@@ -1033,7 +1050,8 @@ export default function DashboardPage() {
                                 subtitle={connectState?.demo_bypass ? "Demo payouts only. No Stripe setup needed." : "Connect Stripe to withdraw your earnings."}
                                 count={connectLabel}
                                 countClassName={connectBadgeClass}
-                                notificationCount={selectedTab === "transactions" ? 0 : payoutSetupNotificationCount}
+                                notificationCount={notificationCounts.stripeAccount}
+                                onTriggerPress={() => markTargetNotificationsSeen("stripeAccount")}
                                 isLast
                             >
                                 <div ref={payoutsRef} className="stack">
@@ -1064,3 +1082,15 @@ export default function DashboardPage() {
         </div>
     );
 }
+
+
+
+
+
+
+
+
+
+
+
+

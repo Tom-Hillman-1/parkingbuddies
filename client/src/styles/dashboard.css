@@ -1068,7 +1068,7 @@
         justify-content: center;
     }
 
-    .dashboardModern .dashboardNotifyBubble--tab {
+    .dashboardModern .appNotifyBadge--dashboard-tab {
         top: -7px;
         right: -7px;
     }
@@ -1099,3 +1099,4 @@
         padding-inline: 0.8rem;
     }
 }
+

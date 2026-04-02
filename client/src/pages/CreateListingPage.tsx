@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, MouseEvent } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Lottie from "lottie-react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import SpotsMap from "../components/SpotsMap";
@@ -158,6 +158,7 @@ export default function CreateListingPage() {
     const { token, user } = useAuth();
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
     const location = useLocation();
 
     const editId = searchParams.get("edit");
@@ -826,6 +827,7 @@ export default function CreateListingPage() {
                     ? await apiPatch<{ parking_spot: ParkingSpot }>(`/parking-spots/${editId}`, submitPayload, token)
                     : await apiPost<{ parking_spot: ParkingSpot }>("/parking-spots", submitPayload, token);
             const nextId = response.parking_spot?.id || editId;
+            await queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
             clearSavedDraft();
             closeSheet();
             showPublishSuccess(nextId ? `/spots/${nextId}` : "/dashboard");
@@ -1556,3 +1558,5 @@ export default function CreateListingPage() {
         </div>
     );
 }
+
+

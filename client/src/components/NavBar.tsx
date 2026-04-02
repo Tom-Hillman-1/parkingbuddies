@@ -15,6 +15,7 @@ export default function NavBar() {
     const isSignedIn = Boolean(user || token);
     const notificationQuery = useNotificationSummary(token);
     const notificationSummary = useSeenNotificationSummary(notificationQuery.data ?? EMPTY_NOTIFICATION_SUMMARY);
+    const dashboardNotificationTotal = notificationSummary.total;
     const accountName = user?.name ?? "Account";
     const closeMenu = () => setOpen(false);
     const handleLogout = () => {
@@ -58,8 +59,8 @@ export default function NavBar() {
                     <span className="brand-text">ParkingBuddies</span>
                 </Link>
 
-                {notificationSummary.total > 0 && isSignedIn && (
-                    <span className="nav-shell-alertBadge">+{notificationSummary.total}</span>
+                {dashboardNotificationTotal > 0 && isSignedIn && (
+                    <span className="appNotifyBadge appNotifyBadge--nav-shell">+{dashboardNotificationTotal}</span>
                 )}
 
                 <button
@@ -81,7 +82,16 @@ export default function NavBar() {
                     {isLoading ? null : isSignedIn ? (
                         <>
                             <NavLink to="/create-listing" className={linkClassName} onClick={closeMenu}>Create listing</NavLink>
-                            <NavLink to="/dashboard" className={linkClassName} onClick={closeMenu}>Dashboard</NavLink>
+                            <NavLink
+                                to="/dashboard"
+                                className={({ isActive }) => `nav-link nav-link--notify${isActive ? " active" : ""}`}
+                                onClick={closeMenu}
+                            >
+                                <span className="nav-link-label">Dashboard</span>
+                                {dashboardNotificationTotal > 0 ? (
+                                    <span className="appNotifyBadge appNotifyBadge--nav-link">+{dashboardNotificationTotal}</span>
+                                ) : null}
+                            </NavLink>
                             <NavLink to="/about" className={linkClassName} onClick={closeMenu}>About</NavLink>
                             <NavLink to="/settings" className={linkClassName} onClick={closeMenu}>Settings</NavLink>
 
@@ -108,4 +118,5 @@ export default function NavBar() {
         </header>
     );
 }
+
 

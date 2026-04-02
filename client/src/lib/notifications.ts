@@ -5,6 +5,14 @@ import { apiGet } from "./api";
 import type { Booking as SharedBooking, ParkingSpot, User } from "../types";
 
 export type NotificationSection = "manageBookings" | "manageListings" | "transactions";
+export type NotificationTarget =
+    | "myBookings"
+    | "myPendingBids"
+    | "myListings"
+    | "bookedSlots"
+    | "ownerPending"
+    | "transactionHistory"
+    | "stripeAccount";
 
 type Booking = SharedBooking & {
     owner_user_id?: string;
@@ -15,17 +23,24 @@ type AuctionBid = {
     status?: string | null;
 };
 
+type Payment = {
+    id: string;
+};
+
 type DashboardNotificationInputs = {
     bookings: Booking[];
+    ownerBookings: Booking[];
     myListings: ParkingSpot[];
     auctionBids: AuctionBid[];
     myAuctionBids: AuctionBid[];
+    payments: Payment[];
     connect: ConnectStatus | null;
 };
 
 export type NotificationItem = {
     id: string;
     section: NotificationSection;
+    target: NotificationTarget;
     label: string;
     count: number;
     href: string;
@@ -34,6 +49,7 @@ export type NotificationItem = {
 export type NotificationSummary = {
     total: number;
     bySection: Record<NotificationSection, number>;
+    byTarget: Record<NotificationTarget, number>;
     items: NotificationItem[];
 };
 
@@ -43,13 +59,30 @@ const NOTIFICATION_SEEN_STORAGE_KEY = "parkingbuddies.notification-seen";
 const NOTIFICATION_SEEN_EVENT = "parkingbuddies:notification-seen";
 const PERSISTENT_NOTIFICATION_IDS = new Set(["owner-pending-bids"]);
 
-export const EMPTY_NOTIFICATION_SUMMARY: NotificationSummary = {
-    total: 0,
-    bySection: {
+function createEmptySectionMap(): Record<NotificationSection, number> {
+    return {
         manageBookings: 0,
         manageListings: 0,
         transactions: 0,
-    },
+    };
+}
+
+function createEmptyTargetMap(): Record<NotificationTarget, number> {
+    return {
+        myBookings: 0,
+        myPendingBids: 0,
+        myListings: 0,
+        bookedSlots: 0,
+        ownerPending: 0,
+        transactionHistory: 0,
+        stripeAccount: 0,
+    };
+}
+
+export const EMPTY_NOTIFICATION_SUMMARY: NotificationSummary = {
+    total: 0,
+    bySection: createEmptySectionMap(),
+    byTarget: createEmptyTargetMap(),
     items: [],
 };
 
@@ -98,19 +131,18 @@ function applySeenNotificationCounts(summary: NotificationSummary, seenCounts: S
         })
         .filter((item): item is NotificationItem => Boolean(item));
 
-    const bySection: Record<NotificationSection, number> = {
-        manageBookings: 0,
-        manageListings: 0,
-        transactions: 0,
-    };
+    const bySection = createEmptySectionMap();
+    const byTarget = createEmptyTargetMap();
 
     for (const item of items) {
         bySection[item.section] += item.count;
+        byTarget[item.target] += item.count;
     }
 
     return {
         total: bySection.manageBookings + bySection.manageListings + bySection.transactions,
         bySection,
+        byTarget,
         items,
     };
 }
@@ -160,72 +192,115 @@ function isPendingBid(bid: AuctionBid) {
     return String(bid.status ?? "").toLowerCase() === "pending";
 }
 
-function bookingStillNeedsPayment(booking: Booking) {
-    if (booking.pay_method !== "money") return false;
-    if (Number(booking.total_price_gbp ?? 0) <= 0) return false;
+function isSettledBooking(booking: Booking) {
     const bookingStatus = String(booking.status ?? "").toLowerCase();
+    if (bookingStatus === "cancelled" || bookingStatus === "rejected" || bookingStatus === "declined") {
+        return false;
+    }
+    if (bookingStatus === "confirmed" || bookingStatus === "approved" || bookingStatus === "accepted") {
+        return true;
+    }
     const paymentStatus = String(booking.payment_status ?? "").toLowerCase();
-    return bookingStatus === "pending" && paymentStatus !== "succeeded";
+    return paymentStatus === "succeeded";
 }
 
 export function summarizeNotifications(input: DashboardNotificationInputs): NotificationSummary {
-    const pendingBookingPayments = input.bookings.filter(bookingStillNeedsPayment).length;
+    const completedDriverBookings = input.bookings.filter(isSettledBooking).length;
     const pendingMyBids = input.myAuctionBids.filter(isPendingBid).length;
+    const publishedListings = input.myListings.length;
+    const confirmedOwnerBookings = input.ownerBookings.filter(isSettledBooking).length;
     const pendingOwnerBids = input.auctionBids.filter(isPendingBid).length;
-    const hasPublishedListings = input.myListings.length > 0;
-    // The Stripe reminder only matters once someone is actually trying to host.
+    const transactionHistory = input.payments.length;
+    const hasPublishedListings = publishedListings > 0;
     const needsPayoutSetup =
         hasPublishedListings &&
         !input.connect?.demo_bypass &&
         (!input.connect?.account_id || !input.connect.onboarding_complete || !input.connect.payouts_enabled);
 
-    const bySection = {
-        manageBookings: pendingBookingPayments + pendingMyBids,
-        manageListings: pendingOwnerBids,
-        transactions: needsPayoutSetup ? 1 : 0,
-    } satisfies Record<NotificationSection, number>;
-
+    const bySection = createEmptySectionMap();
+    const byTarget = createEmptyTargetMap();
     const items: NotificationItem[] = [];
-    if (pendingBookingPayments > 0) {
+
+    if (completedDriverBookings > 0) {
         items.push({
-            id: "booking-payments",
+            id: "driver-bookings",
             section: "manageBookings",
-            label: "payment needed",
-            count: pendingBookingPayments,
+            target: "myBookings",
+            label: "bookings",
+            count: completedDriverBookings,
             href: "/dashboard?tab=myBookings",
         });
     }
     if (pendingMyBids > 0) {
         items.push({
-            id: "my-pending-bids",
+            id: "driver-pending-bids",
             section: "manageBookings",
+            target: "myPendingBids",
             label: "bids awaiting review",
             count: pendingMyBids,
             href: "/dashboard?tab=myAuctionBids",
+        });
+    }
+    if (publishedListings > 0) {
+        items.push({
+            id: "owner-listings",
+            section: "manageListings",
+            target: "myListings",
+            label: "published listings",
+            count: publishedListings,
+            href: "/dashboard?tab=myListings",
+        });
+    }
+    if (confirmedOwnerBookings > 0) {
+        items.push({
+            id: "owner-booked-slots",
+            section: "manageListings",
+            target: "bookedSlots",
+            label: "booked slots",
+            count: confirmedOwnerBookings,
+            href: "/dashboard?tab=ownerConfirmed",
         });
     }
     if (pendingOwnerBids > 0) {
         items.push({
             id: "owner-pending-bids",
             section: "manageListings",
+            target: "ownerPending",
             label: "owner decisions",
             count: pendingOwnerBids,
             href: "/dashboard?tab=ownerPending",
+        });
+    }
+    if (transactionHistory > 0) {
+        items.push({
+            id: "transaction-history",
+            section: "transactions",
+            target: "transactionHistory",
+            label: "payments",
+            count: transactionHistory,
+            href: "/dashboard?tab=payments",
         });
     }
     if (needsPayoutSetup) {
         items.push({
             id: "stripe-payouts",
             section: "transactions",
+            target: "stripeAccount",
             label: "payout setup",
             count: 1,
             href: "/dashboard?tab=payouts",
         });
     }
 
+    for (const item of items) {
+        bySection[item.section] += item.count;
+        byTarget[item.target] += item.count;
+    }
+
     return {
         total: bySection.manageBookings + bySection.manageListings + bySection.transactions,
         bySection,
+        byTarget,
         items,
     };
 }
@@ -242,10 +317,12 @@ export function useNotificationSummary(token: string | null) {
                 .then((response) => response.connect ?? null)
                 .catch(() => null);
 
-            const [meRes, bookingsRes, spotsRes, bidsRes, myBidsRes, connect] = await Promise.all([
+            const [meRes, bookingsRes, ownerBookingsRes, spotsRes, paymentsRes, bidsRes, myBidsRes, connect] = await Promise.all([
                 apiGet<{ user: User }>("/me", token),
                 apiGet<{ bookings: Booking[] }>("/bookings/me", token),
+                apiGet<{ bookings: Booking[] }>("/bookings/owner", token),
                 apiGet<{ parking_spots: ParkingSpot[] }>("/parking-spots"),
+                apiGet<{ payments: Payment[] }>("/payments/me", token),
                 apiGet<{ bids: AuctionBid[] }>("/auctions/owner/bids", token),
                 apiGet<{ bids: AuctionBid[] }>("/auctions/me/pending", token),
                 connectPromise,
@@ -257,9 +334,11 @@ export function useNotificationSummary(token: string | null) {
 
             return summarizeNotifications({
                 bookings: bookingsRes.bookings ?? [],
+                ownerBookings: ownerBookingsRes.bookings ?? [],
                 myListings,
                 auctionBids: bidsRes.bids ?? [],
                 myAuctionBids: myBidsRes.bids ?? [],
+                payments: paymentsRes.payments ?? [],
                 connect,
             });
         },

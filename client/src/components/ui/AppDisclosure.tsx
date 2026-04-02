@@ -7,6 +7,7 @@ type AppDisclosureProps = {
     triggerClassName?: string;
     panelClassName?: string;
     trigger: (isExpanded: boolean) => ReactNode;
+    onTriggerPress?: () => void;
     children: ReactNode;
 };
 
@@ -16,6 +17,7 @@ export function AppDisclosure({
     triggerClassName = "",
     panelClassName = "",
     trigger,
+    onTriggerPress,
     children,
 }: AppDisclosureProps) {
     return (
@@ -26,6 +28,7 @@ export function AppDisclosure({
                         <Button
                             slot="trigger"
                             className={`${triggerClassName}${isExpanded ? " is-open" : ""}`.trim()}
+                            onPress={onTriggerPress}
                         >
                             {trigger(isExpanded)}
                         </Button>
