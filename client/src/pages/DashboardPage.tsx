@@ -6,7 +6,7 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import AppPageState from "../components/AppPageState";
 import { AppDisclosure } from "../components/ui/AppDisclosure";
 import { apiGet, apiPost, readErrorMessage } from "../lib/api";
-import { useAuth, useStripeConnect } from "../lib/auth";
+import { useAuth, useStripeConnect, type ConnectStatus } from "../lib/auth";
 import { markNotificationsSeen, summarizeNotifications, useSeenNotificationSummary } from "../lib/notifications";
 import {
     calcAuctionPointsTotal,
@@ -68,6 +68,7 @@ type DashboardData = {
     payments: Payment[];
     auctionBids: AuctionBid[];
     myAuctionBids: AuctionBid[];
+    connect: ConnectStatus | null;
 };
 
 const NAV_SECTIONS: Array<{ key: DashboardSection; title: string; tone: "driver" | "owner" | "payments" }> = [
@@ -314,7 +315,10 @@ export default function DashboardPage() {
         staleTime: 15000,
         queryFn: async () => {
             if (!token) throw new Error("Missing auth token");
-            const [meRes, bookingsRes, ownerBookingsRes, rewardsRes, spotsRes, paymentsRes, bidsRes, myBidsRes] = await Promise.all([
+            const connectPromise = apiGet<{ connect: ConnectStatus }>("/payments/connect/status", token)
+                .then((response) => response.connect ?? null)
+                .catch(() => null);
+            const [meRes, bookingsRes, ownerBookingsRes, rewardsRes, spotsRes, paymentsRes, bidsRes, myBidsRes, connect] = await Promise.all([
                 apiGet<{ user: Me }>("/me", token),
                 apiGet<{ bookings: Booking[] }>("/bookings/me", token),
                 apiGet<{ bookings: Booking[] }>("/bookings/owner", token),
@@ -323,6 +327,7 @@ export default function DashboardPage() {
                 apiGet<{ payments: Payment[] }>("/payments/me", token),
                 apiGet<{ bids: AuctionBid[] }>("/auctions/owner/bids", token),
                 apiGet<{ bids: AuctionBid[] }>("/auctions/me/pending", token),
+                connectPromise,
             ]);
             return {
                 me: meRes.user,
@@ -333,6 +338,7 @@ export default function DashboardPage() {
                 payments: paymentsRes.payments ?? [],
                 auctionBids: bidsRes.bids ?? [],
                 myAuctionBids: myBidsRes.bids ?? [],
+                connect,
             };
         },
     });
@@ -343,6 +349,7 @@ export default function DashboardPage() {
     }, [token, refreshConnectStatus]);
 
     const dashboardData = dashboardQuery.data;
+    const connectState = connect ?? dashboardData?.connect ?? null;
     const me = dashboardData?.me ?? null;
     const bookings = useMemo(() => dashboardData?.bookings ?? [], [dashboardData?.bookings]);
     const ownerBookings = useMemo(() => dashboardData?.ownerBookings ?? [], [dashboardData?.ownerBookings]);
@@ -370,6 +377,17 @@ export default function DashboardPage() {
     const sortedMyBookings = useMemo(() => sortNewest(bookings), [bookings]);
     const sortedMyAuctionBids = useMemo(() => sortNewest(myAuctionBids), [myAuctionBids]);
     const sortedMyListings = useMemo(() => sortNewest(myListings), [myListings]);
+    const driverUpcoming = useMemo(() => {
+        const now = Date.now();
+        return bookings
+            .filter((booking) => new Date(booking.start_time).getTime() >= now)
+            .filter((booking) => {
+                const status = String(booking.status ?? "").toLowerCase();
+                return status === "confirmed" || status === "approved" || status === "accepted" || (status === "pending" && isMoneyBookingSettled(booking));
+            })
+            .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+            .slice(0, 8);
+    }, [bookings]);
     const sortedRewards = useMemo(() => sortNewest(rewards), [rewards]);
 
     const pendingOwnerBids = useMemo(() => auctionBids.filter((bid) => String(bid.status ?? "").toLowerCase() === "pending"), [auctionBids]);
@@ -381,9 +399,9 @@ export default function DashboardPage() {
                 myListings,
                 auctionBids,
                 myAuctionBids,
-                connect,
+                connect: connectState,
             }),
-        [bookings, myListings, auctionBids, myAuctionBids, connect]
+        [bookings, myListings, auctionBids, myAuctionBids, connectState]
     );
     const notificationSummary = useSeenNotificationSummary(rawNotificationSummary);
     const notificationCountById = useMemo(
@@ -409,8 +427,8 @@ export default function DashboardPage() {
         [ownerBookings]
     );
 
-    const connectLabel = connect?.demo_bypass ? "Demo mode" : !connect?.account_id ? "Not connected" : connect.onboarding_complete ? "Stripe Connected" : "Onboarding incomplete";
-    const connectBadgeClass = connect?.demo_bypass ? "badge badge--cool" : !connect?.account_id ? "badge badge--rose" : connect.onboarding_complete ? "badge badge--green" : "badge badge--warm";
+    const connectLabel = connectState?.demo_bypass ? "Demo mode" : !connectState?.account_id ? "Not connected" : connectState.onboarding_complete ? "Stripe Connected" : "Onboarding incomplete";
+    const connectBadgeClass = connectState?.demo_bypass ? "badge badge--cool" : !connectState?.account_id ? "badge badge--rose" : connectState.onboarding_complete ? "badge badge--green" : "badge badge--warm";
 
     const summaryRows = [
         { label: "Bookings", value: String(bookings.length) },
@@ -562,13 +580,6 @@ export default function DashboardPage() {
                         <div className="heroSub muted">
                             Welcome back{me?.name ? `, ${me.name.split(" ")[0]}` : ""}. Keep track of your bookings, bids, listings, points, and payouts here.
                         </div>
-                        {connect?.onboarding_complete ? (
-                            <div className="dashboardHeroActions">
-                                <button className="btn btn-primary" onClick={handleOpenConnectDashboard} disabled={connectBusy}>
-                                    Open Stripe dashboard
-                                </button>
-                            </div>
-                        ) : null}
                     </div>
                 </section>
 
@@ -633,7 +644,7 @@ export default function DashboardPage() {
                             <span className="dashboardTabInner">
                                 <span>{section.title}</span>
                             </span>
-                            {section.key !== selectedTab && notificationSummary.bySection[section.key] > 0 && (
+                            {notificationSummary.bySection[section.key] > 0 && (
                                 <span className="dashboardNotifyBubble dashboardNotifyBubble--tab">
                                     +{notificationSummary.bySection[section.key]}
                                 </span>
@@ -668,6 +679,46 @@ export default function DashboardPage() {
                                                     { label: status.label, className: status.className },
                                                     { label: capitalizeLabel(booking.pay_method) },
                                                 ])}
+                                                time={slotTime(booking.start_time, booking.end_time)}
+                                                details={
+                                                    <BookingContactDetails
+                                                        email={booking.owner_contact_email}
+                                                        phone={booking.owner_contact_phone}
+                                                        info={booking.owner_contact_info}
+                                                    />
+                                                }
+                                                actions={renderDriverBookingActions(
+                                                    booking,
+                                                    <Link key="listing" to={`/spots/${booking.parking_spot_id}`} className="btn">
+                                                        View listing
+                                                    </Link>
+                                                )}
+                                                errorText={paymentReceiptErrors[booking.id]}
+                                            />
+                                        );
+                                    })}
+                                </DashboardCollection>
+                            </DashboardDisclosureCard>
+
+                            <DashboardDisclosureCard
+                                tone="driver"
+                                title="Upcoming Schedule"
+                                subtitle="Your confirmed bookings coming up next."
+                                count={driverUpcoming.length}
+                                countClassName="badge badge--green"
+                            >
+                                <DashboardCollection isEmpty={driverUpcoming.length === 0} emptyText={DASHBOARD_EMPTY_COPY} className="dashboardScrollRow">
+                                    {driverUpcoming.map((booking) => {
+                                        const { spot, title, address } = resolveBookingSpot(booking);
+                                        return (
+                                            <SlotCard
+                                                key={booking.id}
+                                                tone="blue"
+                                                imageUrl={spot?.image_url}
+                                                title={title}
+                                                address={address}
+                                                amount={bookingAmountLabel(booking)}
+                                                badges={renderBadgeRow([{ label: "Upcoming", className: "badge badge--green" }])}
                                                 time={slotTime(booking.start_time, booking.end_time)}
                                                 details={
                                                     <BookingContactDetails
@@ -810,7 +861,7 @@ export default function DashboardPage() {
                                 subtitle="Approve or reject offers on your listings."
                                 count={pendingOwnerBids.length}
                                 countClassName={pendingOwnerBids.length > 0 ? "badge badge--rose" : "badge badge--warm"}
-                                notificationCount={selectedTab === "manageListings" ? 0 : ownerPendingBidsNotificationCount}
+                                notificationCount={ownerPendingBidsNotificationCount}
                             >
                                 <DashboardCollection isEmpty={pendingOwnerBids.length === 0} emptyText={DASHBOARD_EMPTY_COPY} className="dashboardScrollRow">
                                     {pendingOwnerBids.map((bid) => {
@@ -865,7 +916,7 @@ export default function DashboardPage() {
                                 countClassName="badge badge--green"
                                 isLast
                             >
-                                <DashboardCollection isEmpty={ownerUpcoming.length === 0} emptyText={DASHBOARD_EMPTY_COPY} className="dashboardScrollRow">
+                                <DashboardCollection isEmpty={ownerUpcoming.length === 0} emptyText={DASHBOARD_EMPTY_COPY} className="dashboardScrollRow dashboardScrollRow--compact">
                                     {ownerUpcoming.map((booking) => {
                                         const { spot, title, address } = resolveBookingSpot(booking);
                                         return (
@@ -979,7 +1030,7 @@ export default function DashboardPage() {
                             <DashboardDisclosureCard
                                 tone="payments"
                                 title="Stripe Account"
-                                subtitle={connect?.demo_bypass ? "Demo payouts only. No Stripe setup needed." : "Connect Stripe to withdraw your earnings."}
+                                subtitle={connectState?.demo_bypass ? "Demo payouts only. No Stripe setup needed." : "Connect Stripe to withdraw your earnings."}
                                 count={connectLabel}
                                 countClassName={connectBadgeClass}
                                 notificationCount={selectedTab === "transactions" ? 0 : payoutSetupNotificationCount}
@@ -989,21 +1040,21 @@ export default function DashboardPage() {
                                     <div className="settingRow dashboardStripeStatusRow">
                                         <div className="settingRowTitle">
                                             <div className="tiny muted">Connected account</div>
-                                            <div className="spotInfoValue">{connect?.demo_bypass ? "Demo simulation" : connect?.account_id ?? "Not connected"}</div>
+                                            <div className="spotInfoValue">{connectState?.demo_bypass ? "Demo simulation" : connectState?.account_id ?? "Not connected"}</div>
                                         </div>
-                                        <span className={connect?.charges_enabled ? "badge badge--green" : "badge badge--warm"}>{connect?.charges_enabled ? "Charges enabled" : "Charges pending"}</span>
+                                        <span className={connectState?.charges_enabled ? "badge badge--green" : "badge badge--warm"}>{connectState?.charges_enabled ? "Charges enabled" : "Charges pending"}</span>
                                     </div>
 
                                     <div className="settingRow dashboardStripeStatusRow">
                                         <div className="settingRowTitle">
                                             <div className="tiny muted">Payout capability</div>
-                                            <div className="spotInfoValue">{connect?.payouts_enabled ? "Enabled" : "Pending"}</div>
+                                            <div className="spotInfoValue">{connectState?.payouts_enabled ? "Enabled" : "Pending"}</div>
                                         </div>
-                                        <span className={connect?.details_submitted ? "badge badge--cool" : "badge badge--warm"}>{connect?.details_submitted ? "Details submitted" : "Details required"}</span>
+                                        <span className={connectState?.details_submitted ? "badge badge--cool" : "badge badge--warm"}>{connectState?.details_submitted ? "Details submitted" : "Details required"}</span>
                                     </div>
 
                                     <div className="dashboardStripeActions">
-                                        <button className="btn btn-primary" onClick={handleOpenConnectDashboard} disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}>Open Stripe dashboard</button>
+                                        <button className="btn btn-primary" onClick={handleOpenConnectDashboard} disabled={connectBusy || !connectState?.onboarding_complete || !!connectState?.demo_bypass}>Open Stripe dashboard</button>
                                     </div>
                                 </div>
                         </DashboardDisclosureCard>
