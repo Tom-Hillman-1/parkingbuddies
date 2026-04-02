@@ -845,38 +845,14 @@ label > span:first-child {
 
 .homeFilterLocateBadge {
     position: absolute;
-    top: -4px;
-    right: -4px;
-    width: 13px;
-    height: 13px;
-    display: grid;
-    place-items: center;
-    padding: 0;
-    border-radius: 50%;
-    border: 1px solid #d7e1ef;
-    background: #fbfdff;
-    color: #6c7c94;
-    font-size: 0;
-    box-shadow: none;
-}
-
-.homeFilterLocateBadge svg {
-    width: 8px;
-    height: 8px;
+    top: -3px;
+    right: -3px;
 }
 
 .homeFilterLocateBadge.is-enabled {
     border-color: #bce7cf;
     background: #f1fcf5;
     color: #238654;
-}
-
-.homeFilterTooltipBubble {
-    border-radius: 9px;
-    color: #48627f;
-    font-size: 11px;
-    white-space: nowrap;
-    padding: 0.42rem 0.52rem;
 }
 
 .homeFilterSection {
@@ -2870,6 +2846,11 @@ label > span:first-child {
     .createWizardPage .wizardIntro .wizardTileHead {
         min-height: 1.3rem;
         margin-bottom: 0.02rem;
+    }
+
+    .homeFilterLocateBadge {
+        top: -4px;
+        right: -4px;
     }
 
     .wizardTileTitle {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Button, OverlayArrow, Tooltip, TooltipTrigger } from "react-aria-components";
+import { Button, Tooltip, TooltipTrigger } from "react-aria-components";
 
 type InfoTooltipProps = {
     label: string;
@@ -8,13 +8,12 @@ type InfoTooltipProps = {
     side?: "top" | "right" | "bottom" | "left";
     triggerClassName?: string;
     contentClassName?: string;
-    icon?: ReactNode;
 };
 
 const ALIGN_OFFSET: Record<NonNullable<InfoTooltipProps["align"]>, number> = {
-    start: -22,
+    start: -18,
     center: 0,
-    end: 22,
+    end: 18,
 };
 
 export function InfoTooltip({
@@ -24,7 +23,6 @@ export function InfoTooltip({
     side = "bottom",
     triggerClassName = "",
     contentClassName = "",
-    icon,
 }: InfoTooltipProps) {
     const [isTouchMode, setIsTouchMode] = useState(false);
     const [isTouchOpen, setIsTouchOpen] = useState(false);
@@ -85,7 +83,7 @@ export function InfoTooltip({
                     onMouseDown={(event) => event.stopPropagation()}
                     onTouchStart={(event) => event.stopPropagation()}
                 >
-                    {icon ?? <span className="uiTooltipMark" aria-hidden="true">?</span>}
+                    <span className="uiTooltipMark" aria-hidden="true">?</span>
                 </Button>
                 <Tooltip
                     placement={side}
@@ -94,11 +92,6 @@ export function InfoTooltip({
                     className={`uiTooltipContent ${contentClassName}`.trim()}
                 >
                     {text}
-                    <OverlayArrow className="uiTooltipArrow">
-                        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-                            <path d="M0 0 L5 5 L10 0" />
-                        </svg>
-                    </OverlayArrow>
                 </Tooltip>
             </TooltipTrigger>
         </span>

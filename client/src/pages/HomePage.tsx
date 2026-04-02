@@ -8,7 +8,6 @@ import {
     DashboardIcon,
     MagnifyingGlassIcon,
     MixerHorizontalIcon,
-    QuestionMarkCircledIcon,
     ValueIcon,
 } from "@radix-ui/react-icons";
 import Lottie from "lottie-react";
@@ -545,10 +544,8 @@ export default function HomePage() {
                                     label={locationButtonLabel}
                                     text={locationTooltip}
                                     triggerClassName={`homeFilterLocateBadge${isLocEnabled ? " is-enabled" : ""}`}
-                                    contentClassName="homeFilterTooltipBubble"
-                                    icon={<QuestionMarkCircledIcon />}
                                 />
-                            </div>
+                        </div>
                         </div>
 
                         <HomeFilterSection icon={<CalendarIcon />} label="When" value={whenSummary} isSet={!!draftSearch.date}>

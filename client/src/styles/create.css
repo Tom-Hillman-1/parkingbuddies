@@ -716,24 +716,7 @@
     margin-top: -0.12rem;
 }
 
-.wizardTooltipBtn {
-    width: 1.28rem;
-    height: 1.28rem;
-}
-
-.wizardTooltipBubble {
-    z-index: 130;
-}
-
 @media (max-width: 720px) {
-    .wizardTooltipBtn {
-        width: 1.72rem;
-        height: 1.72rem;
-    }
-
-    .wizardTooltipBubble {
-        width: min(220px, calc(100vw - 2.2rem));
-    }
 
     .wizardAvailabilityCal {
         padding: 0.5rem 0.06rem 0;

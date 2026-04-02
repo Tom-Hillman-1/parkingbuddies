@@ -290,7 +290,7 @@ export function normalizeWindow(raw: unknown): AvailabilityWindow | null {
 }
 
 export function Tooltip({ label, text }: { label: string; text: string }) {
-    return <InfoTooltip label={label} text={text} triggerClassName="wizardTooltipBtn" contentClassName="wizardTooltipBubble" />;
+    return <InfoTooltip label={label} text={text} />;
 }
 
 export function WizardSheet({
@@ -535,3 +535,4 @@ function buildAvailabilityDayLabels(windows: AvailabilityWindow[]) {
 
     return labels;
 }
+

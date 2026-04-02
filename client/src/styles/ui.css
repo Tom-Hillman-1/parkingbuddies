@@ -106,21 +106,22 @@
 }
 
 .uiTooltipTrigger {
-    width: 1.4rem;
-    height: 1.4rem;
+    width: 1.18rem;
+    height: 1.18rem;
     display: inline-grid;
     place-items: center;
+    padding: 0;
     border-radius: 999px;
-    border: 1px solid #cbdced;
-    background: linear-gradient(160deg, rgba(255, 255, 255, 0.96) 0%, rgba(237, 244, 255, 0.94) 100%);
-    color: #3b5b81;
-    font-size: 0.72rem;
+    border: 1px solid #d7e1ef;
+    background: #fbfdff;
+    color: #6c7c94;
+    font-size: 0.66rem;
     font-weight: 800;
     line-height: 1;
     cursor: pointer;
     touch-action: manipulation;
-    box-shadow: 0 8px 18px rgba(24, 45, 79, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-    transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease, background 140ms ease, color 140ms ease;
+    box-shadow: none;
+    transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
 }
 
 .uiTooltipTrigger:hover,
@@ -130,9 +131,9 @@
 .uiTooltipTrigger[data-open] {
     border-color: #9ebde7;
     background: #fff;
-    transform: translateY(-1px);
     color: #1f4c88;
-    box-shadow: 0 12px 24px rgba(24, 72, 132, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.94);
+    box-shadow: none;
+    transform: none;
     outline: none;
 }
 
@@ -141,34 +142,26 @@
     place-items: center;
     width: 100%;
     height: 100%;
-    font-size: 0.82rem;
+    font-size: 0.72rem;
     font-weight: 800;
     line-height: 1;
 }
 
 .uiTooltipContent {
     z-index: 120;
-    width: min(250px, calc(100vw - 2.2rem));
+    width: max-content;
+    max-width: min(210px, calc(100vw - 1.8rem));
     border: 1px solid #d8e3f3;
-    border-radius: 14px;
-    background: linear-gradient(170deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 249, 255, 0.96) 100%);
-    box-shadow: 0 18px 38px rgba(16, 24, 40, 0.16);
-    color: #40556f;
-    font-size: 0.8rem;
-    line-height: 1.5;
-    padding: 0.58rem 0.68rem;
+    border-radius: 10px;
+    background: #ffffff;
+    box-shadow: 0 12px 28px rgba(16, 24, 40, 0.14);
+    color: #48627f;
+    font-size: 0.74rem;
+    line-height: 1.38;
+    white-space: normal;
+    padding: 0.44rem 0.56rem;
 }
 
-.uiTooltipArrow {
-    display: block;
-}
-
-.uiTooltipArrow svg {
-    display: block;
-    fill: #ffffff;
-    stroke: #d8e3f3;
-    stroke-width: 1px;
-}
 
 .appField {
     display: grid;
@@ -755,19 +748,18 @@
 
 @media (max-width: 720px) {
     .uiTooltipTrigger {
-        width: 1.72rem;
-        height: 1.72rem;
+        width: 1.3rem;
+        height: 1.3rem;
     }
 
     .uiTooltipMark {
-        font-size: 0.9rem;
+        font-size: 0.76rem;
     }
 
     .appDialogOverlay {
         padding: 0.65rem;
         align-items: center;
     }
-
     .appDialogModal,
     .appDialogModal--compact,
     .appDialogModal--wide {
