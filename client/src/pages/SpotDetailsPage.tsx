@@ -353,7 +353,7 @@ export default function SpotDetailsPage() {
                 ? calendarDraftEndDate ?? selectedEndDate
                 : null;
     async function createBooking() {
-        if (!token) return setActionMsg("Please log in to book this listing.");
+        if (!token) return;
         if (!spot || spot.mode === "auction") return;
         if (listingInactive) return setActionMsg("This listing is no longer active.");
         if (isOwner) return setActionMsg("You cannot book your own listing.");
@@ -412,7 +412,7 @@ export default function SpotDetailsPage() {
 
     function goToBidConfirm() {
         if (!spot || spot.mode !== "auction") return;
-        if (!token) return setBidMsg("Please log in to place a bid.");
+        if (!token) return;
         if (listingInactive) return setBidMsg("This listing is no longer active.");
         if (isOwner) return setBidMsg("Owners cannot bid on their own listing.");
         if (auctionClosed) return setBidMsg("No slots left for this listing.");
