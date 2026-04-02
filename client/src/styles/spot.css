@@ -211,7 +211,7 @@
 }
 
 .slotCal .appCalendar--slots .rdp-day {
-    height: 3.98rem;
+    height: 4.1rem;
 }
 
 @media (max-width: 720px) {
@@ -220,7 +220,7 @@
     }
 
     .slotCal .appCalendar--slots .rdp-day {
-        height: 4.08rem;
+        height: 4.2rem;
     }
 
     .slotCal .appCalendar--slots .rdp-day_button {
@@ -231,7 +231,7 @@
     }
 
     .slotCal .appCalendar--slots .rdp-day_button::after {
-        top: calc(100% + 0.3rem);
+        top: calc(100% + 0.36rem);
     }
 }
 

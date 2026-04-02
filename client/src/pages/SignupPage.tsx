@@ -93,7 +93,7 @@ export default function SignupPage() {
                         </div>
                     </div>
 
-                    {msg && <div className="card formSection" style={{ color: "crimson" }}>{msg}</div>}
+                    {msg && <div className="spotAlert spotAlert--danger">{msg}</div>}
 
                     <form onSubmit={onSubmit} className="authForm">
                         <AppField label="Name" error={showFieldError("name") ? form.formState.errors.name?.message : undefined}>

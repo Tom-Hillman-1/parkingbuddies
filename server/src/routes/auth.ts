@@ -28,14 +28,21 @@ const loginBodySchema = z.object({
     password: z.string(),
 });
 
-const authRateLimit = simpleRateLimit({
-    windowMs: 10 * 60 * 1000,
-    max: 15,
-    message: "Too many authentication attempts. Please try again shortly.",
-    keyPrefix: "auth",
+const signupRateLimit = simpleRateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 6,
+    message: "Too many account creation attempts. Please try again later.",
+    keyPrefix: "auth_signup",
 });
 
-router.post("/signup", authRateLimit, async (req, res) => {
+const loginRateLimit = simpleRateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 10,
+    message: "Too many login attempts. Please try again shortly.",
+    keyPrefix: "auth_login",
+});
+
+router.post("/signup", signupRateLimit, async (req, res) => {
     const parsedBody = parseWithSchema(signupBodySchema, req.body ?? {}, res, "signup");
     if (!parsedBody.ok) return;
     const { email, name, password } = parsedBody.data;
@@ -100,7 +107,7 @@ router.post("/signup", authRateLimit, async (req, res) => {
     }
 });
 
-router.post("/login", authRateLimit, async (req, res) => {
+router.post("/login", loginRateLimit, async (req, res) => {
     const parsedBody = parseWithSchema(loginBodySchema, req.body ?? {}, res, "login");
     if (!parsedBody.ok) return;
     const { email, password } = parsedBody.data;

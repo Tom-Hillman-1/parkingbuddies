@@ -72,8 +72,8 @@ export function AppTimePickerDialog({
             labels: {
                 ok: applyLabel,
                 cancel: "Cancel",
-                time: "Pick time",
-                mobileTime: "Pick time",
+                time: "Time",
+                mobileTime: "Time",
                 mobileHour: "Hour",
                 mobileMinute: "Minute",
             },
@@ -109,7 +109,7 @@ export function AppTimePickerDialog({
             <div className="rowInline appTimePickerDialogFooter">
                 <div className="appTimePickerSummary">
                     <span className="appTimePickerSummaryLabel">{summaryLabel}</span>
-                    <strong>{TIME_VALUE_PATTERN.test(draftValue) ? draftValue : "Choose time"}</strong>
+                    <strong>{TIME_VALUE_PATTERN.test(draftValue) ? draftValue : "Time"}</strong>
                 </div>
                 <div className="rowInline">
                     <AppButton type="button" onPress={onClose}>
@@ -139,7 +139,7 @@ export function AppTimePicker({
     disabled,
     id,
     name,
-    placeholder = "Pick time",
+    placeholder = "Time",
 }: AppTimePickerProps) {
     const [open, setOpen] = useState(false);
     const [dialogVersion, setDialogVersion] = useState(0);

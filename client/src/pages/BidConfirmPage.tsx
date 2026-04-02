@@ -91,6 +91,7 @@ function BidCardForm({
     const stripe = useStripe();
     const elements = useElements();
     const [busy, setBusy] = useState(false);
+    const [elementReady, setElementReady] = useState(false);
 
     async function submitMoneyBid(confirmedPaymentIntentId: string) {
         return apiPost<{ bid_id: string }>(
@@ -114,10 +115,22 @@ function BidCardForm({
                 onError("Secure authorization form is not ready yet.");
                 return;
             }
+            if (!elementReady) {
+                onError("Secure authorization form is still loading. Please wait a moment and try again.");
+                return;
+            }
 
-            const { error: submitError } = await elements.submit();
-            if (submitError) {
-                onError(submitError.message ?? "Please complete your payment details.");
+            let submitErrorMessage: string | null = null;
+            try {
+                const { error: submitError } = await elements.submit();
+                if (submitError) {
+                    submitErrorMessage = submitError.message ?? "Please complete your payment details.";
+                }
+            } catch (error: unknown) {
+                submitErrorMessage = readErrorMessage(error, "Secure authorization is still loading. Please try again.");
+            }
+            if (submitErrorMessage) {
+                onError(submitErrorMessage);
                 return;
             }
 
@@ -170,15 +183,15 @@ function BidCardForm({
                 Enter your details in Stripe's secure payment form. The amount is only charged if the owner accepts your bid.
             </div>
             <div style={{ padding: 10, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, marginTop: 10 }}>
-                <PaymentElement />
+                <PaymentElement onReady={() => setElementReady(true)} />
             </div>
             <div className="actionInlineGrid" style={{ marginTop: 12 }}>
                 <button
                     onClick={confirm}
-                    disabled={busy}
+                    disabled={busy || !elementReady}
                     className="btn btn-primary"
                 >
-                    {busy ? "Authorizing..." : "Confirm & authorize"}
+                    {busy ? "Authorizing..." : elementReady ? "Confirm & authorize" : "Loading secure form..."}
                 </button>
                 <Link to={onBack} className="btn">Back to listing</Link>
             </div>
@@ -207,6 +220,7 @@ function BidPaymentSection({
 }) {
     const [intent, setIntent] = useState<StripeIntentDetails | null>(null);
     const [intentLoading, setIntentLoading] = useState(true);
+    const [intentNonce, setIntentNonce] = useState(0);
     const intentKey = useMemo(() => buildIntentKey(spotId, start, end, amountGbp), [amountGbp, end, spotId, start]);
 
     useEffect(() => {
@@ -243,7 +257,7 @@ function BidPaymentSection({
         return () => {
             active = false;
         };
-    }, [amountGbp, intentKey, onError, spotId, token]);
+    }, [amountGbp, intentKey, intentNonce, onError, spotId, token]);
 
     if (!intent) {
         return (
@@ -252,6 +266,13 @@ function BidPaymentSection({
                 <div className="tiny muted" style={{ marginTop: 4 }}>
                     {intentLoading ? "Preparing Stripe's secure authorization form..." : "The secure authorization form is unavailable right now."}
                 </div>
+                {!intentLoading ? (
+                    <div className="rowInline" style={{ marginTop: 10 }}>
+                        <button className="btn" onClick={() => setIntentNonce((value) => value + 1)}>
+                            Try again
+                        </button>
+                    </div>
+                ) : null}
             </div>
         );
     }
@@ -383,13 +404,10 @@ export default function BidConfirmPage() {
 
             {pay === "money" ? (
                 moneyBidBelowMinimum ? (
-                    <div className="card formSection" style={{ padding: 16, marginTop: 12 }}>
-                        <div className="h3">Secure card authorization</div>
-                        <div className="tiny muted" style={{ marginTop: 4 }}>
-                            Card payments in GBP must be at least {formatGbp(STRIPE_MIN_GBP_PAYMENT)}.
-                            This bid totals {formatGbp(totalMoney)}, so Stripe cannot create the authorization for this slot.
-                            Increase the bid or use points instead.
-                        </div>
+                    <div className="spotAlert spotAlert--danger" style={{ marginTop: 12 }}>
+                        Card payments in GBP must be at least {formatGbp(STRIPE_MIN_GBP_PAYMENT)}.
+                        This bid totals {formatGbp(totalMoney)}, so Stripe cannot create the authorization for this slot.
+                        Increase the bid or use points instead.
                     </div>
                 ) : (
                     <BidPaymentSection

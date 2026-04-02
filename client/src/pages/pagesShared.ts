@@ -32,6 +32,7 @@ export {
     calcRangeMinutes,
     calcUnitsForMinutes,
     derivedPointsCostFromMoney,
+    expandRangeToBillableEnd,
     MIN_POINTS_COST,
     POINTS_PER_GBP,
     STRIPE_MIN_GBP_PAYMENT,
@@ -127,4 +128,50 @@ export function formatDateTimeLocal(value?: string | null, fallback = "Time on f
 export function formatDateRangeLocal(start?: string | null, end?: string | null, fallback = "Time on file") {
     if (!start || !end) return fallback;
     return `${formatDateTimeLocal(start, fallback)} -> ${formatDateTimeLocal(end, fallback)}`;
+}
+
+export function formatCalendarWindowLabelForDay(dayKey: string, rangeStart: string, rangeEnd: string, startTime: string, endTime: string) {
+    if (dayKey < rangeStart || dayKey > rangeEnd) return "";
+    if (rangeStart === rangeEnd) return `${startTime}-${endTime}`;
+    if (dayKey === rangeStart) return `${startTime}-00:00`;
+    if (dayKey === rangeEnd) return `00:00-${endTime}`;
+    return "All day";
+}
+
+export function mergeCalendarDayLabels(existingLabel: string | undefined, nextLabel: string) {
+    if (!existingLabel || existingLabel === nextLabel) return nextLabel;
+    if (existingLabel === "Full" || nextLabel === "Full") return existingLabel === "Full" ? existingLabel : nextLabel;
+    if (existingLabel === "All day" || nextLabel === "All day") return "All day";
+
+    const current = parseCalendarDayLabel(existingLabel);
+    const next = parseCalendarDayLabel(nextLabel);
+    if (!current || !next) return "Multiple slots";
+    if (current.end < next.start || next.end < current.start) return "Multiple slots";
+
+    const mergedStart = Math.min(current.start, next.start);
+    const mergedEnd = Math.max(current.end, next.end);
+    if (mergedStart === 0 && mergedEnd >= 24 * 60) return "All day";
+
+    return `${formatCalendarMinutes(mergedStart)}-${formatCalendarMinutes(mergedEnd)}`;
+}
+
+function parseCalendarDayLabel(label: string) {
+    if (label === "All day") return { start: 0, end: 24 * 60 };
+    const match = /^(\d{2}:\d{2})-(\d{2}:\d{2})$/.exec(label);
+    if (!match) return null;
+
+    const start = timeToMinutes(match[1]);
+    let end = timeToMinutes(match[2]);
+    if (match[2] === "00:00" && match[1] !== "00:00") {
+        end = 24 * 60;
+    }
+
+    return { start, end };
+}
+
+function formatCalendarMinutes(totalMinutes: number) {
+    const normalized = totalMinutes >= 24 * 60 ? 0 : totalMinutes;
+    const hours = Math.floor(normalized / 60);
+    const minutes = normalized % 60;
+    return `${pad2(hours)}:${pad2(minutes)}`;
 }

@@ -308,6 +308,8 @@
 
 .appTimePickerInline .tp-ui--inline .tp-ui-wrapper {
     margin: 0 auto !important;
+    max-width: min(292px, 100%) !important;
+    min-height: auto !important;
 }
 
 .tp-ui-wrapper .tp-ui-hour,
@@ -704,19 +706,20 @@
     min-width: 3rem;
     min-height: 3rem;
     font-size: 0.98rem;
+    overflow: visible;
 }
 
 .appCalendar--slots .rdp-day_button::after {
     content: attr(data-slot-time);
     position: absolute;
-    top: calc(100% + 0.18rem);
+    top: calc(100% + 0.28rem);
     left: 50%;
-    width: 4.5rem;
+    width: 4.7rem;
     transform: translateX(-50%);
     color: #6d7f96;
-    font-size: 0.58rem;
+    font-size: 0.62rem;
     font-weight: 700;
-    line-height: 1.15;
+    line-height: 1.18;
     text-align: center;
     white-space: normal;
 }
@@ -817,16 +820,22 @@
         font-size: 0.88rem;
     }
 
+    .appCalendar--slots .rdp-day_button::after {
+        width: 4rem;
+        font-size: 0.5rem;
+        line-height: 1.08;
+    }
+
     .appCalendar--home .rdp-month_grid {
         border-spacing: 0.24rem 0.34rem;
     }
 
     .appCalendar--availability.appCalendar--slots .rdp-month_grid {
-        border-spacing: 0.64rem 1.64rem;
+        border-spacing: 0.62rem 0.82rem;
     }
 
     .appCalendar--availability.appCalendar--slots .rdp-day {
-        height: 5.35rem;
+        height: 4.05rem;
     }
 
     .appCalendar--availability.appCalendar--slots .rdp-day_button {
@@ -838,21 +847,21 @@
     }
 
     .appCalendar--availability.appCalendar--slots .rdp-day_button::after {
-        top: calc(100% + 0.46rem);
-        width: 3.95rem;
+        top: calc(100% + 0.28rem);
+        width: 3.2rem;
         font-size: 0.48rem;
-        line-height: 1.2;
+        line-height: 1.06;
     }
 
     .appTimePickerDialogFooter {
-        position: sticky;
-        bottom: -0.92rem;
-        margin: 0 -0.92rem -0.92rem;
-        padding: 0.72rem 0.92rem 0.92rem;
+        position: static;
+        bottom: auto;
+        margin: 0;
+        padding: 0;
         flex-direction: column;
         align-items: stretch;
-        background: linear-gradient(180deg, rgba(245, 249, 255, 0) 0%, rgba(245, 249, 255, 0.94) 18%, rgba(245, 249, 255, 0.99) 100%);
-        backdrop-filter: blur(8px);
+        background: transparent;
+        backdrop-filter: none;
     }
 
     .appTimePickerSummary {

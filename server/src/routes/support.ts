@@ -7,8 +7,8 @@ import { serverError } from "../lib/errors";
 const router = Router();
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL ?? "parkingbuddiesproject@gmail.com";
 const supportRateLimit = simpleRateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 3,
+    windowMs: 60 * 60 * 1000,
+    max: 6,
     message: "Too many support requests. Please wait a bit and try again.",
     keyPrefix: "support_contact",
 });

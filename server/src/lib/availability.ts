@@ -231,17 +231,43 @@ export async function countOverlappingBookings(
     const spotId = Array.isArray(parkingSpotId) ? parkingSpotId[0] : parkingSpotId;
     if (typeof spotId !== "string" || !spotId.trim()) return 0;
     const overlapR = await db.query(
-        `SELECT COUNT(*)::int AS count
+        `SELECT start_time, end_time
          FROM bookings
          WHERE parking_spot_id = $1
            AND (
-               status = 'confirmed'
-               OR (status = 'pending' AND created_at >= now() - ($4 * interval '1 minute'))
-           )
-           AND NOT (end_time <= $2 OR start_time >= $3)`,
+                status = 'confirmed'
+                OR (status = 'pending' AND created_at >= now() - ($4 * interval '1 minute'))
+            )
+            AND NOT (end_time <= $2 OR start_time >= $3)`,
         [spotId, startIso, endIso, PENDING_BOOKING_HOLD_MINUTES]
     );
-    return Number(overlapR.rows[0]?.count ?? 0);
+    const rangeStart = new Date(startIso);
+    const rangeEnd = new Date(endIso);
+    if (Number.isNaN(rangeStart.getTime()) || Number.isNaN(rangeEnd.getTime()) || !(rangeStart < rangeEnd)) return 0;
+
+    const events: Array<{ at: number; delta: number }> = [];
+    for (const row of overlapR.rows as Array<{ start_time?: string; end_time?: string }>) {
+        const bookingStart = row.start_time ? new Date(row.start_time) : null;
+        const bookingEnd = row.end_time ? new Date(row.end_time) : null;
+        if (!bookingStart || !bookingEnd || Number.isNaN(bookingStart.getTime()) || Number.isNaN(bookingEnd.getTime())) continue;
+        const overlapStart = Math.max(rangeStart.getTime(), bookingStart.getTime());
+        const overlapEnd = Math.min(rangeEnd.getTime(), bookingEnd.getTime());
+        if (overlapEnd <= overlapStart) continue;
+        events.push({ at: overlapStart, delta: 1 });
+        events.push({ at: overlapEnd, delta: -1 });
+    }
+
+    events.sort((a, b) => (a.at === b.at ? a.delta - b.delta : a.at - b.at));
+    let active = 0;
+    let maxActive = 0;
+    for (const event of events) {
+        active += event.delta;
+        if (active > maxActive) {
+            maxActive = active;
+        }
+    }
+
+    return maxActive;
 }
 
 type SlotAvailabilityIssueOptions = {

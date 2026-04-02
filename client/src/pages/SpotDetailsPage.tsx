@@ -12,6 +12,7 @@ import {
     calcAuctionPointsTotal,
     calcUnitsForMinutes,
     capitalizeLabel,
+    expandRangeToBillableEnd,
     formatDateDisplay,
     formatDateTimeCompact,
     formatGbp,
@@ -26,6 +27,7 @@ import {
     formatAvailability,
     formatBidAmount,
     getAutoStartForDate,
+    getRangeCapacityState,
     isSlotAllowed,
     nextWholeQuarterHour,
     normalizeTimeInput,
@@ -163,6 +165,14 @@ export default function SpotDetailsPage() {
         [endAt, startAt]
     );
 
+    useEffect(() => {
+        setActionMsg(null);
+    }, [payMethod, selectedEndDate, selectedEndTime, selectedStartDate, selectedStartTime]);
+
+    useEffect(() => {
+        setBidMsg(null);
+    }, [bidMoneyPerHour, bidPayMethod, bidPointsPerHour, selectedEndDate, selectedEndTime, selectedStartDate, selectedStartTime]);
+
     const canUsePoints = !!spot?.allow_points && toFiniteNumber(spot.points_cost) > 0;
 
     useEffect(() => {
@@ -189,27 +199,27 @@ export default function SpotDetailsPage() {
         if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) return false;
         return startAt < endAt;
     }, [startAt, endAt]);
+    const slotBillingMode = spot?.mode === "auction" ? "auction" : "booking";
+    const billableEndAt = useMemo(
+        () => expandRangeToBillableEnd(startAt, endAt, (spot?.price_unit ?? "hour") as PriceUnit, slotBillingMode),
+        [endAt, spot?.price_unit, slotBillingMode, startAt]
+    );
+    const effectiveSlotEnd = billableEndAt ?? endAt;
 
     const slotAllowed = useMemo(() => {
         if (!spot || !slotRangeValid) return false;
-        return isSlotAllowed(spot, startAt, endAt);
-    }, [spot, startAt, endAt, slotRangeValid]);
-
-    const overlappingBookings = useMemo(() => {
-        if (!slotRangeValid) return [] as SpotBooking[];
-
-        return bookings.filter((b) => {
-            if (!b.start_time || !b.end_time) return false;
-            const bs = new Date(b.start_time);
-            const be = new Date(b.end_time);
-            if (Number.isNaN(bs.getTime()) || Number.isNaN(be.getTime())) return false;
-            return bs < endAt && be > startAt;
-        });
-    }, [bookings, startAt, endAt, slotRangeValid]);
+        return isSlotAllowed(spot, startAt, effectiveSlotEnd);
+    }, [effectiveSlotEnd, spot, startAt, slotRangeValid]);
 
     const capacity = Math.max(1, toFiniteNumber(spot?.capacity_total || 1));
-    const spotsLeft = Math.max(0, capacity - overlappingBookings.length);
-    const slotFull = spotsLeft <= 0;
+    const selectedCapacity = useMemo(() => {
+        if (!slotRangeValid) {
+            return { maxBooked: 0, spacesLeft: capacity, isFull: false };
+        }
+        return getRangeCapacityState(bookings, startAt, effectiveSlotEnd, capacity);
+    }, [bookings, capacity, effectiveSlotEnd, slotRangeValid, startAt]);
+    const slotFull = selectedCapacity.isFull;
+    const headerSpacesLeft = hasSelectedSlot && slotFull ? 0 : capacity;
 
     const isOwner = !!user && !!spot && user.id === spot.owner_user_id;
     const listingInactive = !!spot && !spot.is_active;
@@ -226,11 +236,8 @@ export default function SpotDetailsPage() {
                 label: capacity > 1 ? "All spaces are booked for this slot." : "This slot is currently booked.",
             };
         }
-        return {
-            ok: true,
-            label: capacity > 1 ? `${spotsLeft} spot${spotsLeft === 1 ? "" : "s"} left for this slot.` : "Slot is available.",
-        };
-    }, [hasSelectedSlot, listingInactive, slotRangeValid, startsInFuture, slotAllowed, slotFull, capacity, spotsLeft]);
+        return { ok: true, label: "Slot is available." };
+    }, [hasSelectedSlot, listingInactive, slotRangeValid, startsInFuture, slotAllowed, slotFull, capacity]);
 
     const listingUnit = (spot?.price_unit ?? "hour") as PriceUnit;
     const estimatedTotal = useMemo(() => {
@@ -351,6 +358,7 @@ export default function SpotDetailsPage() {
         if (!spot || spot.mode === "auction") return;
         if (listingInactive) return setActionMsg("This listing is no longer active.");
         if (isOwner) return setActionMsg("You cannot book your own listing.");
+        if (!hasSelectedSlot) return setActionMsg("Select a slot before continuing.");
         if (!slotStatus.ok) return setActionMsg(slotStatus.label);
         if (payMethod === "money" && !canUseMoneyBooking) return setActionMsg("This listing accepts points only.");
         if (bookingMoneyBelowMinimum) {
@@ -409,6 +417,7 @@ export default function SpotDetailsPage() {
         if (listingInactive) return setBidMsg("This listing is no longer active.");
         if (isOwner) return setBidMsg("Owners cannot bid on their own listing.");
         if (auctionClosed) return setBidMsg("No slots left for this listing.");
+        if (!hasSelectedSlot) return setBidMsg("Select a slot before continuing.");
         if (!slotStatus.ok) return setBidMsg(slotStatus.label);
 
         if (bidPayMethod === "money") {
@@ -515,8 +524,8 @@ export default function SpotDetailsPage() {
                             <span className="badge">{formatAvailability(spot)}</span>
                             {listingInactive && <span className="badge badge--rose">Inactive</span>}
                             {capacity > 1 && (
-                                <span className={`badge ${spotsLeft > 0 ? "badge--green" : "badge--rose"}`}>
-                                    {spotsLeft}/{capacity} available
+                                <span className={`badge ${headerSpacesLeft > 0 ? "badge--green" : "badge--rose"}`}>
+                                    {headerSpacesLeft}/{capacity} available
                                 </span>
                             )}
                             {auctionClosed && (
@@ -656,16 +665,11 @@ export default function SpotDetailsPage() {
                                         placeholder={`Your bid per ${listingUnit} (GBP)`}
                                         disabled={auctionClosed || bidBusy || listingInactive}
                                     />
-                                    {bidMoneyBelowMinimum && (
-                                        <div className="tiny" style={{ color: "#a23636", marginTop: 4 }}>
-                                            Card payments in GBP must be at least {formatGbp(STRIPE_MIN_GBP_PAYMENT)} for this slot.
-                                        </div>
-                                    )}
                                 </label>
                             ) : (
                                 <label style={{ display: "grid", gap: 6 }}>
                                     <div className="tiny muted">
-                                        Your bid per {listingUnit} (points)
+                                        Points bid
                                         {auctionPointsStartLabel && <span> · Minimum {auctionPointsStartPerUnit} pts / {listingUnit}</span>}
                                     </div>
                                     <input
@@ -678,11 +682,6 @@ export default function SpotDetailsPage() {
                                         placeholder={`Points per ${listingUnit}`}
                                         disabled={auctionClosed || bidBusy || listingInactive}
                                     />
-                                    {bidPointsInsufficient && (
-                                        <div className="tiny" style={{ color: "#a23636", marginTop: 4 }}>
-                                            Not enough points ({userPoints} available).
-                                        </div>
-                                    )}
                                 </label>
                             )}
 
@@ -697,12 +696,12 @@ export default function SpotDetailsPage() {
                                 <button
                                     onClick={goToBidConfirm}
                                     className="btn btn-primary"
-                                    disabled={!token || isOwner || auctionClosed || bidBusy || listingInactive || !slotStatus.ok}
+                                    disabled={isOwner || auctionClosed || bidBusy || listingInactive}
                                 >
                                     Review bid
                                 </button>
-                                {bidMsg && <span className="tiny muted">{bidMsg}</span>}
                             </div>
+                            {bidMsg && <div className="spotAlert spotAlert--danger">{bidMsg}</div>}
                             {isOwner && <div className="spotAlert">You are the owner of this listing.</div>}
                         </div>
                     ) : (
@@ -738,22 +737,12 @@ export default function SpotDetailsPage() {
                                     <strong>{estimatedBookingTotalLabel}</strong>
                                 </span>
                             </div>
-                            {bookingMoneyBelowMinimum && (
-                                <div className="tiny" style={{ color: "#a23636", marginTop: 6 }}>
-                                    Card payments in GBP must be at least {formatGbp(STRIPE_MIN_GBP_PAYMENT)} for this slot.
-                                </div>
-                            )}
-                            {pointsBookingInsufficient && (
-                                <div className="tiny" style={{ color: "#a23636", marginTop: 6 }}>
-                                    Not enough points ({userPoints} available).
-                                </div>
-                            )}
 
                             <div className="rowInline" style={{ marginTop: 4 }}>
                                 <button
                                     onClick={createBooking}
                                     className="btn btn-primary"
-                                    disabled={!token || isOwner || busy || listingInactive || !slotStatus.ok}
+                                    disabled={isOwner || busy || listingInactive}
                                 >
                                     {busy
                                         ? "Booking..."
@@ -763,8 +752,8 @@ export default function SpotDetailsPage() {
                                             ? "Confirm free booking"
                                             : "Continue to payment"}
                                 </button>
-                                {actionMsg && <span className="tiny muted">{actionMsg}</span>}
                             </div>
+                            {actionMsg && <div className="spotAlert spotAlert--danger">{actionMsg}</div>}
                         </div>
                     )}
 

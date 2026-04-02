@@ -12,6 +12,7 @@ export {
     calcRangeMinutes,
     calcUnitsForMinutes,
     derivedPointsCostFromMoney,
+    expandRangeToBillableEnd,
     gbpToPoints,
     MIN_POINTS_COST,
     STRIPE_MIN_GBP_PAYMENT,

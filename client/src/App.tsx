@@ -1,29 +1,28 @@
-import { useEffect, useState } from "react";
-import Lottie from "lottie-react";
+import { useEffect } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
-import loadingAnimation from "./assets/loading.json";
-import logoNameLongBlue from "./assets/logo_name_long_blue.png";
 import NavBar from "./components/NavBar";
 
-const APP_BOOT_SPLASH_MS = 1500;
-
 export default function App() {
-    const [showLoader, setShowLoader] = useState(true);
     const location = useLocation();
 
     useEffect(() => {
-        const timer = window.setTimeout(() => {
-            setShowLoader(false);
-        }, APP_BOOT_SPLASH_MS);
+        if ("scrollRestoration" in window.history) {
+            const previous = window.history.scrollRestoration;
+            window.history.scrollRestoration = "manual";
 
-        return () => {
-            window.clearTimeout(timer);
-        };
+            return () => {
+                window.history.scrollRestoration = previous;
+            };
+        }
+
+        return undefined;
     }, []);
 
     useEffect(() => {
-        if (showLoader) return;
+        window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    }, [location.pathname, location.search]);
 
+    useEffect(() => {
         const root = document.querySelector(".app-main");
         if (!root) return;
         const seen = new WeakSet<HTMLElement>();
@@ -62,24 +61,7 @@ export default function App() {
             domObserver.disconnect();
             observer.disconnect();
         };
-    }, [location.pathname, location.search, showLoader]);
-
-    if (showLoader) {
-        return (
-            <div className="app-loader" role="status" aria-live="polite" aria-label="Loading ParkingBuddies">
-                <div className="app-loader-card">
-                    <Lottie
-                        className="app-loader-animation"
-                        animationData={loadingAnimation}
-                        loop
-                        autoplay
-                        aria-hidden="true"
-                    />
-                    <img className="app-loader-logo" src={logoNameLongBlue} alt="ParkingBuddies" />
-                </div>
-            </div>
-        );
-    }
+    }, [location.pathname, location.search]);
 
     return (
         <div className="app-shell">

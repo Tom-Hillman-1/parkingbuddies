@@ -42,6 +42,23 @@ export function calcRangeMinutes(start?: Date | string | null, end?: Date | stri
     return Math.round((endDate.getTime() - startDate.getTime()) / 60000);
 }
 
+export function expandRangeToBillableEnd(
+    start?: Date | string | null,
+    end?: Date | string | null,
+    unit: PriceUnit = "hour",
+    hourlyMode: "booking" | "auction" = "booking"
+) {
+    if (!start || !end) return null;
+    const startDate = start instanceof Date ? new Date(start) : new Date(start);
+    const endDate = end instanceof Date ? new Date(end) : new Date(end);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate <= startDate) return null;
+    if (unit === "hour") return endDate;
+
+    const units = calcUnitsForMinutes(calcRangeMinutes(startDate, endDate), unit, hourlyMode);
+    const minutesPerUnit = unit === "day" ? 24 * 60 : 7 * 24 * 60;
+    return new Date(startDate.getTime() + units * minutesPerUnit * 60000);
+}
+
 export function calcBookingUnits(start: Date, end: Date, unit: PriceUnit) {
     return calcUnitsForMinutes(calcRangeMinutes(start, end), unit, "booking");
 }

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { EMPTY_NOTIFICATION_SUMMARY, useNotificationSummary, useSeenNotificationSummary } from "../lib/notifications";
 import logoMark from "../assets/logo_logo_blue.png";
@@ -9,7 +9,9 @@ const linkClassName = ({ isActive }: { isActive: boolean }) => `nav-link${isActi
 export default function NavBar() {
     const { user, token, isLoading, logout } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
     const [open, setOpen] = useState(false);
+    const shellRef = useRef<HTMLDivElement | null>(null);
     const isSignedIn = Boolean(user || token);
     const notificationQuery = useNotificationSummary(token);
     const notificationSummary = useSeenNotificationSummary(notificationQuery.data ?? EMPTY_NOTIFICATION_SUMMARY);
@@ -21,13 +23,44 @@ export default function NavBar() {
         navigate("/", { replace: true });
     };
 
+    useEffect(() => {
+        closeMenu();
+    }, [location.pathname, location.search]);
+
+    useEffect(() => {
+        if (!open) return;
+
+        const handlePointerDown = (event: PointerEvent) => {
+            const shell = shellRef.current;
+            if (!shell) return;
+            if (shell.contains(event.target as Node)) return;
+            closeMenu();
+        };
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") closeMenu();
+        };
+
+        window.addEventListener("pointerdown", handlePointerDown);
+        window.addEventListener("keydown", handleKeyDown);
+
+        return () => {
+            window.removeEventListener("pointerdown", handlePointerDown);
+            window.removeEventListener("keydown", handleKeyDown);
+        };
+    }, [open]);
+
     return (
         <header className="nav">
-            <div className="nav-shell container">
+            <div ref={shellRef} className="nav-shell container">
                 <Link to="/" className="brand" aria-label="ParkingBuddies home">
                     <img className="brand-logo" src={logoMark} alt="" />
                     <span className="brand-text">ParkingBuddies</span>
                 </Link>
+
+                {notificationSummary.total > 0 && isSignedIn && (
+                    <span className="nav-shell-alertBadge">+{notificationSummary.total}</span>
+                )}
 
                 <button
                     type="button"
@@ -44,10 +77,10 @@ export default function NavBar() {
 
                 <nav id="site-nav" className={`nav-links${open ? " nav-links--open" : ""}`} aria-label="Primary">
                     <NavLink to="/" className={linkClassName} onClick={closeMenu}>Home</NavLink>
-                    <NavLink to="/about" className={linkClassName} onClick={closeMenu}>About</NavLink>
 
                     {isLoading ? null : isSignedIn ? (
                         <>
+                            <NavLink to="/about" className={linkClassName} onClick={closeMenu}>About</NavLink>
                             <NavLink to="/dashboard" className={linkClassName} onClick={closeMenu}>Dashboard</NavLink>
                             <NavLink to="/create-listing" className={linkClassName} onClick={closeMenu}>Create listing</NavLink>
                             <NavLink to="/settings" className={linkClassName} onClick={closeMenu}>Settings</NavLink>
@@ -57,9 +90,6 @@ export default function NavBar() {
                                     <span className="nav-user-name">{accountName}</span>
                                 </span>
                                 <span className="nav-user-points">{user?.points_balance ?? 0} pts</span>
-                                {notificationSummary.total > 0 && (
-                                    <span className="nav-user-alertBadge">+{notificationSummary.total}</span>
-                                )}
                             </Link>
 
                             <button type="button" className="btn btn-ghost" onClick={handleLogout}>
@@ -68,6 +98,7 @@ export default function NavBar() {
                         </>
                     ) : (
                         <>
+                            <NavLink to="/about" className={linkClassName} onClick={closeMenu}>About</NavLink>
                             <NavLink to="/login" className={linkClassName} onClick={closeMenu}>Log in</NavLink>
                             <NavLink to="/signup" className={linkClassName} onClick={closeMenu}>Sign up</NavLink>
                         </>

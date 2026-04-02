@@ -3,10 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import AppPageState from "../components/AppPageState";
 import { AppButton, AppField, AppInput } from "../components/ui/AppForm";
-import { apiGet, apiPatch, readErrorMessage } from "../lib/api";
+import { apiDelete, apiGet, apiPatch, readErrorMessage } from "../lib/api";
 import { useAuth, useStripeConnect } from "../lib/auth";
 import type { User } from "../types";
 import {
@@ -62,11 +62,13 @@ export default function SettingsPage() {
     const [passwordErr, setPasswordErr] = useState<string | null>(null);
     const [showCurrentPassword, setShowCurrentPassword] = useState(false);
     const [showNewPassword, setShowNewPassword] = useState(false);
+    const [deleteBusy, setDeleteBusy] = useState(false);
     const {
         connect,
         connectBusy,
         refreshConnectStatus,
         beginConnectOnboarding,
+        openConnectDashboard,
     } = useStripeConnect(token);
 
     const profileForm = useForm<ProfileFormValues>({
@@ -169,11 +171,39 @@ export default function SettingsPage() {
         }
     }
 
-    async function handleRefreshConnectStatus() {
+    async function handlePayoutAction() {
         setPayoutErr(null);
-        const result = await refreshConnectStatus();
-        if (!result.ok && result.error) {
-            setPayoutErr(result.error);
+        setPayoutMsg(null);
+
+        if (connect?.account_id && connect.onboarding_complete && !connect.demo_bypass) {
+            const result = await openConnectDashboard();
+            if (!result.ok && result.error) {
+                setPayoutErr(result.error);
+            }
+            return;
+        }
+
+        await handleBeginConnectOnboarding("stripe");
+    }
+
+    async function handleDeleteAccount() {
+        if (deleteBusy) return;
+        const confirmed = window.confirm("Delete your account permanently? This cannot be undone.");
+        if (!confirmed) return;
+
+        setDeleteBusy(true);
+        setProfileErr(null);
+        setPasswordErr(null);
+        setPayoutErr(null);
+
+        try {
+            await apiDelete("/settings/account", token ?? undefined);
+            logout();
+            navigate("/", { replace: true });
+        } catch (error: unknown) {
+            setPayoutErr(readErrorMessage(error, "Unable to delete account right now."));
+        } finally {
+            setDeleteBusy(false);
         }
     }
 
@@ -251,7 +281,7 @@ export default function SettingsPage() {
                     copy="Your account details did not load properly. Head back home and try again in a moment."
                 />
             )}
-            {payoutErr && <div className="card formSection" style={{ color: "crimson" }}>{payoutErr}</div>}
+            {payoutErr && <div className="createInlineError">{payoutErr}</div>}
             {payoutMsg && <div className="card formSection settingsSavedNotice">{payoutMsg}</div>}
 
             {!settingsQuery.isLoading && (
@@ -336,14 +366,6 @@ export default function SettingsPage() {
                                 <AppButton onClick={updatePassword} variant="primary" disabled={passwordForm.formState.isSubmitting}>
                                     {passwordForm.formState.isSubmitting ? "Updating..." : "Update password"}
                                 </AppButton>
-                                <AppButton
-                                    onClick={() => {
-                                        logout();
-                                        navigate("/", { replace: true });
-                                    }}
-                                >
-                                    Log out
-                                </AppButton>
                             </div>
                         </div>
                         <div className="card formSection settingsPanel settingsPanel--profile">
@@ -389,7 +411,6 @@ export default function SettingsPage() {
                                 <AppButton onClick={saveProfile} disabled={profileForm.formState.isSubmitting} variant="primary">
                                     {profileForm.formState.isSubmitting ? "Saving..." : "Save changes"}
                                 </AppButton>
-                                <Link to="/dashboard" className="btn settingsPanelLinkBtn">Back to dashboard</Link>
                             </div>
                         </div>
                         <div className="card formSection settingsPanel settingsPanel--payouts">
@@ -432,24 +453,16 @@ export default function SettingsPage() {
                             <div className="rowInline settingsPanelActions">
                                 <AppButton
                                     variant="primary"
-                                    onClick={() => handleBeginConnectOnboarding("stripe")}
+                                    onClick={handlePayoutAction}
                                     disabled={connectBusy}
                                 >
                                     {connectBusy
                                         ? "Opening..."
-                                        : connect?.demo_bypass
-                                            ? "Connect Stripe instead"
+                                        : connect?.account_id && connect.onboarding_complete && !connect?.demo_bypass
+                                            ? "Open Stripe dashboard"
                                             : !connect?.account_id
                                                 ? "Connect Stripe"
-                                                : connect.onboarding_complete
-                                                    ? "Update Stripe details"
-                                                    : "Continue onboarding"}
-                                </AppButton>
-                                <AppButton
-                                    onClick={handleRefreshConnectStatus}
-                                    disabled={connectBusy}
-                                >
-                                    Refresh status
+                                                : "Continue Stripe setup"}
                                 </AppButton>
                             </div>
                         </div>
@@ -487,6 +500,27 @@ export default function SettingsPage() {
                                 </span>
                             </div>
                         </div>
+                </div>
+            )}
+
+            {!settingsQuery.isLoading && (
+                <div className="settingsFooterActions">
+                    <AppButton
+                        className="settingsFooterBtn settingsFooterBtn--logout"
+                        onClick={() => {
+                            logout();
+                            navigate("/", { replace: true });
+                        }}
+                    >
+                        Log out
+                    </AppButton>
+                    <AppButton
+                        className="settingsFooterBtn settingsFooterBtn--delete"
+                        onClick={handleDeleteAccount}
+                        disabled={deleteBusy}
+                    >
+                        {deleteBusy ? "Deleting..." : "Delete account"}
+                    </AppButton>
                 </div>
             )}
         </div>

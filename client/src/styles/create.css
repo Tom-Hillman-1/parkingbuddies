@@ -502,6 +502,12 @@
     font-weight: 700;
 }
 
+.wizardOptionHead {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.42rem;
+}
+
 .wizardFeatureGrid {
     display: flex;
     flex-wrap: wrap;
@@ -625,7 +631,7 @@
     border: 1px solid #dce7f6;
     border-radius: 22px;
     background: linear-gradient(135deg, #f9fcff 0%, #eef5ff 100%);
-    padding: 0.78rem;
+    padding: 0.68rem 0.72rem;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
@@ -643,25 +649,56 @@
 }
 
 .wizardAvailabilityCal .appCalendar--slots .rdp-month_grid {
-    border-spacing: 0.36rem 0.58rem;
+    border-spacing: 0.42rem 0.48rem;
 }
 
 .wizardAvailabilityCal .appCalendar--slots .rdp-day {
-    height: 4rem;
+    height: 3.72rem;
 }
 
 .wizardAvailabilityCal .appCalendar--slots .rdp-day_button {
-    width: 2.56rem;
-    height: 2.56rem;
-    min-width: 2.56rem;
-    min-height: 2.56rem;
+    width: 2.36rem;
+    height: 2.36rem;
+    min-width: 2.36rem;
+    min-height: 2.36rem;
 }
 
 .wizardAvailabilityCal .appCalendar--slots .rdp-day_button::after {
-    top: calc(100% + 0.24rem);
-    width: 3.45rem;
+    top: calc(100% + 0.26rem);
+    width: 3.34rem;
     font-size: 0.5rem;
-    line-height: 1.1;
+    line-height: 1.12;
+}
+
+.wizardAvailabilityRow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.44rem 0.5rem;
+}
+
+.wizardAvailabilityRowMain {
+    min-width: 0;
+    gap: 0.18rem;
+}
+
+.wizardAvailabilityRowDates {
+    font-size: 0.84rem;
+    font-weight: 700;
+    color: #223954;
+}
+
+.wizardAvailabilityRowTimes {
+    font-size: 0.72rem;
+    line-height: 1.2;
+}
+
+.wizardAvailabilityRemoveBtn {
+    min-height: 30px;
+    padding: 0.28rem 0.62rem;
+    justify-self: flex-start;
+    white-space: nowrap;
 }
 
 .wizardAvailabilityActions {
@@ -689,29 +726,48 @@
     }
 
     .wizardAvailabilityCal {
-        padding: 0.62rem 0.28rem 0.62rem;
+        padding: 0.54rem 0.08rem;
     }
 
     .wizardAvailabilityCal .appCalendar--slots .rdp-month_grid {
-        border-spacing: 0.64rem 0.76rem;
+        border-spacing: 0.6rem 0.38rem;
     }
 
     .wizardAvailabilityCal .appCalendar--slots .rdp-day {
-        height: 4.12rem;
+        height: 3.46rem;
     }
 
     .wizardAvailabilityCal .appCalendar--slots .rdp-day_button {
-        width: 2.38rem;
-        height: 2.38rem;
-        min-width: 2.38rem;
-        min-height: 2.38rem;
+        width: 2.2rem;
+        height: 2.2rem;
+        min-width: 2.2rem;
+        min-height: 2.2rem;
     }
 
     .wizardAvailabilityCal .appCalendar--slots .rdp-day_button::after {
-        top: calc(100% + 0.28rem);
-        width: 3.35rem;
+        top: calc(100% + 0.24rem);
+        width: 2.96rem;
         font-size: 0.46rem;
-        line-height: 1.05;
+        line-height: 1.04;
+    }
+
+    .wizardAvailabilityRow {
+        padding: 0.36rem 0.42rem;
+        gap: 0.44rem;
+    }
+
+    .wizardAvailabilityRowDates {
+        font-size: 0.77rem;
+    }
+
+    .wizardAvailabilityRowTimes {
+        font-size: 0.66rem;
+    }
+
+    .wizardAvailabilityRemoveBtn {
+        min-height: 26px;
+        padding: 0.22rem 0.48rem;
+        font-size: 0.72rem;
     }
 }
 
@@ -736,6 +792,7 @@
     border: 1px solid #e1e9f5;
     border-radius: 24px;
     box-shadow: 0 10px 24px rgba(16, 24, 40, 0.06);
+    padding: 0.78rem 0.9rem;
 }
 
 .wizardActionsLead {

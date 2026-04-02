@@ -58,6 +58,16 @@ app.use(
         },
     })
 );
+app.use((_req, res, next) => {
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    if (isProduction) {
+        res.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+    }
+    next();
+});
 app.post("/payments/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
 app.use(express.json({ limit: "16mb" }));
 

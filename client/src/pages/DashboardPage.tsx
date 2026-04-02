@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tab, TabList, TabPanel, Tabs } from "react-aria-components";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import AppPageState from "../components/AppPageState";
-import { AppButton } from "../components/ui/AppForm";
 import { AppDisclosure } from "../components/ui/AppDisclosure";
 import { apiGet, apiPost, readErrorMessage } from "../lib/api";
 import { useAuth, useStripeConnect } from "../lib/auth";
@@ -150,7 +149,6 @@ function DashboardDisclosureCard({
 }) {
     return (
         <AppDisclosure
-            defaultExpanded
             className={`dashboardDisclosure dashboardDisclosure--${tone}${isLast ? " is-last" : ""}`}
             triggerClassName="dashboardDisclosureTrigger"
             panelClassName="dashboardDisclosurePanel"
@@ -397,24 +395,6 @@ export default function DashboardPage() {
     const ownerPendingBidsNotificationCount = notificationCountById.get("owner-pending-bids") ?? 0;
     const payoutSetupNotificationCount = notificationCountById.get("stripe-payouts") ?? 0;
 
-    useEffect(() => {
-        if (!rawNotificationSummary.items.length) return;
-        markNotificationsSeen(rawNotificationSummary.items.filter((item) => item.section === selectedTab));
-    }, [rawNotificationSummary, selectedTab]);
-
-    const driverUpcoming = useMemo(() => {
-        const now = Date.now();
-        return bookings
-            .filter((booking) => new Date(booking.start_time).getTime() >= now)
-            .filter((booking) => String(booking.status ?? "").toLowerCase() !== "cancelled")
-            .filter((booking) => {
-                if (String(booking.status ?? "").toLowerCase() !== "pending") return true;
-                return isMoneyBookingSettled(booking);
-            })
-            .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
-            .slice(0, 8);
-    }, [bookings]);
-
     const ownerUpcoming = useMemo(() => {
         const now = Date.now();
         return ownerBookings
@@ -432,11 +412,11 @@ export default function DashboardPage() {
     const connectLabel = connect?.demo_bypass ? "Demo mode" : !connect?.account_id ? "Not connected" : connect.onboarding_complete ? "Stripe Connected" : "Onboarding incomplete";
     const connectBadgeClass = connect?.demo_bypass ? "badge badge--cool" : !connect?.account_id ? "badge badge--rose" : connect.onboarding_complete ? "badge badge--green" : "badge badge--warm";
 
-    const headerStats = [
-        { label: "My bookings", value: String(bookings.length) },
-        { label: "Pending bids", value: String(pendingOwnerBids.length + myAuctionBids.length) },
-        { label: "My listings", value: String(myListings.length) },
-        { label: "Points", value: `${me?.points_balance ?? 0} pts` },
+    const summaryRows = [
+        { label: "Bookings", value: String(bookings.length) },
+        { label: "Pending bids", value: String(pendingOwnerBids.length + myAuctionBids.length), alert: pendingOwnerBids.length + myAuctionBids.length > 0 },
+        { label: "Listings", value: String(myListings.length) },
+        { label: "Points", value: `${me?.points_balance ?? 0} pts`, points: true },
         { label: "Total earned", value: formatGbp(totalEarned) },
     ];
     const receiptDate = useMemo(() => formatDateDisplay(new Date()), []);
@@ -488,9 +468,9 @@ export default function DashboardPage() {
     const renderDriverBookingActions = (booking: Booking, extraAction?: ReactNode) => {
         const canOpenStripeReceipt = booking.pay_method === "money" && isMoneyBookingSettled(booking);
         const actionButtons = [
-            <Link key="local" to={`/pay/${booking.id}`} className="btn btn-primary dashboardSlotActionBtn">
-                Local receipt
-            </Link>,
+                <Link key="local" to={`/pay/${booking.id}`} className="btn btn-primary dashboardSlotActionBtn">
+                    Open Receipt
+                </Link>,
             canOpenStripeReceipt ? (
                 <button
                     key="stripe"
@@ -556,15 +536,6 @@ export default function DashboardPage() {
         if (!result.ok) setErr(result.error);
     };
 
-    const handleTopStripeDashboard = async () => {
-        if (!connect?.account_id || !connect.onboarding_complete || connect.demo_bypass) {
-            setSelectedTab("transactions");
-            window.setTimeout(() => payoutsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
-            return;
-        }
-        await handleOpenConnectDashboard();
-    };
-
     const slotTime = (start?: string | null, end?: string | null) => (start && end ? `${formatDateTimeLocal(start)} -> ${formatDateTimeLocal(end)}` : "");
 
     const renderBadgeRow = (items: Array<{ label: ReactNode; className?: string } | null | false>) =>
@@ -581,36 +552,50 @@ export default function DashboardPage() {
     return (
         <div className="container dashboardPage dashboardModern">
             <div className="dashboardHeroSplit">
-                <div className="pageHeader dashboardHero dashboardHeroCard">
+                <section className="dashboardHeroCard card" style={{ padding: "1rem 1.1rem" }}>
                     <div className="dashboardHeroBubble" />
                     <div className="dashboardHeroBubble dashboardHeroBubble--small" />
                     <div className="dashboardHeroBubble dashboardHeroBubble--low" />
                     <div className="dashboardHeroCopy">
-                        <div className="heroKicker">DASHBOARD</div>
-                        <div className="heroTitle">Your dashboard</div>
-                        <div className="heroSub muted">Bookings, listings, payouts, and points in one place.</div>
-                        <div className="dashboardHeroActions">
-                            <AppButton variant="primary" onPress={handleTopStripeDashboard} disabled={connectBusy}>
-                                {connectBusy ? "Opening..." : "Stripe Dashboard"}
-                            </AppButton>
+                        <div className="heroKicker">PARKINGBUDDIES</div>
+                        <div className="heroTitle">Dashboard</div>
+                        <div className="heroSub muted">
+                            Welcome back{me?.name ? `, ${me.name.split(" ")[0]}` : ""}. Keep track of your bookings, bids, listings, points, and payouts here.
                         </div>
+                        {connect?.onboarding_complete ? (
+                            <div className="dashboardHeroActions">
+                                <button className="btn btn-primary" onClick={handleOpenConnectDashboard} disabled={connectBusy}>
+                                    Open Stripe dashboard
+                                </button>
+                            </div>
+                        ) : null}
                     </div>
-                </div>
+                </section>
 
-                <aside className="dashboardHeroReceiptWindow" aria-label="Activity summary">
+                <aside className="dashboardHeroReceiptWindow dashboardHeroReceiptWindow--solo" aria-label="Dashboard summary">
                     <div className="dashboardHeroReceiptTop dashboardHeroReceiptTop--blue">
                         <div className="dashboardHeroBubble" />
                         <div className="dashboardHeroBubble dashboardHeroBubble--small" />
                         <div className="dashboardHeroReceiptHead">
-                            <span className="dashboardHeroReceiptTitle">ACTIVITY RECEIPT</span>
+                            <span className="dashboardHeroReceiptTitle">ACCOUNT SUMMARY</span>
                             <span className="dashboardHeroReceiptDate">{receiptDate}</span>
                         </div>
                     </div>
                     <div className="dashboardHeroReceiptBody">
-                        {headerStats.map((stat) => (
+                        {summaryRows.map((stat) => (
                             <div key={stat.label} className="dashboardHeroReceiptRow">
                                 <span className="dashboardHeroReceiptLabel">{stat.label}</span>
-                                <strong className={`dashboardHeroReceiptValue${stat.label === "Points" ? " dashboardHeroReceiptValue--points" : ""}`}>{stat.value}</strong>
+                                <strong
+                                    className={[
+                                        "dashboardHeroReceiptValue",
+                                        stat.points ? "dashboardHeroReceiptValue--points" : "",
+                                        stat.alert ? "dashboardHeroReceiptValue--alert" : "",
+                                    ]
+                                        .filter(Boolean)
+                                        .join(" ")}
+                                >
+                                    {stat.value}
+                                </strong>
                             </div>
                         ))}
                     </div>
@@ -624,13 +609,17 @@ export default function DashboardPage() {
                     copy="The latest activity did not load properly. Head back home and try again in a moment."
                 />
             )}
-            {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
-            {msg && <div className="card formSection">{msg}</div>}
+            {err && <div className="dashboardInlineNotice dashboardInlineNotice--error">{err}</div>}
+            {msg && <div className="dashboardInlineNotice dashboardInlineNotice--success">{msg}</div>}
             <Tabs
                 aria-label="Dashboard sections"
                 className="dashboardPanel"
                 selectedKey={selectedTab}
-                onSelectionChange={(key) => setSelectedTab(key as DashboardSection)}
+                onSelectionChange={(key) => {
+                    const nextSection = key as DashboardSection;
+                    setSelectedTab(nextSection);
+                    markNotificationsSeen(rawNotificationSummary.items.filter((item) => item.section === nextSection));
+                }}
             >
                 <TabList className="appTabList dashboardTabList">
                     {NAV_SECTIONS.map((section) => (
@@ -687,7 +676,12 @@ export default function DashboardPage() {
                                                         info={booking.owner_contact_info}
                                                     />
                                                 }
-                                                actions={renderDriverBookingActions(booking)}
+                                                actions={renderDriverBookingActions(
+                                                    booking,
+                                                    <Link key="listing" to={`/spots/${booking.parking_spot_id}`} className="btn">
+                                                        View listing
+                                                    </Link>
+                                                )}
                                                 errorText={paymentReceiptErrors[booking.id]}
                                             />
                                         );
@@ -717,7 +711,7 @@ export default function DashboardPage() {
                                                 time={slotTime(bid.start_time, bid.end_time)}
                                                 actions={
                                                     <div className="dashboardSlotActionGrid">
-                                                        <Link to={`/bids/${bid.id}`} className="btn btn-primary">View local receipt</Link>
+                                                        <Link to={`/bids/${bid.id}`} className="btn btn-primary">Open Receipt</Link>
                                                         <Link to={`/spots/${bid.parking_spot_id}`} className="btn">View listing</Link>
                                                         <div className="dashboardSlotActionGridWide">
                                                             <button className="btn" onClick={() => void cancelBid(bid.id)} disabled={busyId === bid.id}>
@@ -732,37 +726,6 @@ export default function DashboardPage() {
                                 </DashboardCollection>
                             </DashboardDisclosureCard>
 
-                            <DashboardDisclosureCard
-                                tone="driver"
-                                title="Upcoming Schedule"
-                                subtitle="Upcoming slots you booked from owners."
-                                count={driverUpcoming.length}
-                                countClassName="badge badge--green"
-                                isLast
-                            >
-                                <DashboardCollection isEmpty={driverUpcoming.length === 0} emptyText={DASHBOARD_EMPTY_COPY} className="dashboardScrollRow">
-                                    {driverUpcoming.map((booking) => {
-                                        const { spot, title, address } = resolveBookingSpot(booking);
-                                        return (
-                                            <SlotCard
-                                                key={booking.id}
-                                                tone="sage"
-                                                imageUrl={spot?.image_url}
-                                                title={title}
-                                                address={address}
-                                                amount={bookingAmountLabel(booking)}
-                                                badges={renderBadgeRow([{ label: "Upcoming", className: "badge badge--cool" }])}
-                                                time={slotTime(booking.start_time, booking.end_time)}
-                                                actions={renderDriverBookingActions(
-                                                    booking,
-                                                    <Link key="listing" to={`/spots/${booking.parking_spot_id}`} className="btn">View listing</Link>
-                                                )}
-                                                errorText={paymentReceiptErrors[booking.id]}
-                                            />
-                                        );
-                                    })}
-                                </DashboardCollection>
-                        </DashboardDisclosureCard>
                     </div>
                 </TabPanel>
 
@@ -846,7 +809,7 @@ export default function DashboardPage() {
                                 title="Pending Bids"
                                 subtitle="Approve or reject offers on your listings."
                                 count={pendingOwnerBids.length}
-                                countClassName="badge badge--warm"
+                                countClassName={pendingOwnerBids.length > 0 ? "badge badge--rose" : "badge badge--warm"}
                                 notificationCount={selectedTab === "manageListings" ? 0 : ownerPendingBidsNotificationCount}
                             >
                                 <DashboardCollection isEmpty={pendingOwnerBids.length === 0} emptyText={DASHBOARD_EMPTY_COPY} className="dashboardScrollRow">
@@ -864,7 +827,7 @@ export default function DashboardPage() {
                                                 actions={
                                                     <div className="dashboardSlotActionGrid">
                                                         <Link to={`/bids/${bid.id}`} className="btn dashboardSlotActionGridWide">
-                                                            View local receipt
+                                                            Open Receipt
                                                         </Link>
                                                         <button
                                                             className="btn btn-primary"
@@ -915,7 +878,7 @@ export default function DashboardPage() {
                                                 amount={bookingAmountLabel(booking, "+")}
                                                 badges={renderBadgeRow([{ label: "Upcoming", className: "badge badge--green" }])}
                                                 time={slotTime(booking.start_time, booking.end_time)}
-                                                actions={<Link to={`/spots/${booking.parking_spot_id}`} className="btn">View listing</Link>}
+                                                actions={<Link to={`/spots/${booking.parking_spot_id}`} className="btn dashboardSlotThinBtn">View listing</Link>}
                                             />
                                         );
                                     })}
@@ -992,15 +955,15 @@ export default function DashboardPage() {
                                                 <div className="dashboardTxLinks">
                                                     <button
                                                         type="button"
-                                                        className="dashboardTxLink dashboardMiniBtn is-dark"
+                                                        className="dashboardMiniBtn is-dark"
                                                         onClick={() => openPaymentReceipt(payment.booking_id)}
                                                         disabled={receiptLoadingId === payment.booking_id}
                                                         aria-busy={receiptLoadingId === payment.booking_id}
                                                     >
                                                         Stripe receipt
                                                     </button>
-                                                    <Link to={`/pay/${payment.booking_id}`} className="dashboardTxLink dashboardMiniBtn">
-                                                        Local receipt
+                                                    <Link to={`/pay/${payment.booking_id}`} className="dashboardMiniBtn">
+                                                        Open Receipt
                                                     </Link>
                                                 </div>
                                                 {paymentReceiptErrors[payment.booking_id] && (
@@ -1040,7 +1003,7 @@ export default function DashboardPage() {
                                     </div>
 
                                     <div className="dashboardStripeActions">
-                                        <button className="btn btn-primary" style={{width: "75%", marginLeft: "12.5%"}} onClick={handleOpenConnectDashboard} disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}>Open Stripe dashboard</button>
+                                        <button className="btn btn-primary" onClick={handleOpenConnectDashboard} disabled={connectBusy || !connect?.onboarding_complete || !!connect?.demo_bypass}>Open Stripe dashboard</button>
                                     </div>
                                 </div>
                         </DashboardDisclosureCard>

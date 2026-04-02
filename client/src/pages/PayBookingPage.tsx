@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Navigate, useParams } from "react-router-dom";
-import Lottie from "lottie-react";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { apiGet, apiPost, readErrorMessage } from "../lib/api";
@@ -9,7 +8,6 @@ import { useAuth } from "../lib/auth";
 import AppPageState from "../components/AppPageState";
 import { ReceiptCard, ReceiptDivider, ReceiptRow } from "../components/ReceiptCard";
 import { buildStripeElementsOptions } from "../lib/stripeElements";
-import loadingAnimation from "../assets/loading.json";
 import { formatDateRangeLocal, formatDateTimeLocal, formatGbp, STRIPE_MIN_GBP_PAYMENT, toFiniteNumber } from "./pagesShared";
 
 type Booking = {
@@ -97,24 +95,37 @@ function BookingCardForm({
     const stripe = useStripe();
     const elements = useElements();
     const [busy, setBusy] = useState(false);
+    const [elementReady, setElementReady] = useState(false);
 
     async function confirmPayment() {
-        if (!stripe || !elements) {
-            onError("Secure payment form is not ready yet.");
-            return;
-        }
-
-        const { error: submitError } = await elements.submit();
-        if (submitError) {
-            onError(submitError.message ?? "Please complete your payment details.");
-            return;
-        }
-
         setBusy(true);
         onProcessingChange(true);
         onError(null);
 
         try {
+            if (!stripe || !elements) {
+                onError("Secure payment form is not ready yet.");
+                return;
+            }
+            if (!elementReady) {
+                onError("Secure payment form is still loading. Please wait a moment and try again.");
+                return;
+            }
+
+            let submitErrorMessage: string | null = null;
+            try {
+                const { error: submitError } = await elements.submit();
+                if (submitError) {
+                    submitErrorMessage = submitError.message ?? "Please complete your payment details.";
+                }
+            } catch (error: unknown) {
+                submitErrorMessage = readErrorMessage(error, "Secure payment is still loading. Please try again.");
+            }
+            if (submitErrorMessage) {
+                onError(submitErrorMessage);
+                return;
+            }
+
             const result = await stripe.confirmPayment({
                 elements,
                 clientSecret,
@@ -136,6 +147,7 @@ function BookingCardForm({
             onError(readErrorMessage(error, "Unable to complete payment."));
             onProcessingChange(false);
         } finally {
+            onProcessingChange(false);
             setBusy(false);
         }
     }
@@ -147,11 +159,11 @@ function BookingCardForm({
                 {SECURE_PAYMENT_NOTICE}
             </div>
             <div style={{border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, marginTop: 12, minHeight: 230 }}>
-                <PaymentElement />
+                <PaymentElement onReady={() => setElementReady(true)} />
             </div>
             <div className="rowInline">
-                <button className="btn btn-primary" onClick={confirmPayment} disabled={busy} style={{marginLeft: 6}}>
-                    {busy ? "Processing..." : "Confirm Payment "}
+                <button className="btn btn-primary" onClick={confirmPayment} disabled={busy || !elementReady} style={{marginLeft: 6}}>
+                    {busy ? "Processing..." : elementReady ? "Confirm Payment" : "Loading secure form..."}
                 </button>
             </div>
         </div>
@@ -173,6 +185,7 @@ function BookingPaymentSection({
 }) {
     const [intent, setIntent] = useState<StripeIntentDetails | null>(null);
     const [intentLoading, setIntentLoading] = useState(true);
+    const [intentNonce, setIntentNonce] = useState(0);
     const paymentIntentStatus = String(intent?.payment_intent_status ?? "").toLowerCase();
 
     useEffect(() => {
@@ -195,7 +208,7 @@ function BookingPaymentSection({
         return () => {
             active = false;
         };
-    }, [booking.id, onError, token]);
+    }, [booking.id, intentNonce, onError, token]);
 
     if (!intent) {
         return (
@@ -204,6 +217,13 @@ function BookingPaymentSection({
                 <div className="muted" style={{ marginTop: 6 }}>
                     {intentLoading ? "Preparing Stripe's secure payment form..." : "The secure payment form is unavailable right now."}
                 </div>
+                {!intentLoading ? (
+                    <div className="rowInline" style={{ marginTop: 10 }}>
+                        <button className="btn" onClick={() => setIntentNonce((value) => value + 1)}>
+                            Try again
+                        </button>
+                    </div>
+                ) : null}
             </div>
         );
     }
@@ -249,7 +269,6 @@ export default function PayBookingPage() {
     const { token, user } = useAuth();
     const queryClient = useQueryClient();
     const [err, setErr] = useState<string | null>(null);
-    const [processingPayment, setProcessingPayment] = useState(false);
 
     const id = bookingId ?? "";
 
@@ -330,12 +349,10 @@ export default function PayBookingPage() {
 
     useEffect(() => {
         if (paymentComplete) {
-            setProcessingPayment(false);
             setErr(null);
             return;
         }
         if (receiptPaymentStatus === "failed") {
-            setProcessingPayment(false);
             setErr((current) => current ?? "Payment was not completed. Please check your details and try again.");
         }
     }, [paymentComplete, receiptPaymentStatus]);
@@ -411,8 +428,6 @@ export default function PayBookingPage() {
                     copy="The booking details did not load properly. Head back home and try again in a moment."
                 />
             )}
-            {err && <div className="spotAlert" style={{ marginBottom: 14, color: "#9f2f45", borderColor: "#f1c7d1", background: "#fff4f6" }}>{err}</div>}
-
             {!loadErr && booking && (
                 <>
                     <ReceiptCard
@@ -462,18 +477,16 @@ export default function PayBookingPage() {
                             booking={booking}
                             token={token}
                             onError={setErr}
-                            onProcessingChange={setProcessingPayment}
+                            onProcessingChange={() => undefined}
                             onPaymentSubmitted={refreshPaymentState}
                         />
                     )}
+                    {err && <div className="spotAlert spotAlert--danger" style={{ marginTop: 14 }}>{err}</div>}
                     {bookingMoneyBelowMinimum && (
-                        <div className="card formSection" style={{ marginTop: 14, marginBottom: 14 }}>
-                            <div className="h3">Secure card payment</div>
-                            <div className="muted" style={{ marginTop: 6 }}>
-                                Card payments in GBP must be at least {formatGbp(STRIPE_MIN_GBP_PAYMENT)}.
-                                This booking totals {formatGbp(booking.total_price_gbp)}, so Stripe cannot open the payment form for it.
-                                Please return to the listing and pick a longer slot or use points instead.
-                            </div>
+                        <div className="spotAlert spotAlert--danger" style={{ marginTop: 14, marginBottom: 14 }}>
+                            Card payments in GBP must be at least {formatGbp(STRIPE_MIN_GBP_PAYMENT)}.
+                            This booking totals {formatGbp(booking.total_price_gbp)}, so Stripe cannot open the payment form for it.
+                            Please return to the listing and pick a longer slot or use points instead.
                         </div>
                     )}
 
@@ -498,16 +511,6 @@ export default function PayBookingPage() {
                     )}
 
                 </>
-            )}
-
-            {processingPayment && (
-                <div className="createSuccessOverlay" role="status" aria-live="polite">
-                    <section className="createSuccessCard">
-                        <Lottie animationData={loadingAnimation} loop className="createSuccessAnimation" />
-                        <div className="h3">Processing payment...</div>
-                        <div className="createFieldHint">Confirming your card payment and opening the Stripe receipt.</div>
-                    </section>
-                </div>
             )}
         </div>
     );

@@ -34,6 +34,24 @@ const geocodeRateLimit = simpleRateLimit({
     message: "Too many address lookups. Please wait a moment and try again.",
     keyPrefix: "geocode",
 });
+const createListingRateLimit = simpleRateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 6,
+    message: "Too many listing publishes. Please wait a bit and try again.",
+    keyPrefix: "listing_create",
+});
+const updateListingRateLimit = simpleRateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 18,
+    message: "Too many listing edits. Please wait a bit and try again.",
+    keyPrefix: "listing_update",
+});
+const deleteListingRateLimit = simpleRateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 8,
+    message: "Too many listing removals. Please wait a bit and try again.",
+    keyPrefix: "listing_delete",
+});
 const PUBLIC_SPOT_SELECT = `
     id,
     owner_user_id,
@@ -304,7 +322,7 @@ async function fetchNominatim(path: "search" | "reverse", params: URLSearchParam
     }
 }
 
-router.post("/", requireAuth, async (req: AuthRequest, res) => {
+router.post("/", requireAuth, createListingRateLimit, async (req: AuthRequest, res) => {
     const parsedBody = parseWithSchema(listingPayloadSchema, req.body ?? {}, res, "listing_create");
     if (!parsedBody.ok) return;
     const body = parsedBody.data;
@@ -402,7 +420,7 @@ router.post("/", requireAuth, async (req: AuthRequest, res) => {
     }
 });
 
-router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
+router.patch("/:id", requireAuth, updateListingRateLimit, async (req: AuthRequest, res) => {
     const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "listing_update");
     if (!parsedParams.ok) return;
     const parsedBody = parseWithSchema(listingPayloadSchema, req.body ?? {}, res, "listing_update");
@@ -472,7 +490,7 @@ router.patch("/:id", requireAuth, async (req: AuthRequest, res) => {
     }
 });
 
-router.delete("/:id", requireAuth, async (req: AuthRequest, res) => {
+router.delete("/:id", requireAuth, deleteListingRateLimit, async (req: AuthRequest, res) => {
     const parsedParams = parseWithSchema(spotIdParamsSchema, req.params ?? {}, res, "listing_delete");
     if (!parsedParams.ok) return;
     const spotId = parsedParams.data.id;

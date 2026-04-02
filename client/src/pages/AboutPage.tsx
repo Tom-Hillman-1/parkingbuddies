@@ -716,7 +716,7 @@ export default function AboutPage() {
                     </AppField>
 
                     <div className="aboutPremiumFormActions">
-                        <AppButton type="submit" className="aboutPremiumBtn aboutPremiumBtn--primary" disabled={sending}>
+                        <AppButton type="submit" variant="primary" className="aboutPremiumBtn" disabled={sending}>
                             {sending ? "Sending..." : "Send message"}
                         </AppButton>
                         <a className="aboutPremiumBtn aboutPremiumBtn--secondary" href={`mailto:${SUPPORT_EMAIL}`}>

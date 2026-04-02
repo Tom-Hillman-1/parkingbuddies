@@ -7,6 +7,8 @@ import { AppTimePicker } from "../components/ui/AppTimePicker";
 import {
     formatDateDisplay,
     formatDateTimeCompact,
+    formatCalendarWindowLabelForDay,
+    mergeCalendarDayLabels,
     pad2,
     parseYmd,
     timeToMinutes,
@@ -68,6 +70,39 @@ export type SlotCalendarProps<TSpot extends AvailabilitySpot> = {
     onPickDate: (date: string) => void;
     disabled?: boolean;
 };
+
+export function getRangeCapacityState(bookings: SlotBookingLike[], start: Date, end: Date, capacity: number) {
+    const safeCapacity = Math.max(1, capacity);
+    if (!(start < end)) {
+        return { maxBooked: 0, spacesLeft: safeCapacity, isFull: false };
+    }
+
+    const events: Array<{ at: number; delta: number }> = [];
+    for (const booking of bookings) {
+        if (!booking.start_time || !booking.end_time) continue;
+        const bookingStart = new Date(booking.start_time);
+        const bookingEnd = new Date(booking.end_time);
+        if (Number.isNaN(bookingStart.getTime()) || Number.isNaN(bookingEnd.getTime()) || !(bookingStart < bookingEnd)) continue;
+        const overlapStart = Math.max(start.getTime(), bookingStart.getTime());
+        const overlapEnd = Math.min(end.getTime(), bookingEnd.getTime());
+        if (overlapEnd <= overlapStart) continue;
+        events.push({ at: overlapStart, delta: 1 });
+        events.push({ at: overlapEnd, delta: -1 });
+    }
+
+    events.sort((a, b) => (a.at === b.at ? a.delta - b.delta : a.at - b.at));
+    let active = 0;
+    let maxBooked = 0;
+    for (const event of events) {
+        active += event.delta;
+        if (active > maxBooked) {
+            maxBooked = active;
+        }
+    }
+
+    const spacesLeft = Math.max(0, safeCapacity - Math.min(safeCapacity, maxBooked));
+    return { maxBooked, spacesLeft, isFull: maxBooked >= safeCapacity };
+}
 
 export function SlotCalendar<TSpot extends AvailabilitySpot>({
     spot,
@@ -466,28 +501,13 @@ function buildSlotDayLabels(spot: AvailabilitySpot, fullyBookedDays = new Set<st
         for (let day = startOfDay(start); day <= end; day = addDays(day, 1)) {
             const key = toLocalDateInput(day);
             if (fullyBookedDays.has(key)) continue;
-            const nextLabel = formatWindowLabelForDay(window, key);
+            const nextLabel = formatCalendarWindowLabelForDay(key, window.date_from, window.date_to, window.start, window.end);
             if (!nextLabel) continue;
-
-            const existingLabel = labels.get(key);
-            if (existingLabel && existingLabel !== nextLabel) {
-                labels.set(key, "Multiple slots");
-                continue;
-            }
-
-            labels.set(key, nextLabel);
+            labels.set(key, mergeCalendarDayLabels(labels.get(key), nextLabel));
         }
     }
 
     return labels;
-}
-
-function formatWindowLabelForDay(window: WindowSlot, dayKey: string) {
-    if (dayKey < window.date_from || dayKey > window.date_to) return "";
-    if (window.date_from === window.date_to) return `${window.start}-${window.end}`;
-    if (dayKey === window.date_from) return `From ${window.start}`;
-    if (dayKey === window.date_to) return `Until ${window.end}`;
-    return "All day";
 }
 
 export function parseDurationQuery(raw: string) {

@@ -113,7 +113,7 @@ export default function BookingConfirmPage() {
                 <div className="heroSub muted">Review the summary before points are deducted.</div>
             </div>
 
-            {err && <div className="card formSection" style={{ color: "crimson" }}>{err}</div>}
+            {err && <div className="spotAlert spotAlert--danger">{err}</div>}
 
             <ReceiptCard
                 kicker="PARKINGBUDDIES"
@@ -136,7 +136,7 @@ export default function BookingConfirmPage() {
                     This booking is confirmed immediately once you continue, so this extra check prevents accidental payments.
                 </div>
                 {insufficientPoints && (
-                    <div className="tiny" style={{ color: "#a23636", marginTop: 8 }}>
+                    <div className="spotAlert spotAlert--danger" style={{ marginTop: 8 }}>
                         Not enough points. You need {totalPoints} pts and currently have {userPoints} pts.
                     </div>
                 )}

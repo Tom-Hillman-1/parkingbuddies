@@ -28,6 +28,13 @@
 
 .dashboardModern .dashboardHeroActions {
     margin-top: 0.95rem;
+    display: flex;
+    justify-content: flex-start;
+}
+
+.dashboardModern .dashboardHeroActions .btn {
+    min-width: 0;
+    white-space: nowrap;
 }
 
 .dashboardModern .dashboardHeroBubble {
@@ -68,6 +75,16 @@
     display: grid;
     grid-template-rows: 32% 1fr;
     min-height: 270px;
+}
+
+.dashboardModern .dashboardSummaryWrap {
+    display: flex;
+    justify-content: flex-start;
+    margin-bottom: 0.8rem;
+}
+
+.dashboardModern .dashboardHeroReceiptWindow--solo {
+    width: min(360px, 100%);
 }
 
 .dashboardModern .dashboardHeroReceiptTop {
@@ -140,6 +157,10 @@
 
 .dashboardModern .dashboardHeroReceiptValue--points {
     color: #2f6ee8;
+}
+
+.dashboardModern .dashboardHeroReceiptValue--alert {
+    color: #b13247;
 }
 
 .dashboardModern .dashboardTabList {
@@ -315,7 +336,7 @@
     overflow-y: hidden;
     gap: 12px;
     scroll-snap-type: x mandatory;
-    touch-action: pan-x;
+    touch-action: auto;
     padding: 0.1rem 0.12rem 0.5rem;
     width: 100%;
     max-width: 100%;
@@ -480,25 +501,6 @@
     display: flex;
     align-items: center;
     gap: 8px;
-}
-
-.dashboardModern .dashboardTxLink {
-    border: 0;
-    background: none;
-    padding: 0;
-    font-family: inherit;
-    font-weight: 600;
-    color: #4f6ef7;
-    text-decoration: none;
-    cursor: pointer;
-}
-
-.dashboardModern .dashboardTxLink {
-    font-size: 10px;
-}
-
-.dashboardModern .dashboardTxLink:hover {
-    text-decoration: underline;
 }
 
 .dashboardModern .dashboardStripLinkBtn {
@@ -697,13 +699,9 @@
     grid-column: 1 / -1;
 }
 
-.dashboardModern .dashboardTxLink:disabled {
-    color: #94a2d5;
+.dashboardModern .dashboardTxLinks .dashboardMiniBtn:disabled {
+    opacity: 0.58;
     cursor: default;
-}
-
-.dashboardModern .dashboardTxLink:disabled:hover {
-    text-decoration: none;
 }
 
 .dashboardModern .dashboardTxLinks .dashboardMiniBtn {
@@ -717,19 +715,23 @@
 }
 
 .dashboardModern .dashboardStripeActions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
+    display: flex;
+    justify-content: flex-start;
     gap: 0.6rem;
 }
 
 .dashboardModern .dashboardStripeActions .btn {
-    width: 100%;
     min-width: 0;
     justify-content: center;
-    white-space: normal;
+    white-space: nowrap;
     text-align: center;
     line-height: 1.25;
     padding-inline: 0.8rem;
+}
+
+.dashboardModern .dashboardStripeActions .btn {
+    min-height: 44px;
+    padding-inline: 1rem;
 }
 
 .dashboardModern .dashboardSlotCard {
@@ -941,6 +943,14 @@
     min-width: 0;
 }
 
+.dashboardModern .dashboardSlotThinBtn {
+    width: 100%;
+    min-height: 34px;
+    padding: 0.35rem 0.72rem;
+    border-color: #dce4f0;
+    background: #fff;
+}
+
 .dashboardModern .dashboardSlotActions .dashboardSlotActionBtn:disabled {
     opacity: 0.7;
     cursor: default;
@@ -982,6 +992,10 @@
 
     .dashboardModern .dashboardHeroReceiptWindow {
         max-width: 320px;
+    }
+
+    .dashboardModern .dashboardHeroReceiptWindow--solo {
+        width: min(360px, 100%);
     }
 
 }

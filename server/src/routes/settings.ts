@@ -14,6 +14,7 @@ import {
 } from "../lib/shared";
 import { parseWithSchema } from "../lib/validation";
 import { serverError } from "../lib/errors";
+import { simpleRateLimit } from "../lib/rateLimit";
 import { issueAuthToken } from "../lib/tokens";
 
 const router = Router();
@@ -25,6 +26,24 @@ const profileBodySchema = z.object({
 const passwordBodySchema = z.object({
     currentPassword: z.string(),
     newPassword: z.string(),
+});
+const profileUpdateRateLimit = simpleRateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 12,
+    message: "Too many profile updates. Please wait a bit and try again.",
+    keyPrefix: "settings_profile",
+});
+const passwordUpdateRateLimit = simpleRateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 6,
+    message: "Too many password changes. Please wait a bit and try again.",
+    keyPrefix: "settings_password",
+});
+const deleteAccountRateLimit = simpleRateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 2,
+    message: "Too many account deletion attempts. Please wait a bit and try again.",
+    keyPrefix: "settings_delete_account",
 });
 
 router.get("/", requireAuth, async (req: AuthRequest, res) => {
@@ -44,7 +63,7 @@ router.get("/", requireAuth, async (req: AuthRequest, res) => {
     }
 });
 
-router.patch("/profile", requireAuth, async (req: AuthRequest, res) => {
+router.patch("/profile", requireAuth, profileUpdateRateLimit, async (req: AuthRequest, res) => {
     const parsedBody = parseWithSchema(profileBodySchema, req.body ?? {}, res, "settings_profile");
     if (!parsedBody.ok) return;
     const { name, email } = parsedBody.data;
@@ -158,7 +177,7 @@ router.patch("/profile", requireAuth, async (req: AuthRequest, res) => {
     }
 });
 
-router.patch("/password", requireAuth, async (req: AuthRequest, res) => {
+router.patch("/password", requireAuth, passwordUpdateRateLimit, async (req: AuthRequest, res) => {
     const parsedBody = parseWithSchema(passwordBodySchema, req.body ?? {}, res, "settings_password");
     if (!parsedBody.ok) return;
     const { currentPassword, newPassword } = parsedBody.data;
@@ -212,6 +231,23 @@ router.patch("/password", requireAuth, async (req: AuthRequest, res) => {
         });
     } catch (e) {
         return serverError(res, e, "Unable to update password right now");
+    }
+});
+
+router.delete("/account", requireAuth, deleteAccountRateLimit, async (req: AuthRequest, res) => {
+    try {
+        const deleted = await pool.query(
+            `DELETE FROM users
+             WHERE id = $1
+             RETURNING id`,
+            [req.userId]
+        );
+        if (!deleted.rowCount) {
+            return res.status(404).json({ ok: false, error: "User not found" });
+        }
+        return res.json({ ok: true });
+    } catch (e) {
+        return serverError(res, e, "Unable to delete account right now");
     }
 });
 

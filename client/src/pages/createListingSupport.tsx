@@ -7,7 +7,9 @@ import { AppButton } from "../components/ui/AppForm";
 import { InfoTooltip } from "../components/ui/InfoTooltip";
 import {
     formatDateDisplay,
+    formatCalendarWindowLabelForDay,
     isTimeHHMM as isTime,
+    mergeCalendarDayLabels,
     parseYmd,
     timeToMinutes as minutes,
     toLocalDateInput,
@@ -39,7 +41,7 @@ export type ListingFeature =
     | "near_station"
     | "near_airport";
 
-export type GeocodeSuggestion = { display_name: string; lat: string; lon: string };
+export type GeocodeSuggestion = { display_name: string; lat: string; lon: string; kind?: "manual" };
 export type AvailabilityWindow = {
     id: string;
     from: string;
@@ -439,14 +441,20 @@ export function AvailabilityCalendarSection({
             {windows.length > 0 && (
                 <div className="stack">
                     {windows.map((window) => (
-                        <div key={window.id} className="wizardInlineRow wizardInlineRow--intro">
-                            <div className="wizardInlineValue">
-                                {formatYmdLabel(window.from)} {" -> "} {formatYmdLabel(window.to)}
-                                <div className="tiny muted">
+                        <div key={window.id} className="wizardInlineRow wizardInlineRow--intro wizardAvailabilityRow">
+                            <div className="wizardInlineValue wizardAvailabilityRowMain">
+                                <div className="wizardAvailabilityRowDates">
+                                    {formatYmdLabel(window.from)} {" -> "} {formatYmdLabel(window.to)}
+                                </div>
+                                <div className="tiny muted wizardAvailabilityRowTimes">
                                     {window.start}-{window.end}
                                 </div>
                             </div>
-                            <button type="button" className="btn btn-ghost" onClick={() => onRemoveWindow(window.id)}>
+                            <button
+                                type="button"
+                                className="btn btn-ghost wizardAvailabilityRemoveBtn"
+                                onClick={() => onRemoveWindow(window.id)}
+                            >
                                 Remove
                             </button>
                         </div>
@@ -513,10 +521,11 @@ function buildAvailabilityDayLabels(windows: AvailabilityWindow[]) {
     const labels = new Map<string, string>();
 
     for (const window of windows) {
-        // The month view gets one tiny line of helper text, so we keep the
-        // last saved slot for a day instead of trying to squeeze everything in.
         for (let dayKey = window.from; dayKey <= window.to; ) {
-            labels.set(dayKey, formatAvailabilityLabelForDay(window, dayKey));
+            const nextLabel = formatCalendarWindowLabelForDay(dayKey, window.from, window.to, window.start, window.end);
+            if (nextLabel) {
+                labels.set(dayKey, mergeCalendarDayLabels(labels.get(dayKey), nextLabel));
+            }
             const nextDay = parseYmd(dayKey);
             if (!nextDay) break;
             nextDay.setDate(nextDay.getDate() + 1);
@@ -525,11 +534,4 @@ function buildAvailabilityDayLabels(windows: AvailabilityWindow[]) {
     }
 
     return labels;
-}
-
-function formatAvailabilityLabelForDay(window: AvailabilityWindow, dayKey: string) {
-    if (window.from === window.to) return `${window.start}-${window.end}`;
-    if (dayKey === window.from) return `From ${window.start}`;
-    if (dayKey === window.to) return `Until ${window.end}`;
-    return "All day";
 }

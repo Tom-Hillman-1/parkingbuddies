@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -52,8 +52,6 @@ export default function LoginPage() {
         }
     });
 
-    const statusTone = useMemo(() => (msg ? (msg.toLowerCase().includes("fail") ? "crimson" : "inherit") : "inherit"), [msg]);
-
     return (
         <div className="container authPage">
             <div className="authGrid authGrid--single">
@@ -66,7 +64,7 @@ export default function LoginPage() {
                         </div>
                     </div>
 
-                    {msg && <div className="card formSection" style={{ color: statusTone }}>{msg}</div>}
+                    {msg && <div className="spotAlert spotAlert--danger">{msg}</div>}
 
                     <form onSubmit={onSubmit} className="authForm">
                         <AppField label="Email" error={form.formState.errors.email?.message}>

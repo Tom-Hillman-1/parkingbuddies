@@ -475,7 +475,11 @@ export default function CreateListingPage() {
 
         applyPickedLocation(nextLat, nextLng, suggestion.display_name);
         setAddressSuggestions([]);
-        setAddressSearchMessage("Location selected. You can still fine-tune the pin on the map.");
+        setAddressSearchMessage(
+            suggestion.kind === "manual"
+                ? "Manual address selected. You can still fine-tune the pin on the map."
+                : "Location selected. You can still fine-tune the pin on the map."
+        );
     }
 
     async function onAddressSearchClick() {
@@ -508,7 +512,15 @@ export default function CreateListingPage() {
                 .slice(0, 3);
 
             if (!matches.length) {
-                setAddressSearchMessage("No close matches found. Try adding a postcode or city.");
+                setAddressSuggestions([
+                    {
+                        display_name: query,
+                        lat: String(parsedCoords?.lat ?? DEFAULT_CENTER[0]),
+                        lon: String(parsedCoords?.lng ?? DEFAULT_CENTER[1]),
+                        kind: "manual",
+                    },
+                ]);
+                setAddressSearchMessage("No close matches found. You can still use your typed address and move the pin manually.");
                 return;
             }
 
@@ -941,10 +953,10 @@ export default function CreateListingPage() {
                     </AppField>
 
                     <div className="wizardLabelRow wizardLabelRow--small">
-                        <span className="wizardPricingHead">Space features</span>
+                        <span className="wizardPricingHead">Select features</span>
                     </div>
                     <AppMultiToggleGroup
-                        ariaLabel="Space features"
+                        ariaLabel="Select features"
                         className="wizardFeatureGrid"
                         itemClassName="wizardFeatureChip"
                         values={features}
@@ -994,10 +1006,6 @@ export default function CreateListingPage() {
                 <div className="wizardSection wizardSection--pricing">
                     <div className="wizardLabelRow">
                         <div className="wizardSubTitle">Pricing setup</div>
-                        <Tooltip
-                            label="Pricing help"
-                            text="Hourly works best for shorter flexible stays. Daily charges one full day for each booked day, even if the driver stays for only part of it. Weekly is best for longer stays and charges by full weeks."
-                        />
                     </div>
 
                     {mode !== "free" && (
@@ -1014,15 +1022,14 @@ export default function CreateListingPage() {
                                 onChange={setPriceUnit}
                                 options={PRICE_UNIT_CHOICES.map((unit) => ({
                                     id: unit.id,
-                                    content: <span className="wizardOptionTitle">{unit.label}</span>,
+                                    content: (
+                                        <span className="wizardOptionHead">
+                                            <span className="wizardOptionTitle">{unit.label}</span>
+                                            <Tooltip label={`${unit.label} pricing help`} text={PRICE_UNIT_HELP[unit.id]} />
+                                        </span>
+                                    ),
                                 }))}
                             />
-                            <div className="wizardInlineText">
-                                {PRICE_UNIT_HELP[priceUnit]}
-                            </div>
-                            <div className="createFieldHint">
-                                Hourly is usually best for short visits, daily works best for day-long parking, and weekly suits longer stays.
-                            </div>
                         </div>
                     )}
 
@@ -1166,7 +1173,13 @@ export default function CreateListingPage() {
                                     >
                                         <span className="addressSuggestionRank">{index + 1}</span>
                                         <span className="addressSuggestionCopy">
-                                            <strong>{index === 0 ? "Closest match" : `Option ${index + 1}`}</strong>
+                                            <strong>
+                                                {suggestion.kind === "manual"
+                                                    ? "Use typed address"
+                                                    : index === 0
+                                                        ? "Closest match"
+                                                        : `Option ${index + 1}`}
+                                            </strong>
                                             <span>{suggestion.display_name}</span>
                                         </span>
                                     </button>
@@ -1458,32 +1471,35 @@ export default function CreateListingPage() {
                     <div className="createConnectNotice">
                         <div className="h3">Stripe onboarding needed</div>
                         <div className="createFieldHint">{connectNotice}</div>
-                        <div className="createConnectNoticeActions">
-                            <AppButton
-                                type="button"
-                                variant="primary"
-                                onPress={() => void handleConnectStripeFromPublish()}
-                                disabled={connectBusy}
-                            >
-                                {connectBusy ? "Opening..." : "Complete Stripe onboarding"}
-                            </AppButton>
-                        </div>
                     </div>
                 )}
 
                 {error && <div className="createInlineError">{error}</div>}
 
-                <SheetActions
-                    secondaryLabel="Back"
-                    onSecondary={() => {
-                        closeSheet();
-                        setError("");
-                    }}
-                    secondaryDisabled={saving}
-                    primaryLabel={saving ? "Saving..." : isEdit ? "Save listing" : "Publish listing"}
-                    onPrimary={() => void submitListing()}
-                    primaryDisabled={!publishReady || saving}
-                />
+                {connectNotice ? (
+                    <div className="createSheetActions">
+                        <AppButton
+                            type="button"
+                            variant="primary"
+                            onPress={() => void handleConnectStripeFromPublish()}
+                            disabled={connectBusy}
+                        >
+                            {connectBusy ? "Opening..." : "Complete Stripe onboarding"}
+                        </AppButton>
+                    </div>
+                ) : (
+                    <SheetActions
+                        secondaryLabel="Back"
+                        onSecondary={() => {
+                            closeSheet();
+                            setError("");
+                        }}
+                        secondaryDisabled={saving}
+                        primaryLabel={saving ? "Saving..." : isEdit ? "Save listing" : "Publish listing"}
+                        onPrimary={() => void submitListing()}
+                        primaryDisabled={!publishReady || saving}
+                    />
+                )}
             </WizardSheet>
 
             <WizardSheet
