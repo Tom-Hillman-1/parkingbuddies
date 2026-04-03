@@ -131,7 +131,7 @@ export default function BidReceiptPage() {
     const confirmationTitle = acceptedBid ? "Booking confirmed" : "Bid submitted";
     const confirmationCopy = acceptedBid
         ? "Your accepted bid has been turned into a booking. The full details are below."
-        : "Your bid is in. It is now waiting for the owner's decision.";
+        : "The bid has been submitted. It is now waiting for the owner's decision.";
 
     async function cancelBid() {
         if (!token || !bid?.can_cancel || cancelBusy) return;
@@ -176,7 +176,7 @@ export default function BidReceiptPage() {
                         {bid.pay_method === "points" ? (
                             <>
                                 <ReceiptRow label="Bid rate" value={`${Number(bid.amount_points ?? 0)} pts / ${bid.price_unit ?? "hour"}`} />
-                                <ReceiptRow label="Total (estimated)" value={`${totalPoints} pts`} />
+                                <ReceiptRow label="Total amount" value={`${totalPoints} pts`} />
                             </>
                         ) : (
                             <ReceiptRow label="Amount" value={formatGbp(bid.amount_gbp)} />
@@ -196,10 +196,10 @@ export default function BidReceiptPage() {
                         <div className="muted" style={{ marginTop: 6 }}>
                             {bid.status === "pending"
                                 ? bid.pay_method === "points"
-                                    ? "Your points bid is pending approval. No points leave your balance unless the owner accepts it."
-                                    : "Your card is only authorized at this stage. You are charged only if the owner accepts the bid."
+                                    ? "This points bid is pending approval. No points leave your balance unless the owner accepts it."
+                                    : "The card is only authorized at this stage. You are charged only if the owner accepts the bid."
                                 : bid.status === "accepted"
-                                    ? "Your bid was accepted and the booking is confirmed."
+                                    ? "This bid was accepted and the booking is confirmed."
                                     : "This bid was rejected by the owner."}
                         </div>
                         <div className="actionInlineGrid" style={{ marginTop: 10 }}>
