@@ -1277,6 +1277,9 @@ export default function CreateListingPage() {
                             <section className="wizardRight">
                                 <div className="wizardIntro">
                                     <div className="wizardIntroCard">
+                                        <div className="wizardLabelRow">
+                                            <div className="wizardSubTitle">Model:</div>
+                                        </div>
                                         <AppRadioCards
                                             ariaLabel="Listing model"
                                             className="wizardTileGrid"
@@ -1573,6 +1576,8 @@ export default function CreateListingPage() {
         </div>
     );
 }
+
+
 
 
 

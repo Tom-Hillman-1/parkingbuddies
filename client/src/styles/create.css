@@ -929,39 +929,6 @@
     }
 }
 
-
-
-
-
-@media (max-width: 720px) {
-    .wizardSplit--intro .wizardActions {
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        column-gap: 0.56rem;
-        row-gap: 0.44rem;
-    }
-
-    .wizardSplit--intro .wizardActionsLead,
-    .wizardSplit--intro .wizardActions > :last-child {
-        width: 100%;
-        min-width: 0;
-    }
-
-    .wizardSplit--intro .wizardActions .btn,
-    .wizardSplit--intro .wizardActions button {
-        width: 100%;
-        min-width: 0;
-        padding-inline: 0.82rem;
-        justify-content: center;
-        white-space: nowrap;
-    }
-
-    .wizardSplit--intro .wizardActionHint {
-        grid-column: 1 / -1;
-        min-height: 0;
-    }
-}
-
-
 @media (max-width: 720px) {
     .wizardSplit--intro .wizardActions {
         grid-template-columns: auto auto;
@@ -981,5 +948,57 @@
         min-width: 0;
         padding-inline: 0.82rem;
         white-space: nowrap;
+    }
+
+    .wizardSplit--intro .wizardActionHint {
+        grid-column: 1 / -1;
+        min-height: 0;
+    }
+}
+
+@media (min-width: 1081px) {
+    .wizardSplit--intro .wizardLeft {
+        padding: 0.66rem 0.8rem;
+        gap: 0.4rem;
+    }
+
+    .wizardSplit--intro .wizardRight {
+        padding: 0.42rem 0.5rem;
+    }
+
+    .wizardSplit--intro .wizardIntroCard {
+        width: min(740px, 100%);
+        min-height: 290px;
+        padding: 0.84rem 0.92rem;
+        gap: 0.64rem;
+        grid-template-rows: minmax(0, 1fr) auto;
+    }
+
+    .wizardSplit--intro .wizardTileGrid {
+        gap: 0.56rem;
+        align-self: stretch;
+        grid-auto-rows: 1fr;
+    }
+
+    .wizardSplit--intro .wizardTile {
+        min-height: 148px;
+        padding: 0.8rem 0.84rem;
+        gap: 0.28rem;
+    }
+
+    .wizardSplit--intro .wizardTileFooter {
+        padding-top: 0.16rem;
+    }
+
+    .wizardSplit--intro .wizardCardFoot {
+        margin-top: auto;
+        padding-top: 0.16rem;
+    }
+
+    .wizardSplit--intro .wizardActions .btn,
+    .wizardSplit--intro .wizardActions button {
+        min-height: 52px;
+        padding-block: 0.78rem;
+        padding-inline: 1rem;
     }
 }
