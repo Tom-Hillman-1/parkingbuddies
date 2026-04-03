@@ -104,12 +104,12 @@ export const LISTING_MODEL_OPTIONS: Array<{ mode: Mode; title: string; copy: str
     { mode: "free", title: "Free", copy: "No payment required for this listing.", tone: "mint", help: "Bookings are free to drivers and no payment is collected." },
 ];
 
-export const CREATE_FLOW_COPY: Record<FlowStep, { panelTitle: string; panelCopy: string; panelTone: Tone; title: string; subtitle: string }> = {
-    2: { panelTitle: "Basics", panelCopy: "Set the core details so drivers quickly understand your space.", panelTone: "blue", title: "Listing information", subtitle: "Keep this short, clear, and practical." },
-    3: { panelTitle: "Pricing", panelCopy: "Choose how each booking is charged, then decide whether drivers can pay in money, points, or both.", panelTone: "mint", title: "Pricing", subtitle: "Pick a charging method that matches how long drivers usually stay." },
-    4: { panelTitle: "Availability", panelCopy: "Add one or more date/time slots to describe when the listing is available.", panelTone: "lilac", title: "Availability", subtitle: "Pick two dates, then add a slot for that range." },
-    5: { panelTitle: "Location", panelCopy: "Add a searchable address and confirm the exact map pin.", panelTone: "cream", title: "Location", subtitle: "Search once, then fine-tune by tapping on the map." },
-    6: { panelTitle: "Images", panelCopy: "A clear image improves trust and click-through for drivers.", panelTone: "sky", title: "Images", subtitle: "Optional, but strongly recommended." },
+export const CREATE_FLOW_COPY: Record<FlowStep, { panelTitle: string; panelCopy: string; panelTone: Tone }> = {
+    2: { panelTitle: "Basics", panelCopy: "Set the core details so drivers quickly understand your space.", panelTone: "blue" },
+    3: { panelTitle: "Pricing", panelCopy: "Choose how each booking is charged, then decide whether drivers can pay in money, points, or both.", panelTone: "mint" },
+    4: { panelTitle: "Availability", panelCopy: "Add one or more date/time slots to describe when the listing is available.", panelTone: "lilac" },
+    5: { panelTitle: "Location", panelCopy: "Add a searchable address and confirm the exact map pin.", panelTone: "cream" },
+    6: { panelTitle: "Images", panelCopy: "A clear image improves trust and click-through for drivers.", panelTone: "sky" },
 };
 
 export const PRICE_UNIT_CHOICES: Array<{ id: PriceUnit; label: string }> = [{ id: "hour", label: "Hourly" }, { id: "day", label: "Daily" }, { id: "week", label: "Weekly" }];
@@ -535,4 +535,5 @@ function buildAvailabilityDayLabels(windows: AvailabilityWindow[]) {
 
     return labels;
 }
+
 

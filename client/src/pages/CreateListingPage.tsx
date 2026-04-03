@@ -155,7 +155,7 @@ function buildEditSnapshot(listing: ParkingSpot, ownerContact: OwnerContactForEd
     };
 }
 export default function CreateListingPage() {
-    const { token, user } = useAuth();
+    const { token } = useAuth();
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const queryClient = useQueryClient();
@@ -1274,14 +1274,9 @@ export default function CreateListingPage() {
                                 </p>
                             </aside>
 
-                            <section className="wizardRight wizardRight--intro">
+                            <section className="wizardRight">
                                 <div className="wizardIntro">
                                     <div className="wizardIntroCard">
-                                        <h1 className="wizardIntroTitle">What kind of listing are you creating?</h1>
-                                        <p className="wizardIntroSub">
-                                            Pick your model first, then choose the spaces and details for {user?.name ?? "you"}.
-                                        </p>
-
                                         <AppRadioCards
                                             ariaLabel="Listing model"
                                             className="wizardTileGrid"
@@ -1363,11 +1358,6 @@ export default function CreateListingPage() {
 
                             <section className="wizardRight">
                                 <div className="wizardCard">
-                                    <header className="wizardCardHead">
-                                        <h3 className="h2 wizardCardTitle">{stepMeta.title}</h3>
-                                        <p className="wizardCardSub">{stepMeta.subtitle}</p>
-                                    </header>
-
                                     <div className="wizardCardBody">{renderStepBody(flowStep)}</div>
                                     <footer className="wizardCardFoot">
                                         <div className="wizardActions">
@@ -1583,6 +1573,12 @@ export default function CreateListingPage() {
         </div>
     );
 }
+
+
+
+
+
+
 
 
 
