@@ -919,14 +919,12 @@ label > span:first-child {
     min-height: 40px;
 }
 
-.homeFilterSectionLabel {
-    color: #52647b;
-    font-size: 0.85rem;
-    font-weight: 700;
-}
-
+.homeFilterSectionLabel,
 .homeFilterSectionLabel.is-set {
     color: #20344f;
+    font-size: 0.92rem;
+    font-weight: 900;
+    letter-spacing: 0.01em;
 }
 
 .homeFilterSectionValue {
@@ -3024,4 +3022,8 @@ label > span:first-child {
         transform: translate(8%, -8%) !important;
     }
 }
+
+
+
+
 

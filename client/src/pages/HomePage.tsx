@@ -258,7 +258,7 @@ export default function HomePage() {
             if (!target) return;
 
             const navHeight = document.querySelector<HTMLElement>(".nav")?.getBoundingClientRect().height ?? 0;
-            const top = target.getBoundingClientRect().top + window.scrollY - navHeight - 12;
+            const top = target.getBoundingClientRect().top + window.scrollY - navHeight - 475;
 
             window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
         });
@@ -455,9 +455,6 @@ export default function HomePage() {
         );
     }
 
-    function goToSpots() {
-        scrollToFirstSpot();
-    }
 
     function focusSpotOnMap(spotId: string, shouldScroll: boolean) {
         setSelectedId(spotId);
@@ -500,7 +497,7 @@ export default function HomePage() {
                 </p>
                 <div className="home-actions">
                     <Link to="/create-listing" className="btn btn-primary">List a spot</Link>
-                    <button type="button" className="btn btn-ghost" onClick={goToSpots}>View spots</button>
+                    <button type="button" className="btn btn-ghost" onClick={scrollToFirstSpot}>View spots</button>
                 </div>
                 {heroCityAnimationData ? (
                     <div className="home-hero-city" aria-hidden="true">
