@@ -51,6 +51,7 @@ const HOME_HERO_BACKGROUND_URL = new URL("../assets/loading_hero.json", import.m
 const HOME_HERO_CITY_URL = new URL("../assets/city.json", import.meta.url).href;
 const HOME_MAP_FOCUS_RADIUS_KM = 5;
 const HOME_ADDRESS_RESULT_LIMIT = 10;
+const MAP_COORD_TOLERANCE = 0.000001;
 const DEFAULT_MODE_FILTER: ModeFilter = { free: true, rent: true, auction: true };
 const HOME_DURATION_OPTIONS = [
     { value: 30, label: "30 min" },
@@ -232,6 +233,16 @@ function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: num
     return 2 * earthKm * Math.asin(Math.sqrt(x));
 }
 
+function hasUsableMapCoordinates(coords: { lat: number; lng: number }) {
+    return Number.isFinite(coords.lat)
+        && Number.isFinite(coords.lng)
+        && (Math.abs(coords.lat) > MAP_COORD_TOLERANCE || Math.abs(coords.lng) > MAP_COORD_TOLERANCE);
+}
+
+function displayCoordinates(coords: { lat: number; lng: number }) {
+    return hasUsableMapCoordinates(coords) ? coords : LONDON;
+}
+
 export default function HomePage() {
     const [spots, setSpots] = useState<ParkingSpot[]>([]);
     const [loading, setLoading] = useState(true);
@@ -354,14 +365,13 @@ export default function HomePage() {
     const anchor = useMemo(() => {
         if (activeSearchLocation) return { lat: activeSearchLocation.lat, lng: activeSearchLocation.lng };
         if (userLoc) return userLoc;
-        if (filtered[0]) return { lat: filtered[0].lat, lng: filtered[0].lng };
         return LONDON;
-    }, [activeSearchLocation, filtered, userLoc]);
+    }, [activeSearchLocation, userLoc]);
 
     const ranked = useMemo(() => {
         const rows = filtered.map((spot) => ({
             spot,
-            distKm: haversineKm(anchor, { lat: spot.lat, lng: spot.lng }),
+            distKm: haversineKm(anchor, displayCoordinates({ lat: spot.lat, lng: spot.lng })),
             price: priceValue(spot),
         }));
 
@@ -380,7 +390,14 @@ export default function HomePage() {
     }, [filtered, anchor, activeSearchLocation, activeSort]);
 
     const visible = ranked;
-    const mapSpots = useMemo(() => ranked.map((entry) => entry.spot), [ranked]);
+    const mapSpots = useMemo(
+        () =>
+            ranked.map((entry) => ({
+                ...entry.spot,
+                ...displayCoordinates({ lat: entry.spot.lat, lng: entry.spot.lng }),
+            })),
+        [ranked]
+    );
 
     useEffect(() => {
         if (!mapSpots.length) {

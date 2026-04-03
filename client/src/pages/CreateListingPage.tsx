@@ -210,7 +210,6 @@ export default function CreateListingPage() {
     const [showBasicsStepValidation, setShowBasicsStepValidation] = useState(false);
     const [showPricingStepValidation, setShowPricingStepValidation] = useState(false);
     const successTimerRef = useRef<number | null>(null);
-    const draftReadyRef = useRef(false);
     const {
         beginConnectOnboarding,
         connectBusy,
@@ -222,11 +221,11 @@ export default function CreateListingPage() {
     const customSheetOpen = activeSheet === "custom";
     const confirmSheetOpen = activeSheet === "confirm";
     const deleteSheetOpen = activeSheet === "delete";
-    const draftStorageKey = isEdit && editId ? `pb_listing_draft:${editId}` : "pb_listing_draft:new";
 
     const parsedCoords = parseCoordinates(lat, lng);
     const hasPlacedCoords =
         !!parsedCoords && (Math.abs(parsedCoords.lat) > 0.000001 || Math.abs(parsedCoords.lng) > 0.000001);
+    const effectiveCoords = hasPlacedCoords ? parsedCoords : null;
     const pickerPosition = hasPlacedCoords ? parsedCoords : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] };
     const mapCenter = pickerPosition;
     const addressLookup = useAddressSuggestions({
@@ -234,7 +233,7 @@ export default function CreateListingPage() {
         token,
         limit: 3,
         enabled: activeStep === 5 && addressLookupOpen,
-        manualFallback: parsedCoords ?? { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] },
+        manualFallback: effectiveCoords ?? { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] },
     });
     const addressLookupStatus = addressLookupMessage || addressLookup.message;
 
@@ -308,79 +307,6 @@ export default function CreateListingPage() {
         setImageUrl(snapshot.imageUrl);
     }
 
-    function buildDraftSnapshot(): DraftSnapshot {
-        return {
-            mode,
-            parkingType,
-            features,
-            title,
-            description,
-            ownerContactEmail,
-            ownerContactPhone,
-            ownerContactInfo,
-            capacityTotal,
-            priceUnit,
-            price,
-            auctionStartPrice,
-            allowPoints,
-            pointsCost,
-            availabilityWindows,
-            addressText,
-            lat,
-            lng,
-            imageUrl,
-        };
-    }
-
-    function clearSavedDraft() {
-        try {
-            window.localStorage.removeItem(draftStorageKey);
-        } catch {
-        }
-    }
-
-    function saveCurrentDraft() {
-        try {
-            const payload = JSON.stringify({
-                activeStep,
-                snapshot: buildDraftSnapshot(),
-            });
-            window.localStorage.setItem(draftStorageKey, payload);
-        } catch {
-            try {
-                const snapshot = buildDraftSnapshot();
-                window.localStorage.setItem(
-                    draftStorageKey,
-                    JSON.stringify({
-                        activeStep,
-                        snapshot: {
-                            ...snapshot,
-                            imageUrl: "",
-                        },
-                    })
-                );
-            } catch {
-            }
-        }
-    }
-
-    function restoreSavedDraft() {
-        try {
-            const raw = window.localStorage.getItem(draftStorageKey);
-            if (!raw) return false;
-            const parsed = JSON.parse(raw) as { activeStep?: number; snapshot?: DraftSnapshot };
-            if (!parsed?.snapshot) return false;
-            applySnapshot(parsed.snapshot);
-            const nextStep = Number(parsed.activeStep);
-            if (Number.isInteger(nextStep) && nextStep >= 1 && nextStep <= STEP_COUNT) {
-                setActiveStep(nextStep as WizardStep);
-            }
-            return true;
-        } catch {
-            return false;
-        }
-    }
-
     function isStripePublishBlock(message: string) {
         return /complete stripe onboarding/i.test(message) || /money payments/i.test(message);
     }
@@ -399,50 +325,14 @@ export default function CreateListingPage() {
     }, [isEdit]);
 
     useEffect(() => {
-        if (draftReadyRef.current) return;
-        if (!isEdit) {
-            restoreSavedDraft();
-            draftReadyRef.current = true;
-            return;
-        }
-        if (editSnapshotQuery.isPending) return;
-        if (!restoreSavedDraft() && editSnapshotQuery.data) {
-            applySnapshot(editSnapshotQuery.data);
-        }
-        draftReadyRef.current = true;
-    }, [draftStorageKey, editSnapshotQuery.data, editSnapshotQuery.isPending, isEdit]);
+        if (!isEdit || !editSnapshotQuery.data) return;
+        applySnapshot(editSnapshotQuery.data);
+    }, [editSnapshotQuery.data, isEdit]);
 
     useEffect(() => {
         if (!editSnapshotQuery.isError) return;
         setError(readErrorMessage(editSnapshotQuery.error, "Could not load listing for editing."));
     }, [editSnapshotQuery.isError, editSnapshotQuery.error]);
-
-    useEffect(() => {
-        if (!draftReadyRef.current) return;
-        saveCurrentDraft();
-    }, [
-        activeStep,
-        mode,
-        features,
-        title,
-        description,
-        ownerContactEmail,
-        ownerContactPhone,
-        ownerContactInfo,
-        parkingType,
-        capacityTotal,
-        priceUnit,
-        price,
-        auctionStartPrice,
-        allowPoints,
-        pointsCost,
-        availabilityWindows,
-        addressText,
-        lat,
-        lng,
-        imageUrl,
-        draftStorageKey,
-    ]);
 
     useEffect(() => {
         if (mode === "free") {
@@ -732,7 +622,7 @@ export default function CreateListingPage() {
     }, [availabilityWindows, features]);
     const availabilityIssue = availabilityPayloadResult.issue;
 
-    const locationIssue = !parsedCoords
+    const locationIssue = !effectiveCoords
         ? "Set a map pin so drivers can find your listing."
         : normalizedAddress.length < 5
             ? "Add an address with at least 5 characters."
@@ -758,7 +648,7 @@ export default function CreateListingPage() {
     const publishReady = stepReady[6];
 
     const submitPayload: ListingSubmitPayload | null =
-        !submitIssue && parsedCoords && availabilityPayloadResult.payload
+        !submitIssue && effectiveCoords && availabilityPayloadResult.payload
             ? {
                   title: normalizedTitle,
                   description: normalizedDescription || "No description provided.",
@@ -768,8 +658,8 @@ export default function CreateListingPage() {
                   allow_points: mode === "free" ? false : allowPoints,
                   points_cost: mode === "free" ? 0 : effectivePointsNum,
                   address_text: normalizedAddress,
-                  lat: parsedCoords.lat,
-                  lng: parsedCoords.lng,
+                  lat: effectiveCoords.lat,
+                  lng: effectiveCoords.lng,
                   image_url: imageUrl.trim() || null,
                   owner_contact_email: normalizedOwnerContactEmail || null,
                   owner_contact_phone: normalizedOwnerContactPhone || null,
@@ -802,15 +692,13 @@ export default function CreateListingPage() {
                     : await apiPost<{ parking_spot: ParkingSpot }>("/parking-spots", submitPayload, token);
             const nextId = response.parking_spot?.id || editId;
             await queryClient.invalidateQueries({ queryKey: ["notification-summary"] });
-            clearSavedDraft();
             closeSheet();
             showPublishSuccess(nextId ? `/spots/${nextId}` : "/dashboard");
         } catch (error: unknown) {
             const message = readErrorMessage(error, isEdit ? "Failed to save listing." : "Failed to publish listing.");
             if (isStripePublishBlock(message)) {
-                saveCurrentDraft();
                 setConnectNotice(
-                    "Please complete Stripe’s official onboarding before publishing a money listing. It usually takes around 5 minutes. Your draft is saved and will be waiting when you come back, or you can switch this listing to points only."
+                    "Please complete Stripe onboarding before publishing a money listing. It usually takes around 5 minutes, or you can switch this listing to points only."
                 );
                 return;
             }
@@ -821,7 +709,6 @@ export default function CreateListingPage() {
     }
 
     async function handleConnectStripeFromPublish() {
-        saveCurrentDraft();
         setError("");
         const result = await beginConnectOnboarding("stripe");
         if (!result.ok && result.error) {

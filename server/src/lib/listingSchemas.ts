@@ -139,6 +139,14 @@ export const listingPayloadSchema = z.object({
     owner_contact_info: optionalTrimmedNullableString(500),
     parking_kind: parkingKindInputSchema.optional(),
     availability: listingAvailabilitySchema,
+}).superRefine((value, ctx) => {
+    if (Math.abs(value.lat) <= 0.000001 && Math.abs(value.lng) <= 0.000001) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["lat"],
+            message: "Select a real map location before publishing",
+        });
+    }
 });
 export type ListingPayload = z.output<typeof listingPayloadSchema>;
 
