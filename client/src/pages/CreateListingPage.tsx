@@ -225,7 +225,10 @@ export default function CreateListingPage() {
     const draftStorageKey = isEdit && editId ? `pb_listing_draft:${editId}` : "pb_listing_draft:new";
 
     const parsedCoords = parseCoordinates(lat, lng);
-    const mapCenter = parsedCoords ?? { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] };
+    const hasPlacedCoords =
+        !!parsedCoords && (Math.abs(parsedCoords.lat) > 0.000001 || Math.abs(parsedCoords.lng) > 0.000001);
+    const pickerPosition = hasPlacedCoords ? parsedCoords : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] };
+    const mapCenter = pickerPosition;
     const addressLookup = useAddressSuggestions({
         query: addressText,
         token,
@@ -1144,7 +1147,7 @@ export default function CreateListingPage() {
                         <SpotsMap
                             spots={[]}
                             center={mapCenter}
-                            pickerPosition={parsedCoords}
+                            pickerPosition={pickerPosition}
                             onMapPick={onMapPick}
                         />
                     </div>
