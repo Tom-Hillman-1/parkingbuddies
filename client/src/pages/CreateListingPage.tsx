@@ -5,9 +5,11 @@ import Lottie from "lottie-react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import SpotsMap from "../components/SpotsMap";
 import { AppMultiToggleGroup, AppRadioCards, AppSwitchField } from "../components/ui/AppChoiceControls";
+import { AddressAutocompleteMenu } from "../components/ui/AddressAutocompleteMenu";
 import { AppButton, AppField, AppInput, AppTextarea } from "../components/ui/AppForm";
 import { AppTimePicker } from "../components/ui/AppTimePicker";
 import { apiDelete, apiGet, apiPatch, apiPost, readErrorMessage } from "../lib/api";
+import { parseGeocodeCoordinates, useAddressSuggestions, type GeocodeSuggestion } from "../lib/geocode";
 import { useAuth, useStripeConnect } from "../lib/auth";
 import successAnimation from "../assets/Success.json";
 import type { ParkingSpot } from "../types";
@@ -30,7 +32,6 @@ import {
     CREATE_FLOW_COPY,
     LISTING_FEATURE_OPTIONS,
     LISTING_MODEL_OPTIONS,
-    LONDON_VIEWBOX,
     MIN_AUCTION_START_PRICE_GBP,
     MIN_POINTS_COST,
     modeLabel,
@@ -54,7 +55,6 @@ import type {
     AvailabilityWindow,
     DraftSnapshot,
     FlowStep,
-    GeocodeSuggestion,
     ListingFeature,
     Mode,
     PriceUnit,
@@ -191,9 +191,8 @@ export default function CreateListingPage() {
     const [draftSlotEnd, setDraftSlotEnd] = useState(DEFAULT_SLOT_END);
 
     const [addressText, setAddressText] = useState("");
-    const [addressSearchBusy, setAddressSearchBusy] = useState(false);
-    const [addressSearchMessage, setAddressSearchMessage] = useState("");
-    const [addressSuggestions, setAddressSuggestions] = useState<GeocodeSuggestion[]>([]);
+    const [addressLookupMessage, setAddressLookupMessage] = useState("");
+    const [addressLookupOpen, setAddressLookupOpen] = useState(false);
     const [lat, setLat] = useState(String(DEFAULT_CENTER[0]));
     const [lng, setLng] = useState(String(DEFAULT_CENTER[1]));
 
@@ -218,6 +217,7 @@ export default function CreateListingPage() {
     } = useStripeConnect(token);
 
     const imageInputRef = useRef<HTMLInputElement | null>(null);
+    const addressLookupRef = useRef<HTMLDivElement | null>(null);
     const spacesSheetOpen = activeSheet === "spaces";
     const customSheetOpen = activeSheet === "custom";
     const confirmSheetOpen = activeSheet === "confirm";
@@ -226,6 +226,14 @@ export default function CreateListingPage() {
 
     const parsedCoords = parseCoordinates(lat, lng);
     const mapCenter = parsedCoords ?? { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] };
+    const addressLookup = useAddressSuggestions({
+        query: addressText,
+        token,
+        limit: 3,
+        enabled: activeStep === 5 && addressLookupOpen,
+        manualFallback: parsedCoords ?? { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] },
+    });
+    const addressLookupStatus = addressLookupMessage || addressLookup.message;
 
     useEffect(() => {
         window.requestAnimationFrame(() => {
@@ -474,78 +482,34 @@ export default function CreateListingPage() {
     }
 
     function chooseAddressSuggestion(suggestion: GeocodeSuggestion) {
-        const nextLat = Number(suggestion.lat);
-        const nextLng = Number(suggestion.lon);
-        if (!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) {
-            setAddressSearchMessage("Could not use that location. Please try another result.");
+        const nextCoords = parseGeocodeCoordinates(suggestion);
+        if (!nextCoords) {
+            setAddressLookupMessage("Could not use that location. Please try another result.");
             return;
         }
 
-        applyPickedLocation(nextLat, nextLng, suggestion.display_name);
-        setAddressSuggestions([]);
-        setAddressSearchMessage(
+        applyPickedLocation(nextCoords.lat, nextCoords.lng, suggestion.display_name);
+        addressLookup.clear();
+        setAddressLookupOpen(false);
+        setAddressLookupMessage(
             suggestion.kind === "manual"
                 ? "Manual address selected. You can still fine-tune the pin on the map."
                 : "Location selected. You can still fine-tune the pin on the map."
         );
     }
 
-    async function onAddressSearchClick() {
-        const query = addressText.trim();
-        if (query.length < 3) {
-            setAddressSuggestions([]);
-            setAddressSearchMessage("Enter at least 3 characters to search.");
-            return;
-        }
-
-        setAddressSearchBusy(true);
-        setAddressSearchMessage("");
-        setAddressSuggestions([]);
-
-        try {
-            const params = new URLSearchParams({
-                format: "jsonv2",
-                limit: "3",
-                addressdetails: "1",
-                countrycodes: "gb",
-                viewbox: LONDON_VIEWBOX,
-                q: query,
-            });
-            const lookup = await apiGet<{ suggestions: GeocodeSuggestion[] }>(
-                `/parking-spots/geocode/search?${params.toString()}`,
-                token || undefined
-            );
-            const matches = (Array.isArray(lookup.suggestions) ? lookup.suggestions : [])
-                .filter((suggestion) => Number.isFinite(Number(suggestion.lat)) && Number.isFinite(Number(suggestion.lon)))
-                .slice(0, 3);
-
-            if (!matches.length) {
-                setAddressSuggestions([
-                    {
-                        display_name: query,
-                        lat: String(parsedCoords?.lat ?? DEFAULT_CENTER[0]),
-                        lon: String(parsedCoords?.lng ?? DEFAULT_CENTER[1]),
-                        kind: "manual",
-                    },
-                ]);
-                setAddressSearchMessage("No close matches found. You can still use your typed address and move the pin manually.");
-                return;
-            }
-
-            setAddressSuggestions(matches);
-            setAddressSearchMessage(`Choose the best match below, then adjust the pin on the map if needed.`);
-        } catch (error: unknown) {
-            setAddressSuggestions([]);
-            setAddressSearchMessage(readErrorMessage(error, "Address search is unavailable right now."));
-        } finally {
-            setAddressSearchBusy(false);
-        }
+    function closeAddressLookupIfNeeded() {
+        window.requestAnimationFrame(() => {
+            if (addressLookupRef.current?.contains(document.activeElement)) return;
+            setAddressLookupOpen(false);
+        });
     }
 
     function onMapPick(nextLat: number, nextLng: number) {
         applyPickedLocation(nextLat, nextLng);
-        setAddressSuggestions([]);
-        setAddressSearchMessage("Pin updated from map.");
+        addressLookup.clear();
+        setAddressLookupOpen(false);
+        setAddressLookupMessage("Pin updated from map.");
     }
 
     function openSpacesSheet() {
@@ -1137,64 +1101,43 @@ export default function CreateListingPage() {
                     <div className="addressLookupWrap">
                         <AppField
                             label="Address"
-                            description="Search to set a pin, then click map to adjust precisely."
+                            description="Start typing to search, then click the map to adjust the pin precisely."
                         >
-                            <div className="addressInputRow">
+                            <div
+                                ref={addressLookupRef}
+                                className="addressAutocompleteAnchor"
+                                onBlurCapture={closeAddressLookupIfNeeded}
+                            >
                                 <AppInput
                                     value={addressText}
                                     onChange={(event) => {
-                                        setAddressText(event.target.value);
+                                        const nextValue = event.target.value;
+                                        setAddressText(nextValue);
                                         setLat("");
                                         setLng("");
-                                        setAddressSuggestions([]);
-                                        setAddressSearchMessage("");
+                                        setAddressLookupMessage("");
+                                        setAddressLookupOpen(nextValue.trim().length >= 3);
                                     }}
+                                    onFocus={() => setAddressLookupOpen(addressText.trim().length >= 3)}
                                     onKeyDown={(event) => {
-                                        if (event.key !== "Enter") return;
+                                        if (event.key !== "Enter" || addressLookup.suggestions.length === 0) return;
                                         event.preventDefault();
-                                        void onAddressSearchClick();
+                                        chooseAddressSuggestion(addressLookup.suggestions[0]);
                                     }}
                                     placeholder="Start typing an address (for example 295 Upper Street)"
                                     autoComplete="off"
                                 />
-                                <AppButton
-                                    type="button"
-                                    variant="primary"
-                                    className="addressSearchBtn"
-                                    disabled={addressSearchBusy}
-                                    onClick={() => void onAddressSearchClick()}
-                                >
-                                    {addressSearchBusy ? "Searching..." : "Search"}
-                                </AppButton>
+                                <AddressAutocompleteMenu
+                                    open={addressLookupOpen && (addressLookup.busy || addressLookup.suggestions.length > 0 || !!addressLookup.message)}
+                                    suggestions={addressLookup.suggestions}
+                                    busy={addressLookup.busy}
+                                    message={addressLookup.message}
+                                    onSelect={chooseAddressSuggestion}
+                                />
                             </div>
                         </AppField>
 
-                        {addressSearchMessage && <div className="addressLookupStatus">{addressSearchMessage}</div>}
-
-                        {addressSuggestions.length > 0 && (
-                            <div className="addressSuggestionList" role="list" aria-label="Address suggestions">
-                                {addressSuggestions.map((suggestion, index) => (
-                                    <button
-                                        key={`${suggestion.lat}-${suggestion.lon}-${index}`}
-                                        type="button"
-                                        className="addressSuggestionItem"
-                                        onClick={() => chooseAddressSuggestion(suggestion)}
-                                    >
-                                        <span className="addressSuggestionRank">{index + 1}</span>
-                                        <span className="addressSuggestionCopy">
-                                            <strong>
-                                                {suggestion.kind === "manual"
-                                                    ? "Use typed address"
-                                                    : index === 0
-                                                        ? "Closest match"
-                                                        : `Option ${index + 1}`}
-                                            </strong>
-                                            <span>{suggestion.display_name}</span>
-                                        </span>
-                                    </button>
-                                ))}
-                            </div>
-                        )}
+                        {addressLookupStatus && <div className="addressLookupStatus">{addressLookupStatus}</div>}
                     </div>
 
                     <div className="mapWrap mapWrap--pin wizardMap">
@@ -1576,6 +1519,10 @@ export default function CreateListingPage() {
         </div>
     );
 }
+
+
+
+
 
 
 

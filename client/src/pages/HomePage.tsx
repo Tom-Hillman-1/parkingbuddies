@@ -16,8 +16,15 @@ import AppPageState from "../components/AppPageState";
 import SpotsMap from "../components/SpotsMap";
 import { AppDisclosure } from "../components/ui/AppDisclosure";
 import { AppMultiToggleGroup, AppRadioCards } from "../components/ui/AppChoiceControls";
+import { AddressAutocompleteMenu } from "../components/ui/AddressAutocompleteMenu";
 import { InfoTooltip } from "../components/ui/InfoTooltip";
 import { apiGet } from "../lib/api";
+import {
+    fetchAddressSuggestions,
+    parseGeocodeCoordinates,
+    useAddressSuggestions,
+    type GeocodeSuggestion,
+} from "../lib/geocode";
 import type { ParkingSpot } from "../types";
 import { capitalizeLabel, formatDateDisplay, toFiniteNumber } from "./pagesShared";
 import {
@@ -36,11 +43,14 @@ import {
 
 type SortMode = "distance" | "price_low" | "price_high" | "newest";
 type ModeFilter = Record<ParkingSpot["mode"], boolean>;
+type SearchAddressLocation = { lat: number; lng: number };
 
 const LONDON = { lat: 51.5074, lng: -0.1278 };
 const LOCATION_SEARCH_LABEL = "Using your location";
 const HOME_HERO_BACKGROUND_URL = new URL("../assets/loading_hero.json", import.meta.url).href;
 const HOME_HERO_CITY_URL = new URL("../assets/city.json", import.meta.url).href;
+const HOME_MAP_FOCUS_RADIUS_KM = 5;
+const HOME_ADDRESS_RESULT_LIMIT = 10;
 const DEFAULT_MODE_FILTER: ModeFilter = { free: true, rent: true, auction: true };
 const HOME_DURATION_OPTIONS = [
     { value: 30, label: "30 min" },
@@ -240,12 +250,16 @@ export default function HomePage() {
     const [dateDialogOpen, setDateDialogOpen] = useState(false);
     const [timeDialogOpen, setTimeDialogOpen] = useState(false);
     const [searchFeedback, setSearchFeedback] = useState<string | null>(null);
+    const [draftSearchLocation, setDraftSearchLocation] = useState<SearchAddressLocation | null>(null);
+    const [activeSearchLocation, setActiveSearchLocation] = useState<SearchAddressLocation | null>(null);
+    const [homeAddressOpen, setHomeAddressOpen] = useState(false);
 
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [hoveredId, setHoveredId] = useState<string | null>(null);
 
     const spotsRef = useRef<HTMLDivElement | null>(null);
     const mapRef = useRef<HTMLElement | null>(null);
+    const homeAddressRef = useRef<HTMLDivElement | null>(null);
 
     function scrollToFirstSpot() {
         if (typeof window === "undefined") return;
@@ -319,7 +333,7 @@ export default function HomePage() {
     }, []);
 
     const filtered = useMemo(() => {
-        const q = normalizeSearchQuery(activeSearch.query, userLoc).toLowerCase();
+        const q = activeSearchLocation ? "" : normalizeSearchQuery(activeSearch.query, userLoc).toLowerCase();
         const minPrice = activeSearch.minPrice.trim() ? toFiniteNumber(activeSearch.minPrice, 0) : 0;
         const maxPrice = activeSearch.maxPrice.trim() ? toFiniteNumber(activeSearch.maxPrice, Number.POSITIVE_INFINITY) : Number.POSITIVE_INFINITY;
         const searchWindow = buildSearchWindow(activeSearch);
@@ -335,13 +349,14 @@ export default function HomePage() {
             if (searchWindow && !isSpotSlotAllowed(spot, searchWindow.start, searchWindow.end)) return false;
             return true;
         });
-    }, [spots, activeSearch, activeModeFilter, userLoc]);
+    }, [spots, activeSearch, activeModeFilter, activeSearchLocation, userLoc]);
 
     const anchor = useMemo(() => {
+        if (activeSearchLocation) return { lat: activeSearchLocation.lat, lng: activeSearchLocation.lng };
         if (userLoc) return userLoc;
         if (filtered[0]) return { lat: filtered[0].lat, lng: filtered[0].lng };
         return LONDON;
-    }, [filtered, userLoc]);
+    }, [activeSearchLocation, filtered, userLoc]);
 
     const ranked = useMemo(() => {
         const rows = filtered.map((spot) => ({
@@ -350,15 +365,19 @@ export default function HomePage() {
             price: priceValue(spot),
         }));
 
-        rows.sort((a, b) => {
+        const candidateRows = activeSearchLocation
+            ? [...rows].sort((a, b) => a.distKm - b.distKm).slice(0, HOME_ADDRESS_RESULT_LIMIT)
+            : rows;
+
+        candidateRows.sort((a, b) => {
             if (activeSort === "distance") return a.distKm - b.distKm;
             if (activeSort === "price_low") return a.price - b.price;
             if (activeSort === "price_high") return b.price - a.price;
             return new Date(b.spot.created_at).getTime() - new Date(a.spot.created_at).getTime();
         });
 
-        return rows;
-    }, [filtered, anchor, activeSort]);
+        return candidateRows;
+    }, [filtered, anchor, activeSearchLocation, activeSort]);
 
     const visible = ranked;
     const mapSpots = useMemo(() => ranked.map((entry) => entry.spot), [ranked]);
@@ -375,11 +394,12 @@ export default function HomePage() {
     }, [mapSpots, selectedId]);
 
     const mapCenter = useMemo(() => {
+        if (activeSearchLocation) return { lat: activeSearchLocation.lat, lng: activeSearchLocation.lng };
         const selected = mapSpots.find((spot) => spot.id === selectedId);
         if (selected) return { lat: selected.lat, lng: selected.lng };
         if (mapSpots[0]) return { lat: mapSpots[0].lat, lng: mapSpots[0].lng };
         return LONDON;
-    }, [mapSpots, selectedId]);
+    }, [activeSearchLocation, mapSpots, selectedId]);
 
     const isLocEnabled = locStatus === "Location enabled.";
     const isLocPending = locStatus === "Enabling location...";
@@ -389,7 +409,17 @@ export default function HomePage() {
         : locStatus === "Location was blocked." ? "Location blocked"
         : locStatus === "Location is not supported on this browser." ? "Not supported"
         : "Enable location";
-
+    const homeAddressSearch = useAddressSuggestions({
+        query: draftSearch.query,
+        limit: 3,
+        enabled: homeAddressOpen && draftSearch.query.trim().toLowerCase() !== LOCATION_SEARCH_LABEL.toLowerCase(),
+    });
+    const homeAddressSearchOpen =
+        homeAddressOpen && (homeAddressSearch.busy || homeAddressSearch.suggestions.length > 0 || !!homeAddressSearch.message);
+    const homeAddressSearchMessage =
+        homeAddressSearch.message === "No matching addresses found."
+            ? "No close address match. Press Search to use the typed text instead."
+            : homeAddressSearch.message;
 
     function resetFilters() {
         const initialSearch = createInitialSearch();
@@ -399,10 +429,25 @@ export default function HomePage() {
         setActiveSort("distance");
         setDraftModeFilter(DEFAULT_MODE_FILTER);
         setActiveModeFilter(DEFAULT_MODE_FILTER);
+        setDraftSearchLocation(null);
+        setActiveSearchLocation(null);
+        setHomeAddressOpen(false);
+        homeAddressSearch.clear();
         setSearchFeedback(null);
     }
 
-    function submitSearch(event?: React.FormEvent) {
+    function applyHomeSearch(nextSearch: HomeSearchState, nextSearchLocation: SearchAddressLocation | null) {
+        setActiveSearch(nextSearch);
+        setActiveSort(draftSort);
+        setActiveModeFilter(draftModeFilter);
+        setActiveSearchLocation(nextSearchLocation);
+        setHomeAddressOpen(false);
+        homeAddressSearch.clear();
+        setSearchFeedback(null);
+        scrollToFirstSpot();
+    }
+
+    async function submitSearch(event?: React.FormEvent) {
         event?.preventDefault();
         const next = {
             ...draftSearch,
@@ -429,11 +474,35 @@ export default function HomePage() {
             return;
         }
 
-        setActiveSearch(next);
-        setActiveSort(draftSort);
-        setActiveModeFilter(draftModeFilter);
-        setSearchFeedback(null);
-        scrollToFirstSpot();
+        let resolvedSearchLocation = draftSearchLocation;
+        const trimmedQuery = next.query.trim();
+        const canResolveTypedAddress =
+            !resolvedSearchLocation &&
+            trimmedQuery.length >= 3 &&
+            trimmedQuery.toLowerCase() !== LOCATION_SEARCH_LABEL.toLowerCase();
+
+        if (canResolveTypedAddress) {
+            try {
+                const firstSuggestion =
+                    homeAddressSearch.suggestions[0] ??
+                    (await fetchAddressSuggestions({
+                        query: trimmedQuery,
+                        limit: 3,
+                    }))[0];
+
+                const nextCoords = firstSuggestion ? parseGeocodeCoordinates(firstSuggestion) : null;
+                if (firstSuggestion && nextCoords) {
+                    next.query = firstSuggestion.display_name;
+                    resolvedSearchLocation = { lat: nextCoords.lat, lng: nextCoords.lng };
+                    setDraftSearch((current) => ({ ...current, query: firstSuggestion.display_name }));
+                    setDraftSearchLocation(resolvedSearchLocation);
+                }
+            } catch {
+                // Keep plain-text search working even if address lookup is temporarily unavailable.
+            }
+        }
+
+        applyHomeSearch(next, resolvedSearchLocation);
     }
 
     function requestLocation() {
@@ -447,6 +516,9 @@ export default function HomePage() {
             (position) => {
                 setUserLoc({ lat: position.coords.latitude, lng: position.coords.longitude });
                 setDraftSearch((current) => ({ ...current, query: LOCATION_SEARCH_LABEL }));
+                setDraftSearchLocation(null);
+                setHomeAddressOpen(false);
+                homeAddressSearch.clear();
                 setLocStatus("Location enabled.");
             },
             () => {
@@ -455,6 +527,29 @@ export default function HomePage() {
         );
     }
 
+
+    function closeHomeAddressSearchIfNeeded() {
+        window.requestAnimationFrame(() => {
+            if (homeAddressRef.current?.contains(document.activeElement)) return;
+            setHomeAddressOpen(false);
+        });
+    }
+
+    function chooseHomeAddressSuggestion(suggestion: GeocodeSuggestion) {
+        const nextCoords = parseGeocodeCoordinates(suggestion);
+        if (!nextCoords) {
+            setSearchFeedback("Could not use that location. Please try another result.");
+            return;
+        }
+
+        const nextQuery = suggestion.display_name;
+        const nextLocation = { lat: nextCoords.lat, lng: nextCoords.lng };
+        const nextSearch = { ...draftSearch, query: nextQuery };
+
+        setDraftSearch(nextSearch);
+        setDraftSearchLocation(nextLocation);
+        applyHomeSearch(nextSearch, nextLocation);
+    }
 
     function focusSpotOnMap(spotId: string, shouldScroll: boolean) {
         setSelectedId(spotId);
@@ -515,17 +610,50 @@ export default function HomePage() {
                 <aside className="home-left">
                     <form className="card home-controls home-controls--search" onSubmit={submitSearch}>
                         <div className="homeFilterTopRow">
-                            <label className="homeFilterSearchShell" aria-label="Search by location">
-                                <span className="homeFilterSearchIcon">
-                                    <MagnifyingGlassIcon />
-                                </span>
-                                <input
-                                    className="homeFilterSearchInput"
-                                    value={draftSearch.query}
-                                    onChange={(event) => setDraftSearch((current) => ({ ...current, query: event.target.value }))}
-                                    placeholder="Area, street or landmark..."
+                            <div
+                                ref={homeAddressRef}
+                                className="homeFilterSearchGroup addressAutocompleteAnchor"
+                                onBlurCapture={closeHomeAddressSearchIfNeeded}
+                            >
+                                <label className="homeFilterSearchShell" aria-label="Search by location">
+                                    <span className="homeFilterSearchIcon">
+                                        <MagnifyingGlassIcon />
+                                    </span>
+                                    <input
+                                        className="homeFilterSearchInput"
+                                        value={draftSearch.query}
+                                        onChange={(event) => {
+                                            const nextQuery = event.target.value;
+                                            setDraftSearch((current) => ({ ...current, query: nextQuery }));
+                                            setDraftSearchLocation(null);
+                                            setHomeAddressOpen(
+                                                nextQuery.trim().length >= 3 &&
+                                                    nextQuery.trim().toLowerCase() !== LOCATION_SEARCH_LABEL.toLowerCase()
+                                            );
+                                        }}
+                                        onFocus={() =>
+                                            setHomeAddressOpen(
+                                                draftSearch.query.trim().length >= 3 &&
+                                                    draftSearch.query.trim().toLowerCase() !== LOCATION_SEARCH_LABEL.toLowerCase()
+                                            )
+                                        }
+                                        onKeyDown={(event) => {
+                                            if (event.key !== "Enter" || homeAddressSearch.suggestions.length === 0) return;
+                                            event.preventDefault();
+                                            chooseHomeAddressSuggestion(homeAddressSearch.suggestions[0]);
+                                        }}
+                                        placeholder="Area, street or landmark..."
+                                        autoComplete="off"
+                                    />
+                                </label>
+                                <AddressAutocompleteMenu
+                                    open={homeAddressSearchOpen}
+                                    suggestions={homeAddressSearch.suggestions}
+                                    busy={homeAddressSearch.busy}
+                                    message={homeAddressSearchMessage}
+                                    onSelect={chooseHomeAddressSuggestion}
                                 />
-                            </label>
+                            </div>
 
                             <div className="homeFilterLocateWrap">
                                 <button
@@ -788,6 +916,7 @@ export default function HomePage() {
                     <SpotsMap
                         spots={mapSpots}
                         center={mapCenter}
+                        focusArea={activeSearchLocation ? { center: activeSearchLocation, radiusKm: HOME_MAP_FOCUS_RADIUS_KM } : null}
                         selectedId={selectedId}
                         hoveredId={hoveredId}
                         userLocation={isLocEnabled ? userLoc : null}

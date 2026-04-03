@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { Marker as LeafletMarker } from "leaflet";
 import L from "leaflet";
 import markerIcon2xUrl from "leaflet/dist/images/marker-icon-2x.png";
@@ -59,13 +59,21 @@ function modeLabel(mode?: MapSpot["mode"]) {
     return mode.charAt(0).toUpperCase() + mode.slice(1);
 }
 
-function Recenter({ center }: { center: { lat: number; lng: number } }) {
+type FocusArea = { center: { lat: number; lng: number }; radiusKm: number } | null;
+
+function Recenter({ center, focusArea }: { center: { lat: number; lng: number }; focusArea?: FocusArea }) {
     const map = useMap();
 
     useEffect(() => {
+        if (focusArea) {
+            const bounds = L.latLng(focusArea.center.lat, focusArea.center.lng).toBounds(focusArea.radiusKm * 2000);
+            map.fitBounds(bounds.pad(0.18), { animate: true, maxZoom: 13 });
+            return;
+        }
+
         const zoom = map.getZoom();
         map.setView([center.lat, center.lng], zoom, { animate: true });
-    }, [map, center.lat, center.lng]);
+    }, [map, center.lat, center.lng, focusArea?.center.lat, focusArea?.center.lng, focusArea?.radiusKm]);
 
     return null;
 }
@@ -90,6 +98,7 @@ export default function SpotsMap({
     onMapPick,
     userLocation,
     showPopupDetails = true,
+    focusArea,
 }: {
     spots: MapSpot[];
     center?: { lat: number; lng: number };
@@ -101,6 +110,7 @@ export default function SpotsMap({
     onMapPick?: (lat: number, lng: number) => void;
     userLocation?: { lat: number; lng: number } | null;
     showPopupDetails?: boolean;
+    focusArea?: FocusArea;
 }) {
     const markerRefs = useRef<Record<string, LeafletMarker | null>>({});
 
@@ -118,7 +128,7 @@ export default function SpotsMap({
                 zoomControl={false}
                 scrollWheelZoom={false}
             >
-                <Recenter center={center} />
+                <Recenter center={center} focusArea={focusArea} />
                 <MapPickerEvents onMapPick={onMapPick} />
                 <ZoomControl position="topright" />
 

@@ -41,7 +41,6 @@ export type ListingFeature =
     | "near_station"
     | "near_airport";
 
-export type GeocodeSuggestion = { display_name: string; lat: string; lon: string; kind?: "manual" };
 export type AvailabilityWindow = {
     id: string;
     from: string;
@@ -535,5 +534,6 @@ function buildAvailabilityDayLabels(windows: AvailabilityWindow[]) {
 
     return labels;
 }
+
 
 

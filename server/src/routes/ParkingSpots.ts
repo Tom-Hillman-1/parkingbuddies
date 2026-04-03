@@ -30,7 +30,7 @@ const NOMINATIM_HEADERS = {
 };
 const geocodeRateLimit = simpleRateLimit({
     windowMs: 60 * 1000,
-    max: 20,
+    max: 60,
     message: "Too many address lookups. Please wait a moment and try again.",
     keyPrefix: "geocode",
 });
@@ -607,7 +607,7 @@ router.get("/geocode/search", geocodeRateLimit, async (req, res) => {
                       lat: item.lat as string,
                       lon: item.lon as string,
                   }))
-                  .slice(0, 5)
+                   .slice(0, maxResults)
             : [];
 
         return res.json({ ok: true, suggestions });
@@ -699,4 +699,5 @@ router.get("/:id", async (req, res) => {
 });
 
 export default router;
+
 
