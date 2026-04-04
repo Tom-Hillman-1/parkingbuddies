@@ -11,7 +11,6 @@ export type ParkingSpot = {
     auction_start_price_gbp?: number | null;
     auction_highest_pending_gbp?: number | null;
     auction_sold_out?: boolean;
-    parking_type?: "private" | "public";
     capacity_total?: number;
 
     allow_points: boolean;
@@ -34,7 +33,6 @@ export type ParkingSpot = {
             start: string;
             end: string;
         }>;
-        parking_kind?: string;
         features?: string[];
     } | null;
 

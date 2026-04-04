@@ -61,12 +61,11 @@ async function insertSpot(client, ownerId, data) {
             availability_json,
             auction_end,
             auction_start_price_gbp,
-            parking_type,
             capacity_total,
             is_active
         )
          VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17
         )
          RETURNING id, title`,
         [
@@ -85,7 +84,6 @@ async function insertSpot(client, ownerId, data) {
             data.availability_json,
             data.auction_end,
             data.auction_start_price_gbp,
-            data.parking_type,
             data.capacity_total,
             true,
         ]
@@ -189,7 +187,6 @@ async function seed() {
                 availability_json: continuousWindow(ymd(0), ymd(120), "06:00", "23:00"),
                 auction_end: null,
                 auction_start_price_gbp: null,
-                parking_type: "private",
                 capacity_total: 1,
             })
         );
@@ -210,7 +207,6 @@ async function seed() {
                 availability_json: continuousWindow(ymd(0), ymd(180), "00:00", "23:59"),
                 auction_end: null,
                 auction_start_price_gbp: null,
-                parking_type: "private",
                 capacity_total: 1,
             })
         );
@@ -231,7 +227,6 @@ async function seed() {
                 availability_json: continuousWindow(ymd(0), ymd(90), "08:00", "19:00"),
                 auction_end: null,
                 auction_start_price_gbp: null,
-                parking_type: "public",
                 capacity_total: 2,
             })
         );
@@ -252,7 +247,6 @@ async function seed() {
                 availability_json: continuousWindow(ymd(0), ymd(45), "00:00", "23:59"),
                 auction_end: addDays(new Date(), 12).toISOString(),
                 auction_start_price_gbp: 2.5,
-                parking_type: "private",
                 capacity_total: 1,
             })
         );
@@ -273,7 +267,6 @@ async function seed() {
                 availability_json: continuousWindow(ymd(0), ymd(180), "00:00", "23:59"),
                 auction_end: null,
                 auction_start_price_gbp: null,
-                parking_type: "private",
                 capacity_total: 1,
             })
         );
@@ -294,7 +287,6 @@ async function seed() {
                 availability_json: continuousWindow(ymd(0), ymd(60), "07:00", "22:00"),
                 auction_end: addDays(new Date(), 8).toISOString(),
                 auction_start_price_gbp: 1.8,
-                parking_type: "private",
                 capacity_total: 1,
             })
         );
@@ -315,7 +307,6 @@ async function seed() {
                 availability_json: continuousWindow(ymd(0), ymd(365), "00:00", "23:59"),
                 auction_end: null,
                 auction_start_price_gbp: null,
-                parking_type: "public",
                 capacity_total: 4,
             })
         );
@@ -336,8 +327,67 @@ async function seed() {
                 availability_json: continuousWindow(ymd(0), ymd(180), "00:00", "23:59"),
                 auction_end: null,
                 auction_start_price_gbp: null,
-                parking_type: "private",
                 capacity_total: 1,
+            })
+        );
+
+        listingRows.push(
+            await insertSpot(client, ownerId, {
+                title: "Paddington Shared Courtyard",
+                description: "No-photo shared courtyard listing with custom capacity for multi-space demo coverage.",
+                mode: "rent",
+                price_gbp: 12,
+                price_unit: "day",
+                allow_points: false,
+                points_cost: 0,
+                address_text: "21 Norfolk Place, Paddington, London",
+                lat: 51.5166,
+                lng: -0.1753,
+                image_url: null,
+                availability_json: continuousWindow(ymd(0), ymd(120), "07:00", "22:00"),
+                auction_end: null,
+                auction_start_price_gbp: null,
+                capacity_total: 3,
+            })
+        );
+
+        listingRows.push(
+            await insertSpot(client, ownerId, {
+                title: "Hackney School-Run Bay",
+                description: "No-photo free bay with a tighter weekday window for short local stops.",
+                mode: "free",
+                price_gbp: 0,
+                price_unit: "hour",
+                allow_points: false,
+                points_cost: 0,
+                address_text: "54 Mare St, Hackney, London",
+                lat: 51.5462,
+                lng: -0.0557,
+                image_url: null,
+                availability_json: continuousWindow(ymd(0), ymd(75), "09:30", "15:30"),
+                auction_end: null,
+                auction_start_price_gbp: null,
+                capacity_total: 1,
+            })
+        );
+
+        listingRows.push(
+            await insertSpot(client, ownerId, {
+                title: "Clapham Auction Drive",
+                description: "No-photo auction driveway with two spaces for multi-space bidding checks.",
+                mode: "auction",
+                price_gbp: 0,
+                price_unit: "hour",
+                allow_points: true,
+                points_cost: 20,
+                address_text: "12 The Pavement, Clapham, London",
+                lat: 51.4620,
+                lng: -0.1382,
+                image_url: null,
+                availability_json: continuousWindow(ymd(0), ymd(45), "06:00", "23:00"),
+                auction_end: addDays(new Date(), 10).toISOString(),
+                auction_start_price_gbp: 1.4,
+                capacity_total: 2,
             })
         );
 

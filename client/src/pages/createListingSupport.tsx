@@ -59,7 +59,6 @@ type RawAvailabilityWindow = {
 };
 export type DraftSnapshot = {
     mode: Mode;
-    parkingType: "private" | "public";
     features: ListingFeature[];
     title: string;
     description: string;

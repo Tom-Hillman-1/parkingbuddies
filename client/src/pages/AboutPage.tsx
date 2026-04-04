@@ -414,12 +414,8 @@ export default function AboutPage() {
         if (!location.hash) return;
 
         const targetId = location.hash.slice(1);
-        const scrollToTarget = () => {
-            const target = document.getElementById(targetId);
-            if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
-        };
-
-        window.requestAnimationFrame(scrollToTarget);
+        const target = document.getElementById(targetId);
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
     }, [location.hash]);
 
     async function submitHelp(e: React.FormEvent<HTMLFormElement>) {
@@ -459,8 +455,8 @@ export default function AboutPage() {
 
                 </p>
                 <div className="aboutPremiumActions">
-                    <a href="#contact-bottom" className="aboutPremiumBtn aboutPremiumBtn--primary">Contact</a>
-                    <Link to="/create-listing" className="aboutPremiumBtn aboutPremiumBtn--secondary">Create listing</Link>
+                    <a href="#contact-bottom" className="btn btn-primary">Contact</a>
+                    <Link to="/create-listing" className="btn btn-ghost">Create listing</Link>
                 </div>
             </header>
 
@@ -716,10 +712,10 @@ export default function AboutPage() {
                     </AppField>
 
                     <div className="aboutPremiumFormActions">
-                        <AppButton type="submit" variant="primary" className="aboutPremiumBtn" disabled={sending}>
+                        <AppButton type="submit" variant="primary" disabled={sending}>
                             {sending ? "Sending..." : "Send message"}
                         </AppButton>
-                        <a className="aboutPremiumBtn aboutPremiumBtn--secondary" href={`mailto:${SUPPORT_EMAIL}`}>
+                        <a className="btn btn-ghost" href={`mailto:${SUPPORT_EMAIL}`}>
                             Email directly
                         </a>
                     </div>

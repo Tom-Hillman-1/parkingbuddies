@@ -92,7 +92,6 @@ type ListingSubmitPayload = {
     owner_contact_phone: string | null;
     owner_contact_info: string | null;
     availability: ReturnType<typeof toAvailabilityPayload>;
-    parking_type: "private" | "public";
     capacity_total: number;
     auction_start_price_gbp?: number;
 };
@@ -129,7 +128,6 @@ function buildEditSnapshot(listing: ParkingSpot, ownerContact: OwnerContactForEd
 
     return {
         mode: normalizeMode(listing.mode),
-        parkingType: listing.parking_type === "public" ? "public" : "private",
         features: Array.isArray(av?.features)
             ? av.features.filter((feature): feature is ListingFeature => isListingFeature(feature))
             : [],
@@ -173,7 +171,6 @@ export default function CreateListingPage() {
     const [ownerContactEmail, setOwnerContactEmail] = useState("");
     const [ownerContactPhone, setOwnerContactPhone] = useState("");
     const [ownerContactInfo, setOwnerContactInfo] = useState("");
-    const [parkingType, setParkingType] = useState<"private" | "public">("private");
     const [capacityTotal, setCapacityTotal] = useState("1");
 
     const [priceUnit, setPriceUnit] = useState<PriceUnit>("hour");
@@ -271,7 +268,6 @@ export default function CreateListingPage() {
 
     function applySnapshot(snapshot: DraftSnapshot) {
         setMode(snapshot.mode);
-        setParkingType(snapshot.parkingType);
         setFeatures(snapshot.features ?? []);
         setTitle(snapshot.title);
         setDescription(snapshot.description);
@@ -665,7 +661,6 @@ export default function CreateListingPage() {
                   owner_contact_phone: normalizedOwnerContactPhone || null,
                   owner_contact_info: normalizedOwnerContactInfo || null,
                   availability: availabilityPayloadResult.payload,
-                  parking_type: parkingType,
                   capacity_total: setupCapacity,
                   ...(mode === "auction" ? { auction_start_price_gbp: allowMoney ? auctionStartNum : 0 } : {}),
               }

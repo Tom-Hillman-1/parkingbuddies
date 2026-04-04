@@ -252,11 +252,7 @@
 }
 
 .wizardTileSpotsBtn {
-    min-height: 34px;
     margin-top: 0.08rem;
-    padding: 0.28rem 0.7rem;
-    border-radius: 999px;
-    font-size: 0.78rem;
 }
 
 .wizardSplit {

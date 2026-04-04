@@ -92,7 +92,6 @@ router.post("/", requireAuth, bookingCreateRateLimit, async (req: AuthRequest, r
                  points_cost,
                  is_active,
                  availability_json,
-                 parking_type,
                  capacity_total
              FROM parking_spots
              WHERE id = $1`,
@@ -104,7 +103,6 @@ router.post("/", requireAuth, bookingCreateRateLimit, async (req: AuthRequest, r
         }
 
         const spot = spotR.rows[0] as any;
-        if (spot.parking_type == null) spot.parking_type = "private";
         if (spot.capacity_total == null) spot.capacity_total = 1;
 
         if (!spot.is_active) {

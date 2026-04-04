@@ -73,40 +73,6 @@
     gap: 0.68rem;
 }
 
-.aboutPremiumBtn {
-    min-height: 44px;
-    border-radius: 999px;
-    border: 1px solid transparent;
-    font-weight: 700;
-    font-size: 0.92rem;
-    padding: 0.58rem 1.08rem;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease;
-}
-
-.aboutPremiumBtn:hover {
-    transform: translateY(-1px);
-}
-
-.aboutPremiumBtn--primary {
-    background: linear-gradient(135deg, #2d8ef9 0%, #1a73f2 100%);
-    color: #fff;
-    box-shadow: 0 8px 18px rgba(34, 117, 225, 0.28);
-}
-
-.aboutPremiumBtn--secondary {
-    border-color: #cfdaeb;
-    background: rgba(255, 255, 255, 0.8);
-    color: #23405f;
-}
-
-.aboutPremiumBtn--secondary:hover {
-    border-color: #a3bbdb;
-    box-shadow: 0 8px 16px rgba(16, 24, 40, 0.1);
-}
-
 .aboutPremiumDivider {
     height: 1px;
     background: linear-gradient(90deg, transparent 0%, rgba(123, 143, 171, 0.5) 20%, rgba(123, 143, 171, 0.5) 80%, transparent 100%);
@@ -682,10 +648,6 @@
     .aboutPremiumFormActions {
         width: 100%;
         justify-content: flex-start;
-    }
-
-    .aboutPremiumBtn {
-        width: auto;
     }
 
     .aboutShowcaseRail {

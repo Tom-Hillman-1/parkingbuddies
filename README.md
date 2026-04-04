@@ -1,68 +1,131 @@
-ParkingBuddies
+# ParkingBuddies
 
-Quick start (Docker database)
-This setup is for a fresh machine with no local PostgreSQL. You only need Docker Desktop, Node.js, and a terminal.
+ParkingBuddies is a parking marketplace demo built with:
 
-1) Open a terminal
-- On Windows: open PowerShell or Windows Terminal.
-- All commands below assume you are in the repo root for your local clone.
+- `client/` - React + Vite frontend
+- `server/` - Express + PostgreSQL API
+- `shared/` - shared validation and pricing helpers
 
-2) Install dependencies
-- Server:
-  - `cd server`
-  - `npm.cmd install`
-- Client:
-  - `cd ..\client`
-  - `npm.cmd install`
+Live site:
 
-3) Start the database (Docker)
-- From the repo root:
-  - `docker compose up -d db`
+- [https://parkingbuddies.onrender.com](https://parkingbuddies.onrender.com)
 
-4) Run migrations + seed demo data
-- `cd server`
-- `npm.cmd run db:setup`
+## Submission notes
 
-5) Start the app (two terminals)
-- Terminal 1 (server):
-  - `cd server`
-  - `npm.cmd run dev`
-- Terminal 2 (client):
-  - `cd client`
-  - `npm.cmd run dev`
+This folder is ready to run locally.
 
-Demo accounts
-- owner@demo.com / demo1234
-- driver@demo.com / demo1234
+- The submission copy already includes `client/.env` and `server/.env` for local demo use.
+- If those files are missing for any reason, copy from `.env.example` in each folder.
+- Local payments use Stripe test keys.
+- The local database is provided through Docker and the demo data is created by the seed script.
 
-Notes
-- If PowerShell blocks npm scripts, use `npm.cmd` (as shown).
-- To stop the Docker DB: `docker compose down`
+## Local run guide
 
-Deployment notes
-- A Render blueprint file is included at `render.yaml` if you want to create the frontend and API from the same repo.
-- The frontend and backend deploy separately.
-- Frontend build:
-  - `cd client`
-  - `npm run build`
-- Backend build:
-  - `cd server`
-  - `npm run build`
-- Backend start command:
-  - `npm run migrate:up && npm run start`
+### Requirements
 
-Minimum production environment variables
-- Backend:
-  - `DATABASE_URL`
-  - `JWT_SECRET`
-  - `STRIPE_SECRET_KEY`
-  - `STRIPE_WEBHOOK_SECRET`
-  - `FRONTEND_URL`
-  - optional: `SUPPORT_EMAIL`, `CORS_ORIGINS`
-- Frontend:
-  - `VITE_API_URL`
-  - `VITE_STRIPE_PUBLISHABLE_KEY`
+- Node.js 20 or newer
+- Docker Desktop
+- A terminal such as PowerShell or Windows Terminal
 
-Production safeguards
-- `DEMO_BYPASS_CONNECT` must stay `false` in production.
-- The API now fails fast in production if no frontend origin is configured.
+### 1. Install dependencies
+
+Open a terminal in the repo root, then run:
+
+```powershell
+cd server
+npm.cmd install
+cd ..\client
+npm.cmd install
+```
+
+### 2. Start PostgreSQL in Docker
+
+From the repo root:
+
+```powershell
+docker compose up -d db
+```
+
+### 3. Run migrations and seed the demo database
+
+```powershell
+cd server
+npm.cmd run db:setup
+```
+
+This creates the schema and seeds demo users, listings, bids, and bookings.
+
+The seed currently creates `11` demo listings covering:
+
+- rent, free, and auction listings
+- hourly, daily, and weekly pricing
+- single-space and multi-space listings
+- listings with and without images
+
+### 4. Start the app
+
+Use two terminals.
+
+Terminal 1 - API:
+
+```powershell
+cd server
+npm.cmd run dev
+```
+
+Terminal 2 - frontend:
+
+```powershell
+cd client
+npm.cmd run dev
+```
+
+### 5. Open the app
+
+- Frontend: [http://localhost:5173](http://localhost:5173)
+- API health check: [http://localhost:4000/health](http://localhost:4000/health)
+
+## Demo accounts
+
+- Owner: `owner@demo.com` / `demo1234`
+- Driver: `driver@demo.com` / `demo1234`
+
+## If you need to reset the local database
+
+From the repo root:
+
+```powershell
+docker compose down -v
+docker compose up -d db
+cd server
+npm.cmd run db:setup
+```
+
+## Build checks
+
+Frontend:
+
+```powershell
+cd client
+npm.cmd run build
+```
+
+Backend:
+
+```powershell
+cd server
+npm.cmd run build
+```
+
+## Project structure
+
+- `client/public/seed/` contains the seeded demo listing images.
+- `server/migrations/` contains the database migrations.
+- `server/scripts/seed.js` creates the demo data used for local testing.
+- `render.yaml` contains the Render deployment blueprint for the live site.
+
+## Notes
+
+- If PowerShell blocks npm scripts, use `npm.cmd` exactly as shown above.
+- To stop the Docker database without deleting the data: `docker compose down`
+- To remove the data as well: `docker compose down -v`

@@ -1,8 +1,7 @@
 {
   "name": "parkingbuddies",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Submission root metadata. Use the client and server packages to run the app.",
   "scripts": {
     "test": "echo \"Use the client and server package scripts for checks.\""
   },
@@ -13,8 +12,5 @@
   "private": true,
   "engines": {
     "node": ">=20"
-  },
-  "dependencies": {
-    "vite": "^8.0.0"
   }
 }

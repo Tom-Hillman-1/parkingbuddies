@@ -2491,12 +2491,6 @@ label > span:first-child {
         gap: 0.48rem;
     }
 
-    .createWizardPage .wizardIntro .wizardTileSpotsBtn {
-        width: auto;
-        padding-inline: 0.72rem;
-        font-size: 0.76rem;
-    }
-
     .wizardIntro {
         min-height: auto;
         padding: 0.94rem;
@@ -2802,6 +2796,7 @@ label > span:first-child {
         width: 100%;
         padding-inline: 0.52rem;
         font-size: 0.74rem;
+        justify-content: center;
     }
 
     .createWizardPage .wizardIntro .wizardTileFooter {
@@ -2810,12 +2805,6 @@ label > span:first-child {
         justify-content: flex-start;
         align-items: center;
         gap: 0.42rem;
-    }
-
-    .createWizardPage .wizardIntro .wizardTileSpotsBtn {
-        width: auto;
-        min-width: 108px;
-        padding-inline: 0.68rem;
     }
 
     .wizardAvailabilityCal {

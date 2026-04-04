@@ -13,7 +13,7 @@ import {
 import { parseWithSchema } from "../lib/validation";
 import { serverError } from "../lib/errors";
 import { simpleRateLimit } from "../lib/rateLimit";
-import { listingPayloadSchema, pointsPricingIssue, type ListingAvailability as AvailabilityJson, type ListingPayload, type Mode, type ParkingType } from "../lib/listingSchemas";
+import { listingPayloadSchema, pointsPricingIssue, type ListingAvailability as AvailabilityJson, type ListingPayload, type Mode } from "../lib/listingSchemas";
 
 const router = Router();
 
@@ -69,7 +69,6 @@ const PUBLIC_SPOT_SELECT = `
     availability_json,
     auction_end,
     auction_start_price_gbp,
-    parking_type,
     capacity_total,
     is_active,
     created_at,
@@ -84,10 +83,6 @@ const geocodeSearchQuerySchema = z.object({
     countrycodes: z.string().trim().optional(),
     viewbox: z.string().trim().optional(),
 });
-const geocodeReverseQuerySchema = z.object({
-    lat: z.coerce.number().min(-90).max(90),
-    lng: z.coerce.number().min(-180).max(180),
-});
 
 type NormalizedListingInput = {
     title: string;
@@ -96,7 +91,6 @@ type NormalizedListingInput = {
     address_text: string;
     lat: number;
     lng: number;
-    parking_type: ParkingType;
     capacity_total: number;
     image_url: string | null;
     unit: PriceUnit;
@@ -153,9 +147,7 @@ function auctionEndFromAvailability(availability: AvailabilityJson) {
 }
 
 function buildAvailabilityJson(body: ListingPayload): { ok: true; availability: AvailabilityJson } {
-    const parking_kind = body.parking_kind ?? body.availability.parking_kind;
     const features = Array.isArray(body.availability.features) ? body.availability.features : [];
-    const kindField = parking_kind ? { parking_kind } : {};
     const featureField = features.length ? { features } : { features: [] };
 
     const windows = body.availability.windows
@@ -168,7 +160,7 @@ function buildAvailabilityJson(body: ListingPayload): { ok: true; availability: 
             end: rawWindow.end,
         }));
 
-    return { ok: true, availability: { type: "window_slots", windows, ...kindField, ...featureField } };
+    return { ok: true, availability: { type: "window_slots", windows, ...featureField } };
 }
 
 function normalizeListingInput(
@@ -193,7 +185,6 @@ function normalizeListingInput(
             address_text: body.address_text,
             lat: body.lat,
             lng: body.lng,
-            parking_type: body.parking_type,
             capacity_total: body.capacity_total,
             image_url: body.image_url,
             unit: body.price_unit,
@@ -301,7 +292,6 @@ function listingMutationCoreValues(data: PreparedListingMutation) {
         data.availability,
         data.auction_end,
         data.auction_start_price_gbp,
-        data.parking_type,
         data.capacity_total,
         data.owner_contact_email,
         data.owner_contact_phone,
@@ -309,11 +299,11 @@ function listingMutationCoreValues(data: PreparedListingMutation) {
     ];
 }
 
-async function fetchNominatim(path: "search" | "reverse", params: URLSearchParams) {
+async function fetchNominatim(params: URLSearchParams) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), NOMINATIM_TIMEOUT_MS);
     try {
-        return await fetch(`${NOMINATIM_BASE_URL}/${path}?${params.toString()}`, {
+        return await fetch(`${NOMINATIM_BASE_URL}/search?${params.toString()}`, {
             headers: NOMINATIM_HEADERS,
             signal: controller.signal,
         });
@@ -375,14 +365,13 @@ router.post("/", requireAuth, createListingRateLimit, async (req: AuthRequest, r
         availability_json,
         auction_end,
         auction_start_price_gbp,
-        parking_type,
         capacity_total,
         owner_contact_email,
         owner_contact_phone,
         owner_contact_info
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
       )
       RETURNING *`,
             insertValues
@@ -469,13 +458,12 @@ router.patch("/:id", requireAuth, updateListingRateLimit, async (req: AuthReques
            availability_json=$12,
            auction_end=$13,
            auction_start_price_gbp=$14,
-           parking_type=$15,
-           capacity_total=$16,
-           owner_contact_email=$17,
-           owner_contact_phone=$18,
-           owner_contact_info=$19,
+           capacity_total=$15,
+           owner_contact_email=$16,
+           owner_contact_phone=$17,
+           owner_contact_info=$18,
            updated_at=now()
-       WHERE id=$20 AND owner_user_id=$21 AND is_active = true
+       WHERE id=$19 AND owner_user_id=$20 AND is_active = true
        RETURNING *`,
             updateValues
         );
@@ -587,7 +575,7 @@ router.get("/geocode/search", geocodeRateLimit, async (req, res) => {
             q: rawQuery,
         });
 
-        const response = await fetchNominatim("search", params);
+        const response = await fetchNominatim(params);
         if (!response.ok) {
             return res.status(502).json({ ok: false, error: `Address search provider error (${response.status})` });
         }
@@ -613,47 +601,6 @@ router.get("/geocode/search", geocodeRateLimit, async (req, res) => {
         return res.json({ ok: true, suggestions });
     } catch (e) {
         return res.status(503).json({ ok: false, error: "Address search is unavailable right now. Please try again." });
-    }
-});
-
-router.get("/geocode/reverse", geocodeRateLimit, async (req, res) => {
-    const parsedQuery = parseWithSchema(geocodeReverseQuerySchema, req.query ?? {}, res, "geocode_reverse");
-    if (!parsedQuery.ok) return;
-    const { lat: latRaw, lng: lngRaw } = parsedQuery.data;
-
-    try {
-        const params = new URLSearchParams({
-            format: "jsonv2",
-            addressdetails: "1",
-            lat: String(latRaw),
-            lon: String(lngRaw),
-            zoom: "18",
-        });
-
-        const response = await fetchNominatim("reverse", params);
-        if (!response.ok) {
-            return res.status(502).json({ ok: false, error: `Address lookup provider error (${response.status})` });
-        }
-
-        const payload = (await response.json()) as {
-            display_name?: string;
-            lat?: string;
-            lon?: string;
-        };
-        if (typeof payload.display_name !== "string") {
-            return res.status(404).json({ ok: false, error: "No nearby address found" });
-        }
-
-        return res.json({
-            ok: true,
-            result: {
-                display_name: payload.display_name,
-                lat: typeof payload.lat === "string" ? payload.lat : String(latRaw),
-                lon: typeof payload.lon === "string" ? payload.lon : String(lngRaw),
-            },
-        });
-    } catch {
-        return res.status(503).json({ ok: false, error: "Address lookup is unavailable right now. Please try again." });
     }
 });
 

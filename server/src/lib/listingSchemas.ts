@@ -8,22 +8,6 @@ export type Mode = z.infer<typeof modeSchema>;
 export const priceUnitSchema = z.enum(["hour", "day", "week"]);
 export type PriceUnit = z.infer<typeof priceUnitSchema>;
 
-export const parkingTypeSchema = z.enum(["private", "public"]);
-export type ParkingType = z.infer<typeof parkingTypeSchema>;
-
-export const parkingKindSchema = z.enum([
-    "street",
-    "parking_lot",
-    "garage",
-    "closed_parking",
-    "driveway",
-    "underground",
-    "carport",
-    "multi_storey",
-    "ev_charging",
-]);
-export type ParkingKind = z.infer<typeof parkingKindSchema>;
-
 export const listingFeatureSchema = z.enum([
     "protected_lot",
     "private_outdoor",
@@ -41,10 +25,6 @@ export const listingFeatureSchema = z.enum([
     "near_airport",
 ]);
 export type ListingFeature = z.infer<typeof listingFeatureSchema>;
-
-const parkingKindInputSchema = z
-    .union([parkingKindSchema, z.literal("covered_parking")])
-    .transform((value): ParkingKind => (value === "covered_parking" ? "closed_parking" : value));
 
 const ymdSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be in YYYY-MM-DD format");
 const hhmmSchema = z.string().regex(/^\d{2}:\d{2}$/, "must be in HH:MM format");
@@ -114,7 +94,6 @@ export type ListingAvailabilityWindow = z.output<typeof listingAvailabilityWindo
 export const listingAvailabilitySchema = z.object({
     type: z.literal("window_slots"),
     windows: z.array(listingAvailabilityWindowSchema).min(1, "availability.windows must contain at least one slot"),
-    parking_kind: parkingKindInputSchema.optional(),
     features: z.array(listingFeatureSchema).max(16, "availability.features can contain at most 16 items").optional().default([]),
 });
 export type ListingAvailability = z.output<typeof listingAvailabilitySchema>;
@@ -126,7 +105,6 @@ export const listingPayloadSchema = z.object({
     address_text: z.string().trim().min(5, "address_text must be at least 5 characters"),
     lat: z.coerce.number().min(-90, "lat must be between -90 and 90").max(90, "lat must be between -90 and 90"),
     lng: z.coerce.number().min(-180, "lng must be between -180 and 180").max(180, "lng must be between -180 and 180"),
-    parking_type: parkingTypeSchema.optional().default("private"),
     capacity_total: z.coerce.number().int().min(1, "capacity_total must be at least 1").optional().default(1),
     image_url: optionalImageUrlString(14_500_000),
     price_unit: priceUnitSchema.optional().default("hour"),
@@ -137,7 +115,6 @@ export const listingPayloadSchema = z.object({
     owner_contact_email: optionalTrimmedNullableString(160),
     owner_contact_phone: optionalTrimmedNullableString(60),
     owner_contact_info: optionalTrimmedNullableString(500),
-    parking_kind: parkingKindInputSchema.optional(),
     availability: listingAvailabilitySchema,
 }).superRefine((value, ctx) => {
     if (Math.abs(value.lat) <= 0.000001 && Math.abs(value.lng) <= 0.000001) {
