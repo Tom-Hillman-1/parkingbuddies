@@ -749,7 +749,7 @@
 }
 
 .appCalendar--slots .rdp-day {
-    height: 4.3rem;
+    height: 5.25rem;
     vertical-align: top;
 }
 
@@ -770,11 +770,11 @@
     width: 4.7rem;
     transform: translateX(-50%);
     color: #6d7f96;
-    font-size: 0.62rem;
+    font-size: 0.56rem;
     font-weight: 700;
-    line-height: 1.18;
+    line-height: 1.1;
     text-align: center;
-    white-space: normal;
+    white-space: pre-line;
 }
 
 .appCalendar--slots .rdp-day_button[data-slot-time=""]::after {

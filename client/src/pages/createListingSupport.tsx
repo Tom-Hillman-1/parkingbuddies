@@ -10,6 +10,7 @@ import {
     formatCalendarWindowLabelForDay,
     isTimeHHMM as isTime,
     mergeCalendarDayLabels,
+    parseUtcDateTime,
     parseYmd,
     timeToMinutes as minutes,
     toLocalDateInput,
@@ -186,9 +187,9 @@ export function createAvailabilityWindow(partial?: Partial<Omit<AvailabilityWind
 
 export function availabilityWindowBounds(window: Pick<AvailabilityWindow, "from" | "to" | "start" | "end">) {
     if (!isTime(window.start) || !isTime(window.end)) return null;
-    const start = new Date(`${window.from}T${window.start}:00`);
-    const end = new Date(`${window.to}T${window.end}:00`);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+    const start = parseUtcDateTime(window.from, window.start);
+    const end = parseUtcDateTime(window.to, window.end);
+    if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
     return { start, end };
 }
 
@@ -367,9 +368,7 @@ export function AvailabilityCalendarSection({
     const anchorYmd = dateFrom || windows.at(-1)?.from || toLocalDateInput(new Date());
     const [visibleMonth, setVisibleMonth] = useState(() => calendarMonthFromYmd(anchorYmd));
     const today = useMemo(() => {
-        const value = new Date();
-        value.setHours(0, 0, 0, 0);
-        return value;
+        return parseYmd(toLocalDateInput(new Date())) ?? new Date();
     }, []);
     const selectedSingleDate = dateFrom && (!dateTo || dateFrom === dateTo) ? dateFrom : "";
     const dayLabels = useMemo(() => buildAvailabilityDayLabels(windows), [windows]);
@@ -467,7 +466,7 @@ export function AvailabilityCalendarSection({
 
 function calendarMonthFromYmd(ymd: string) {
     const parsed = parseYmd(ymd) ?? new Date();
-    return new Date(parsed.getFullYear(), parsed.getMonth(), 1);
+    return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), 1));
 }
 
 type AvailabilityDayState = "single" | "start" | "middle" | "end";
@@ -510,7 +509,7 @@ function AvailabilityDayButton({
 
     return (
         <DayPickerDayButton day={day} modifiers={modifiers} className={className} data-slot-time={slotLabel} {...buttonProps}>
-            {day.date.getDate()}
+            {Number(day.isoDate.slice(8, 10))}
         </DayPickerDayButton>
     );
 }
@@ -526,7 +525,7 @@ function buildAvailabilityDayLabels(windows: AvailabilityWindow[]) {
             }
             const nextDay = parseYmd(dayKey);
             if (!nextDay) break;
-            nextDay.setDate(nextDay.getDate() + 1);
+            nextDay.setUTCDate(nextDay.getUTCDate() + 1);
             dayKey = toLocalDateInput(nextDay);
         }
     }

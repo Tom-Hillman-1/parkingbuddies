@@ -188,6 +188,22 @@
     color: #146244;
 }
 
+.slotCal .appCalendar .appCalendarDay--availableSingle.rdp-disabled .rdp-day_button,
+.slotCal .appCalendar .appCalendarDay--availableStart.rdp-disabled .rdp-day_button,
+.slotCal .appCalendar .appCalendarDay--availableMiddle.rdp-disabled .rdp-day_button,
+.slotCal .appCalendar .appCalendarDay--availableEnd.rdp-disabled .rdp-day_button {
+    border-color: #d3ded5;
+    background: linear-gradient(180deg, #edf3ef 0%, #e3ebe6 100%);
+    color: #7f9385;
+}
+
+.slotCal .appCalendar .appCalendarDay--availableSingle.rdp-disabled .rdp-day_button::after,
+.slotCal .appCalendar .appCalendarDay--availableStart.rdp-disabled .rdp-day_button::after,
+.slotCal .appCalendar .appCalendarDay--availableMiddle.rdp-disabled .rdp-day_button::after,
+.slotCal .appCalendar .appCalendarDay--availableEnd.rdp-disabled .rdp-day_button::after {
+    color: #819183;
+}
+
 .slotCal .appCalendar .appCalendarDay--fullyBooked {
     background: transparent;
 }
@@ -211,7 +227,7 @@
 }
 
 .slotCal .appCalendar--slots .rdp-day {
-    height: 4.1rem;
+    height: 5.1rem;
 }
 
 @media (max-width: 720px) {
@@ -220,7 +236,7 @@
     }
 
     .slotCal .appCalendar--slots .rdp-day {
-        height: 4.2rem;
+        height: 5.2rem;
     }
 
     .slotCal .appCalendar--slots .rdp-day_button {
@@ -233,8 +249,8 @@
     .slotCal .appCalendar--slots .rdp-day_button::after {
         top: calc(100% + 0.36rem);
         width: 3.18rem;
-        font-size: 0.39rem;
-        line-height: 1;
+        font-size: 0.36rem;
+        line-height: 1.05;
     }
 }
 

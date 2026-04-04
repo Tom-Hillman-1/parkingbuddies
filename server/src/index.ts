@@ -9,7 +9,6 @@ import settingsRoutes from "./routes/settings";
 import dashboardRoutes from "./routes/dashboard";
 import paymentsRoutes, { stripeWebhookHandler } from "./routes/payments";
 import auctionsRoutes from "./routes/auctions";
-import supportRoutes from "./routes/support";
 dotenv.config();
 
 const isProduction = process.env.NODE_ENV === "production";
@@ -77,7 +76,6 @@ app.use("/settings", settingsRoutes);
 app.use("/dashboard", dashboardRoutes);
 app.use("/payments", paymentsRoutes);
 app.use("/auctions", auctionsRoutes);
-app.use("/support", supportRoutes);
 
 app.use((err: any, _req: Request, res: Response, next: any) => {
     if (err?.type === "entity.too.large") {

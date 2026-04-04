@@ -15,6 +15,7 @@ export function AppCalendar({
 }: AppCalendarProps) {
     return (
         <DayPicker
+            timeZone="UTC"
             fixedWeeks={fixedWeeks}
             navLayout={navLayout}
             showOutsideDays={showOutsideDays}

@@ -1,12 +1,15 @@
 export const SUPPORT_EMAIL = "parkingbuddiesproject@gmail.com";
 const DISPLAY_LOCALE = "en-GB";
+const DISPLAY_TIME_ZONE = "UTC";
 const YMD_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const dateStamp = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+    timeZone: DISPLAY_TIME_ZONE,
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
 });
 const timeStamp = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+    timeZone: DISPLAY_TIME_ZONE,
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -18,10 +21,12 @@ const moneyStamp = new Intl.NumberFormat(DISPLAY_LOCALE, {
     maximumFractionDigits: 2,
 });
 const monthTitleStamp = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+    timeZone: DISPLAY_TIME_ZONE,
     month: "long",
     year: "numeric",
 });
 const monthChipStamp = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+    timeZone: DISPLAY_TIME_ZONE,
     month: "short",
 });
 
@@ -55,22 +60,38 @@ export function pad2(value: number) {
 }
 
 export function toLocalDateInput(date: Date) {
-    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+    return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
 }
 
 export function parseYmd(value: string) {
-    // Treat YYYY-MM-DD values as local dates. Using new Date("2026-03-30")
-    // shifts the day in some time zones, which gets messy fast in booking UIs.
+    // Treat YYYY-MM-DD values as fixed GMT/UTC calendar days so booking dates
+    // do not drift when different users open the site in different time zones.
     if (!YMD_PATTERN.test(value)) return null;
     const [yearRaw, monthRaw, dayRaw] = value.split("-");
     const year = Number(yearRaw);
     const month = Number(monthRaw);
     const day = Number(dayRaw);
     if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
-    const parsed = new Date(year, month - 1, day);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
     if (Number.isNaN(parsed.getTime())) return null;
-    parsed.setHours(0, 0, 0, 0);
+    parsed.setUTCHours(0, 0, 0, 0);
     return parsed;
+}
+
+export function parseUtcDateTime(ymd: string, hhmm: string) {
+    const date = parseYmd(ymd);
+    if (!date || !isTimeHHMM(hhmm)) return null;
+    const [hoursRaw, minutesRaw] = hhmm.split(":");
+    const hours = Number(hoursRaw);
+    const minutes = Number(minutesRaw);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+    const next = new Date(date);
+    next.setUTCHours(hours, minutes, 0, 0);
+    return next;
+}
+
+export function formatUtcClock(date: Date) {
+    return `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`;
 }
 
 export function capitalizeLabel(value: string, fallback = "Unknown") {
@@ -88,7 +109,7 @@ export function formatDateTimeCompact(value?: string | null, fallback = "-") {
     if (!value) return fallback;
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
-    return `${dateStamp.format(date)} ${timeStamp.format(date)}`;
+    return `${dateStamp.format(date)} ${timeStamp.format(date)} GMT`;
 }
 
 export function formatDateDisplay(value?: Date | string | null, fallback = "-") {
@@ -107,7 +128,7 @@ export function formatTimeDisplay(value?: Date | string | null, fallback = "-") 
     if (!value) return fallback;
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return typeof value === "string" ? value : fallback;
-    return timeStamp.format(date);
+    return `${timeStamp.format(date)} GMT`;
 }
 
 export function formatMonthYearLabel(value: Date) {

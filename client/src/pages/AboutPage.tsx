@@ -13,7 +13,6 @@ import { Link, useLocation } from "react-router-dom";
 import { AppDisclosure } from "../components/ui/AppDisclosure";
 import { AppButton, AppField, AppInput, AppSelect, AppTextarea } from "../components/ui/AppForm";
 import { SUPPORT_EMAIL } from "./pagesShared";
-import { apiPost, readErrorMessage } from "../lib/api";
 
 type ShowcaseCard = {
     id: string;
@@ -335,7 +334,7 @@ export default function AboutPage() {
     const [message, setMessage] = useState("");
     const [company, setCompany] = useState("");
     const [sending, setSending] = useState(false);
-    const [sent, setSent] = useState(false);
+    const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
@@ -418,28 +417,57 @@ export default function AboutPage() {
         if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
     }, [location.hash]);
 
+    function openSupportDraft() {
+        const params = new URLSearchParams({
+            subject: `ParkingBuddies help request: ${topic}`,
+            body: `Name: ${name.trim()}\nEmail: ${email.trim()}\nTopic: ${topic}\n\n${message.trim()}`,
+        });
+        window.location.href = `mailto:${SUPPORT_EMAIL}?${params.toString()}`;
+    }
+
     async function submitHelp(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault();
         setSending(true);
-        setSent(false);
+        setSuccessMessage(null);
         setError(null);
 
+        if (company.trim()) {
+            setSuccessMessage("Thanks, your message has been sent.");
+            setSending(false);
+            return;
+        }
+
         try {
-            await apiPost("/support/contact", {
+            const payload = new URLSearchParams({
                 name: name.trim(),
                 email: email.trim(),
                 topic,
                 message: message.trim(),
-                company,
+                _subject: `ParkingBuddies help request: ${topic}`,
+                _template: "table",
+                _captcha: "false",
             });
-            setSent(true);
+            const response = await fetch(`https://formsubmit.co/ajax/${SUPPORT_EMAIL}`, {
+                method: "POST",
+                headers: {
+                    Accept: "application/json",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: payload.toString(),
+            });
+            const result = (await response.json().catch(() => null)) as { success?: string | boolean; message?: string } | null;
+            if (!response.ok || (result?.success !== true && result?.success !== "true")) {
+                throw new Error(result?.message || "Message failed to send. Please try again or use the email draft button.");
+            }
+
+            setSuccessMessage("Thanks, your message has been sent.");
             setName("");
             setEmail("");
             setTopic("General question");
             setMessage("");
             setCompany("");
         } catch (submitError) {
-            setError(readErrorMessage(submitError, "Message failed to send. Please try again or use direct email."));
+            setError(submitError instanceof Error ? submitError.message : "Message failed to send. Please use the email draft button.");
         } finally {
             setSending(false);
         }
@@ -715,12 +743,12 @@ export default function AboutPage() {
                         <AppButton type="submit" variant="primary" disabled={sending}>
                             {sending ? "Sending..." : "Send message"}
                         </AppButton>
-                        <a className="btn btn-ghost" href={`mailto:${SUPPORT_EMAIL}`}>
-                            Email directly
-                        </a>
+                        <AppButton type="button" onPress={openSupportDraft}>
+                            Open email draft
+                        </AppButton>
                     </div>
 
-                    {sent && <p className="aboutPremiumNotice aboutPremiumNotice--ok">Thanks, your message has been sent.</p>}
+                    {successMessage && <p className="aboutPremiumNotice aboutPremiumNotice--ok">{successMessage}</p>}
                     {error && <p className="aboutPremiumNotice aboutPremiumNotice--err">{error}</p>}
                 </form>
             </section>

@@ -8,7 +8,9 @@ import {
     expandRangeToBillableEnd,
     formatDateDisplay,
     formatDateTimeCompact,
+    formatUtcClock,
     pad2,
+    parseUtcDateTime,
     parseYmd,
     timeToMinutes,
     toFiniteNumber,
@@ -249,7 +251,7 @@ export function SlotDialog({
 
 function calendarMonthFromYmd(ymd: string) {
     const parsed = parseYmd(ymd) ?? new Date();
-    return new Date(parsed.getFullYear(), parsed.getMonth(), 1);
+    return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), 1));
 }
 
 function isTimeHHMM(value: string) {
@@ -324,10 +326,10 @@ function hasWindowDayState(spot: AvailabilitySpot, day: Date, state: WindowDaySt
 function isWindowRangeAllowed(window: WindowSlot, start: Date, end: Date) {
     if (!(start < end)) return false;
 
-    const slotStart = new Date(`${window.date_from}T${window.start}:00`);
-    const slotEnd = new Date(`${window.date_to}T${window.end}:00`);
+    const slotStart = parseUtcDateTime(window.date_from, window.start);
+    const slotEnd = parseUtcDateTime(window.date_to, window.end);
 
-    if (Number.isNaN(slotStart.getTime()) || Number.isNaN(slotEnd.getTime())) return false;
+    if (!slotStart || !slotEnd || Number.isNaN(slotStart.getTime()) || Number.isNaN(slotEnd.getTime())) return false;
     if (!(slotStart < slotEnd)) return false;
 
     return start >= slotStart && end <= slotEnd;
@@ -378,7 +380,7 @@ function buildDayAvailabilityState(spot: AvailabilitySpot, bookings: SlotBooking
     }
 
     const fullDays = new Set<string>();
-    const dayLabels = new Map<string, string>();
+    const dayLabels = new Map<string, string[]>();
 
     for (const [key, segments] of dayWindows.entries()) {
         let hasAvailability = false;
@@ -393,17 +395,20 @@ function buildDayAvailabilityState(spot: AvailabilitySpot, bookings: SlotBooking
                 const nextLabel = formatDaySegmentLabel(available.start, available.end);
                 if (!nextLabel) continue;
                 hasAvailability = true;
-                dayLabels.set(key, keepLongestDayLabel(dayLabels.get(key), nextLabel));
+                pushDayLabel(dayLabels, key, nextLabel);
             }
         }
 
         if (!hasAvailability) {
             fullDays.add(key);
-            dayLabels.set(key, "Full");
+            dayLabels.set(key, ["Full"]);
         }
     }
 
-    return { fullyBookedDays: fullDays, dayLabels };
+    return {
+        fullyBookedDays: fullDays,
+        dayLabels: new Map(Array.from(dayLabels.entries()).map(([key, labels]) => [key, labels.slice(0, 3).join("\n")])),
+    };
 }
 
 function getSpotPriceUnit(spot: AvailabilitySpot) {
@@ -526,44 +531,23 @@ function formatDaySegmentLabel(start: Date, end: Date) {
     const startMinutes = Math.max(0, Math.round((start.getTime() - dayStart.getTime()) / 60000));
     if (startMinutes <= 0 && end >= nextDay) return "All day";
 
-    const startText = startMinutes <= 0 ? "00:00" : `${pad2(start.getHours())}:${pad2(start.getMinutes())}`;
-    const endText = end >= nextDay ? "00:00" : `${pad2(end.getHours())}:${pad2(end.getMinutes())}`;
+    const startText = startMinutes <= 0 ? "00:00" : formatUtcClock(start);
+    const endText = end >= nextDay ? "00:00" : formatUtcClock(end);
 
     if (startText === "00:00" && endText === "00:00") return "All day";
     return `${startText}-${endText}`;
 }
 
-function keepLongestDayLabel(currentLabel: string | undefined, nextLabel: string) {
-    if (!currentLabel) return nextLabel;
-    if (currentLabel === "All day" || nextLabel === "All day") return "All day";
-
-    const currentRange = parseDayLabelRange(currentLabel);
-    const nextRange = parseDayLabelRange(nextLabel);
-    if (!currentRange) return nextLabel;
-    if (!nextRange) return currentLabel;
-
-    const currentLength = currentRange.end - currentRange.start;
-    const nextLength = nextRange.end - nextRange.start;
-    if (nextLength > currentLength) return nextLabel;
-    if (nextLength < currentLength) return currentLabel;
-    return nextRange.start < currentRange.start ? nextLabel : currentLabel;
-}
-
-function parseDayLabelRange(label: string) {
-    if (label === "All day") {
-        return { start: 0, end: 24 * 60 };
+function pushDayLabel(dayLabels: Map<string, string[]>, key: string, nextLabel: string) {
+    const current = dayLabels.get(key) ?? [];
+    if (current.includes("All day")) return;
+    if (nextLabel === "All day") {
+        dayLabels.set(key, ["All day"]);
+        return;
     }
-
-    const match = /^(\d{2}:\d{2})-(\d{2}:\d{2})$/.exec(label);
-    if (!match) return null;
-
-    const start = timeToMinutes(match[1]);
-    let end = timeToMinutes(match[2]);
-    if (match[2] === "00:00" && match[1] !== "00:00") {
-        end = 24 * 60;
+    if (!current.includes(nextLabel)) {
+        dayLabels.set(key, [...current, nextLabel]);
     }
-
-    return end > start ? { start, end } : null;
 }
 
 export function getAutoStartForDate(spot: AvailabilitySpot | null, ymd: string) {
@@ -626,7 +610,7 @@ function SlotDayButton({
             data-slot-time={slotLabel}
             {...buttonProps}
         >
-            {day.date.getDate()}
+            {Number(day.isoDate.slice(8, 10))}
         </DayPickerDayButton>
     );
 }
@@ -694,21 +678,21 @@ export function formatBidAmount(bid: AuctionBidLike) {
 export function nextWholeQuarterHour() {
     const now = new Date();
     const d = new Date(now);
-    d.setSeconds(0, 0);
+    d.setUTCSeconds(0, 0);
 
-    const roundedMinutes = Math.ceil(d.getMinutes() / 15) * 15;
+    const roundedMinutes = Math.ceil(d.getUTCMinutes() / 15) * 15;
     if (roundedMinutes === 60) {
-        d.setHours(d.getHours() + 1, 0, 0, 0);
+        d.setUTCHours(d.getUTCHours() + 1, 0, 0, 0);
     } else {
-        d.setMinutes(roundedMinutes, 0, 0);
+        d.setUTCMinutes(roundedMinutes, 0, 0);
     }
 
-    if (d <= now) d.setMinutes(d.getMinutes() + 15, 0, 0);
+    if (d <= now) d.setUTCMinutes(d.getUTCMinutes() + 15, 0, 0);
     return d;
 }
 
 export function toTimeInput(date: Date) {
-    return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+    return formatUtcClock(date);
 }
 
 export function normalizeTimeInput(value: string) {
@@ -729,25 +713,25 @@ export function addMinutes(date: Date, minutes: number) {
 
 function addDays(date: Date, days: number) {
     const next = new Date(date);
-    next.setDate(next.getDate() + days);
+    next.setUTCDate(next.getUTCDate() + days);
     return next;
 }
 
 export function setTime(date: Date, hhmm: string) {
     const [h, m] = hhmm.split(":").map((v) => Number(v));
     const out = new Date(date);
-    out.setHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0);
+    out.setUTCHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0);
     return out;
 }
 
 export function startOfDay(date: Date) {
     const d = new Date(date);
-    d.setHours(0, 0, 0, 0);
+    d.setUTCHours(0, 0, 0, 0);
     return d;
 }
 
 function isSameDay(a: Date, b: Date) {
-    return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    return a.getUTCFullYear() === b.getUTCFullYear() && a.getUTCMonth() === b.getUTCMonth() && a.getUTCDate() === b.getUTCDate();
 }
 
 export function roundMoney(value: number) {

@@ -2,17 +2,6 @@ type AvailabilityWindow = { start: Date; end: Date };
 type Queryable = {
     query: (text: string, params?: unknown[]) => Promise<{ rows: Array<{ count?: number | string }> }>;
 };
-const LONDON_TIME_ZONE = "Europe/London";
-const londonDateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
-    timeZone: LONDON_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    hourCycle: "h23",
-});
 
 function parseTimeToMinutes(hhmm: string) {
     const [rawH, rawM] = hhmm.split(":");
@@ -21,18 +10,11 @@ function parseTimeToMinutes(hhmm: string) {
     return h * 60 + m;
 }
 
-function londonDateTimeParts(date: Date) {
-    const parts = londonDateTimeFormatter.formatToParts(date);
-    return {
-        year: Number(parts.find((part) => part.type === "year")?.value ?? 0),
-        month: Number(parts.find((part) => part.type === "month")?.value ?? 1),
-        day: Number(parts.find((part) => part.type === "day")?.value ?? 1),
-        hour: Number(parts.find((part) => part.type === "hour")?.value ?? 0),
-        minute: Number(parts.find((part) => part.type === "minute")?.value ?? 0),
-    };
+function pad2(value: number) {
+    return String(value).padStart(2, "0");
 }
 
-export function parseLondonDateTime(ymd: string, hhmm: string) {
+export function parseUtcDateTime(ymd: string, hhmm: string) {
     const [rawYear, rawMonth, rawDay] = ymd.split("-").map(Number);
     const [rawHour, rawMinute] = hhmm.split(":").map(Number);
     const year = rawYear ?? 0;
@@ -40,27 +22,15 @@ export function parseLondonDateTime(ymd: string, hhmm: string) {
     const day = rawDay ?? 1;
     const hour = rawHour ?? 0;
     const minute = rawMinute ?? 0;
-    const desiredUtcMs = Date.UTC(year, month - 1, day, hour, minute);
-    let guess = new Date(desiredUtcMs);
-
-    for (let i = 0; i < 3; i += 1) {
-        const parts = londonDateTimeParts(guess);
-        const actualLocalMs = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
-        const offsetMs = desiredUtcMs - actualLocalMs;
-        if (offsetMs === 0) break;
-        guess = new Date(guess.getTime() + offsetMs);
-    }
-
-    return guess;
+    return new Date(Date.UTC(year, month - 1, day, hour, minute));
 }
 
-function londonDateTimeKey(date: Date) {
-    const parts = londonDateTimeParts(date);
-    const year = String(parts.year).padStart(4, "0");
-    const month = String(parts.month).padStart(2, "0");
-    const day = String(parts.day).padStart(2, "0");
-    const hour = String(parts.hour).padStart(2, "0");
-    const minute = String(parts.minute).padStart(2, "0");
+function utcDateTimeKey(date: Date) {
+    const year = String(date.getUTCFullYear()).padStart(4, "0");
+    const month = pad2(date.getUTCMonth() + 1);
+    const day = pad2(date.getUTCDate());
+    const hour = pad2(date.getUTCHours());
+    const minute = pad2(date.getUTCMinutes());
     return `${year}-${month}-${day}T${hour}:${minute}`;
 }
 
@@ -88,8 +58,8 @@ function buildAvailabilityWindows(spot: any, maxDaysForward = 30): AvailabilityW
     const windows: AvailabilityWindow[] = [];
     for (const window of a.windows) {
         if (!isWindowSlot(window)) continue;
-        const start = parseLondonDateTime(window.date_from, window.start);
-        const end = parseLondonDateTime(window.date_to, window.end);
+        const start = parseUtcDateTime(window.date_from, window.start);
+        const end = parseUtcDateTime(window.date_to, window.end);
         if (!(start < end)) continue;
         if (end <= now || start >= maxEnd) continue;
         windows.push({
@@ -189,8 +159,8 @@ export function isSlotAllowed(spot: any, start: Date, end: Date) {
     const a: any = spot?.availability_json;
     if (a?.type !== "window_slots" || !Array.isArray(a.windows)) return false;
 
-    const startKey = londonDateTimeKey(start);
-    const endKey = londonDateTimeKey(end);
+    const startKey = utcDateTimeKey(start);
+    const endKey = utcDateTimeKey(end);
 
     for (const window of a.windows) {
         if (!isWindowSlot(window)) continue;

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
-import { availabilityDateRange, isWindowSlot, parseLondonDateTime, remainingMinutes } from "../lib/availability";
+import { availabilityDateRange, isWindowSlot, parseUtcDateTime, remainingMinutes } from "../lib/availability";
 import {
     LISTING_PUBLISH_REWARD_POINTS,
     MAX_LISTING_PUBLISH_REWARDS,
@@ -143,7 +143,7 @@ function auctionEndFromAvailability(availability: AvailabilityJson) {
         .sort()
         .at(-1);
     if (!lastDate) return null;
-    return new Date(parseLondonDateTime(lastDate, "23:59").getTime() + 59 * 1000 + 999).toISOString();
+    return new Date(parseUtcDateTime(lastDate, "23:59").getTime() + 59 * 1000 + 999).toISOString();
 }
 
 function buildAvailabilityJson(body: ListingPayload): { ok: true; availability: AvailabilityJson } {
