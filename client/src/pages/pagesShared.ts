@@ -64,7 +64,7 @@ export function toLocalDateInput(date: Date) {
 }
 
 export function parseYmd(value: string) {
-    // Treat YYYY-MM-DD values as fixed GMT/UTC calendar days so booking dates
+    // Treat YYYY-MM-DD values as fixed UTC calendar days so booking dates
     // do not drift when different users open the site in different time zones.
     if (!YMD_PATTERN.test(value)) return null;
     const [yearRaw, monthRaw, dayRaw] = value.split("-");
@@ -109,7 +109,7 @@ export function formatDateTimeCompact(value?: string | null, fallback = "-") {
     if (!value) return fallback;
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
-    return `${dateStamp.format(date)} ${timeStamp.format(date)} GMT`;
+    return `${dateStamp.format(date)} ${timeStamp.format(date)}`;
 }
 
 export function formatDateDisplay(value?: Date | string | null, fallback = "-") {
@@ -128,7 +128,7 @@ export function formatTimeDisplay(value?: Date | string | null, fallback = "-") 
     if (!value) return fallback;
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return typeof value === "string" ? value : fallback;
-    return `${timeStamp.format(date)} GMT`;
+    return timeStamp.format(date);
 }
 
 export function formatMonthYearLabel(value: Date) {
