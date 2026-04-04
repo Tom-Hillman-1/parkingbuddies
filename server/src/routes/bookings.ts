@@ -3,7 +3,7 @@ import type { Response } from "express";
 import type { PoolClient } from "pg";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
-import { calcBookingUnits, expandRangeToBillableEnd, type PriceUnit, STRIPE_MIN_GBP_PAYMENT, toMoney } from "../lib/shared";
+import { calcBookingUnits, type PriceUnit, STRIPE_MIN_GBP_PAYMENT, toMoney } from "../lib/shared";
 import { findSlotAvailabilityIssue, occupiedBookingWhereClause } from "../lib/availability";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
@@ -122,18 +122,14 @@ router.post("/", requireAuth, bookingCreateRateLimit, async (req: AuthRequest, r
         }
         const start = requestedStart;
         const end = requestedEnd;
-        const reservedEnd = expandRangeToBillableEnd(start, end, unit, "booking");
-        if (!reservedEnd) {
-            return rollbackWithError(client, res, 400, "Invalid booking range");
-        }
         const startIso = start.toISOString();
-        const endIso = reservedEnd.toISOString();
+        const endIso = end.toISOString();
         const slotIssue = await findSlotAvailabilityIssue({
             db: client,
             parkingSpotId: parking_spot_id,
             spot,
             start,
-            end: reservedEnd,
+            end,
         });
         if (slotIssue) {
             return rollbackWithError(client, res, 400, slotIssue);

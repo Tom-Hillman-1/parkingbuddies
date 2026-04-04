@@ -169,7 +169,34 @@ export function pushCalendarDayLabel(dayLabels: Map<string, string[]>, dayKey: s
         return;
     }
     if (!current.includes(nextLabel)) {
-        dayLabels.set(dayKey, [...current, nextLabel]);
+        dayLabels.set(dayKey, [...current, nextLabel].sort(compareCalendarDayLabels));
     }
+}
+
+function compareCalendarDayLabels(left: string, right: string) {
+    const leftRange = parseCalendarDayLabel(left);
+    const rightRange = parseCalendarDayLabel(right);
+    if (!leftRange || !rightRange) return left.localeCompare(right);
+
+    const leftDuration = leftRange.end - leftRange.start;
+    const rightDuration = rightRange.end - rightRange.start;
+    if (leftDuration !== rightDuration) {
+        return rightDuration - leftDuration;
+    }
+
+    return leftRange.start - rightRange.start;
+}
+
+function parseCalendarDayLabel(label: string) {
+    const match = /^(\d{2}:\d{2})-(\d{2}:\d{2})$/.exec(label);
+    if (!match) return null;
+
+    const start = timeToMinutes(match[1]);
+    let end = timeToMinutes(match[2]);
+    if (match[2] === "00:00" && match[1] !== "00:00") {
+        end = 24 * 60;
+    }
+
+    return { start, end };
 }
 

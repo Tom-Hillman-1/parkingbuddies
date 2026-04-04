@@ -5,7 +5,7 @@ import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
 import { stripe } from "../stripe";
 import { findSlotAvailabilityIssue, occupiedBookingWhereClause, remainingMinutes } from "../lib/availability";
-import { calcAuctionUnits, calcMinimumAuctionMoneyTotal, expandRangeToBillableEnd, type PriceUnit, toMoney } from "../lib/shared";
+import { calcAuctionUnits, calcMinimumAuctionMoneyTotal, type PriceUnit, toMoney } from "../lib/shared";
 import { z } from "zod";
 import { parseWithSchema } from "../lib/validation";
 import { serverError } from "../lib/errors";
@@ -452,13 +452,9 @@ router.post("/:spotId/bid", requireAuth, bidSubmitRateLimit, async (req: AuthReq
         const unit = normalizeAuctionUnit(spot.price_unit);
         const start = requestedStart;
         const end = requestedEnd;
-        const reservedEnd = expandRangeToBillableEnd(start, end, unit, "auction");
-        if (!reservedEnd) {
-            return rollbackWith(400, "Invalid start/end time", payMethod === "money");
-        }
         const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
         const maxEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-        if (!Number.isFinite(minutes) || minutes <= 0 || reservedEnd > maxEnd) {
+        if (!Number.isFinite(minutes) || minutes <= 0 || end > maxEnd) {
             return rollbackWith(400, "Selected slot exceeds the allowed booking window.", payMethod === "money");
         }
 
@@ -467,7 +463,7 @@ router.post("/:spotId/bid", requireAuth, bidSubmitRateLimit, async (req: AuthReq
             parkingSpotId: spotId,
             spot,
             start,
-            end: reservedEnd,
+            end,
             fullMessage: "Selected slot is no longer available",
         });
         if (slotIssue) {
@@ -514,7 +510,7 @@ router.post("/:spotId/bid", requireAuth, bidSubmitRateLimit, async (req: AuthReq
                 `INSERT INTO auction_bids (parking_spot_id, bidder_user_id, amount_gbp, payment_intent_id, start_time, end_time, status, pay_method)
                  VALUES ($1,$2,$3,$4,$5,$6,'pending','money')
                  RETURNING id`,
-                [spotId, req.userId, amount.toFixed(2), authorizationRef, start.toISOString(), reservedEnd.toISOString()]
+                [spotId, req.userId, amount.toFixed(2), authorizationRef, start.toISOString(), end.toISOString()]
             );
             bidId = insertR.rows[0]?.id ?? null;
         } else {
@@ -547,7 +543,7 @@ router.post("/:spotId/bid", requireAuth, bidSubmitRateLimit, async (req: AuthReq
                 `INSERT INTO auction_bids (parking_spot_id, bidder_user_id, amount_gbp, amount_points, start_time, end_time, status, pay_method)
                  VALUES ($1,$2,$3,$4,$5,$6,'pending','points')
                  RETURNING id`,
-                [spotId, req.userId, "0.00", Math.ceil(amountPoints), start.toISOString(), reservedEnd.toISOString()]
+                [spotId, req.userId, "0.00", Math.ceil(amountPoints), start.toISOString(), end.toISOString()]
             );
             bidId = insertR.rows[0]?.id ?? null;
         }

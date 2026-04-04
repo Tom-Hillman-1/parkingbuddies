@@ -14,7 +14,6 @@ import {
     calcAuctionPointsTotal,
     calcUnitsForMinutes,
     capitalizeLabel,
-    expandRangeToBillableEnd,
     formatDateDisplay,
     formatDateTimeCompact,
     formatGbp,
@@ -201,25 +200,19 @@ export default function SpotDetailsPage() {
         if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) return false;
         return startAt < endAt;
     }, [startAt, endAt]);
-    const slotBillingMode = spot?.mode === "auction" ? "auction" : "booking";
-    const billableEndAt = useMemo(
-        () => expandRangeToBillableEnd(startAt, endAt, (spot?.price_unit ?? "hour") as PriceUnit, slotBillingMode),
-        [endAt, spot?.price_unit, slotBillingMode, startAt]
-    );
-    const effectiveSlotEnd = billableEndAt ?? endAt;
 
     const slotAllowed = useMemo(() => {
         if (!spot || !slotRangeValid) return false;
-        return isSlotAllowed(spot, startAt, effectiveSlotEnd);
-    }, [effectiveSlotEnd, spot, startAt, slotRangeValid]);
+        return isSlotAllowed(spot, startAt, endAt);
+    }, [endAt, spot, startAt, slotRangeValid]);
 
     const capacity = Math.max(1, toFiniteNumber(spot?.capacity_total || 1));
     const selectedCapacity = useMemo(() => {
         if (!slotRangeValid) {
             return { maxBooked: 0, spacesLeft: capacity, isFull: false };
         }
-        return getRangeCapacityState(bookings, startAt, effectiveSlotEnd, capacity);
-    }, [bookings, capacity, effectiveSlotEnd, slotRangeValid, startAt]);
+        return getRangeCapacityState(bookings, startAt, endAt, capacity);
+    }, [bookings, capacity, endAt, slotRangeValid, startAt]);
     const slotFull = selectedCapacity.isFull;
 
     const isOwner = !!user && !!spot && user.id === spot.owner_user_id;
