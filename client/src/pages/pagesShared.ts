@@ -161,41 +161,15 @@ export function formatCalendarWindowLabelForDay(dayKey: string, rangeStart: stri
     return "All day";
 }
 
-export function mergeCalendarDayLabels(existingLabel: string | undefined, nextLabel: string) {
-    if (!existingLabel || existingLabel === nextLabel) return nextLabel;
-    if (existingLabel === "Full" || nextLabel === "Full") return existingLabel === "Full" ? existingLabel : nextLabel;
-    if (existingLabel === "All day" || nextLabel === "All day") return "All day";
-
-    const current = parseCalendarDayLabel(existingLabel);
-    const next = parseCalendarDayLabel(nextLabel);
-    if (!current || !next) return "Multiple slots";
-    if (current.end < next.start || next.end < current.start) return "Multiple slots";
-
-    const mergedStart = Math.min(current.start, next.start);
-    const mergedEnd = Math.max(current.end, next.end);
-    if (mergedStart === 0 && mergedEnd >= 24 * 60) return "All day";
-
-    return `${formatCalendarMinutes(mergedStart)}-${formatCalendarMinutes(mergedEnd)}`;
-}
-
-function parseCalendarDayLabel(label: string) {
-    if (label === "All day") return { start: 0, end: 24 * 60 };
-    const match = /^(\d{2}:\d{2})-(\d{2}:\d{2})$/.exec(label);
-    if (!match) return null;
-
-    const start = timeToMinutes(match[1]);
-    let end = timeToMinutes(match[2]);
-    if (match[2] === "00:00" && match[1] !== "00:00") {
-        end = 24 * 60;
+export function pushCalendarDayLabel(dayLabels: Map<string, string[]>, dayKey: string, nextLabel: string) {
+    const current = dayLabels.get(dayKey) ?? [];
+    if (current.includes("All day") || current.includes("Full")) return;
+    if (nextLabel === "All day" || nextLabel === "Full") {
+        dayLabels.set(dayKey, [nextLabel]);
+        return;
     }
-
-    return { start, end };
-}
-
-function formatCalendarMinutes(totalMinutes: number) {
-    const normalized = totalMinutes >= 24 * 60 ? 0 : totalMinutes;
-    const hours = Math.floor(normalized / 60);
-    const minutes = normalized % 60;
-    return `${pad2(hours)}:${pad2(minutes)}`;
+    if (!current.includes(nextLabel)) {
+        dayLabels.set(dayKey, [...current, nextLabel]);
+    }
 }
 

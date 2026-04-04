@@ -26,6 +26,7 @@ const signupBodySchema = z.object({
 const loginBodySchema = z.object({
     email: z.string(),
     password: z.string(),
+    remember: z.boolean().optional(),
 });
 
 const signupRateLimit = simpleRateLimit({
@@ -110,7 +111,7 @@ router.post("/signup", signupRateLimit, async (req, res) => {
 router.post("/login", loginRateLimit, async (req, res) => {
     const parsedBody = parseWithSchema(loginBodySchema, req.body ?? {}, res, "login");
     if (!parsedBody.ok) return;
-    const { email, password } = parsedBody.data;
+    const { email, password, remember = false } = parsedBody.data;
 
     const trimmedEmail = normalizeEmail(email);
 
@@ -133,7 +134,7 @@ router.post("/login", loginRateLimit, async (req, res) => {
             return res.status(401).json({ ok: false, error: "Invalid email or password" });
         }
 
-        const token = issueAuthToken(user.id, Number(user.token_version ?? 0));
+        const token = issueAuthToken(user.id, Number(user.token_version ?? 0), remember);
 
         const safeUser = {
             id: user.id,

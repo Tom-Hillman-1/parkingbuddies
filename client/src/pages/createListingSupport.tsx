@@ -9,9 +9,9 @@ import {
     formatDateDisplay,
     formatCalendarWindowLabelForDay,
     isTimeHHMM as isTime,
-    mergeCalendarDayLabels,
     parseUtcDateTime,
     parseYmd,
+    pushCalendarDayLabel,
     timeToMinutes as minutes,
     toLocalDateInput,
 } from "./pagesShared";
@@ -515,13 +515,13 @@ function AvailabilityDayButton({
 }
 
 function buildAvailabilityDayLabels(windows: AvailabilityWindow[]) {
-    const labels = new Map<string, string>();
+    const labels = new Map<string, string[]>();
 
     for (const window of windows) {
         for (let dayKey = window.from; dayKey <= window.to; ) {
             const nextLabel = formatCalendarWindowLabelForDay(dayKey, window.from, window.to, window.start, window.end);
             if (nextLabel) {
-                labels.set(dayKey, mergeCalendarDayLabels(labels.get(dayKey), nextLabel));
+                pushCalendarDayLabel(labels, dayKey, nextLabel);
             }
             const nextDay = parseYmd(dayKey);
             if (!nextDay) break;
@@ -530,7 +530,7 @@ function buildAvailabilityDayLabels(windows: AvailabilityWindow[]) {
         }
     }
 
-    return labels;
+    return new Map(Array.from(labels.entries()).map(([dayKey, dayLabels]) => [dayKey, dayLabels.slice(0, 3).join("\n")]));
 }
 
 

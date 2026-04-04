@@ -32,6 +32,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 const TOKEN_KEY = "pb_token";
 const REMEMBER_KEY = "pb_remember";
+const TOKEN_ERROR_MESSAGES = new Set(["Invalid or expired token", "Missing Bearer token"]);
 
 function readStoredAuth() {
     try {
@@ -43,7 +44,7 @@ function readStoredAuth() {
         const localToken = window.localStorage.getItem(TOKEN_KEY);
         return {
             token: localToken,
-            remember: localToken ? window.localStorage.getItem(REMEMBER_KEY) === "true" : false,
+            remember: Boolean(localToken),
         };
     } catch {
         return { token: null, remember: false };
@@ -76,6 +77,10 @@ function clearStoredToken() {
     }
 }
 
+function shouldClearAuthState(error: unknown) {
+    return TOKEN_ERROR_MESSAGES.has(readErrorMessage(error, ""));
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [storedAuth] = useState(() => readStoredAuth());
     const [token, setToken] = useState<string | null>(storedAuth.token);
@@ -104,9 +109,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         (async () => {
             try {
                 await refreshMe();
-            } catch {
+            } catch (error: unknown) {
                 if (!active) return;
-                clearAuthState();
+                if (shouldClearAuthState(error)) {
+                    clearAuthState();
+                }
             } finally {
                 if (active) setIsLoading(false);
             }
@@ -119,11 +126,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         if (!token) return;
         const onFocus = () => {
-            refreshMe().catch(clearAuthState);
+            refreshMe().catch((error: unknown) => {
+                if (shouldClearAuthState(error)) {
+                    clearAuthState();
+                }
+            });
         };
         const onVisibility = () => {
             if (document.visibilityState === "visible") {
-                refreshMe().catch(clearAuthState);
+                refreshMe().catch((error: unknown) => {
+                    if (shouldClearAuthState(error)) {
+                        clearAuthState();
+                    }
+                });
             }
         };
 
@@ -136,7 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, [token, refreshMe, clearAuthState]);
 
     const login = useCallback(async (email: string, password: string, remember = false) => {
-        const r = await apiPost<{ token: string }>("/auth/login", { email, password });
+        const r = await apiPost<{ token: string }>("/auth/login", { email, password, remember });
         writeStoredToken(r.token, remember);
         setRememberSession(remember);
         setToken(r.token);

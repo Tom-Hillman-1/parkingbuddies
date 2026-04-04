@@ -12,6 +12,7 @@ import {
     pad2,
     parseUtcDateTime,
     parseYmd,
+    pushCalendarDayLabel,
     timeToMinutes,
     toFiniteNumber,
     toLocalDateInput,
@@ -395,7 +396,7 @@ function buildDayAvailabilityState(spot: AvailabilitySpot, bookings: SlotBooking
                 const nextLabel = formatDaySegmentLabel(available.start, available.end);
                 if (!nextLabel) continue;
                 hasAvailability = true;
-                pushDayLabel(dayLabels, key, nextLabel);
+                pushCalendarDayLabel(dayLabels, key, nextLabel);
             }
         }
 
@@ -536,18 +537,6 @@ function formatDaySegmentLabel(start: Date, end: Date) {
 
     if (startText === "00:00" && endText === "00:00") return "All day";
     return `${startText}-${endText}`;
-}
-
-function pushDayLabel(dayLabels: Map<string, string[]>, key: string, nextLabel: string) {
-    const current = dayLabels.get(key) ?? [];
-    if (current.includes("All day")) return;
-    if (nextLabel === "All day") {
-        dayLabels.set(key, ["All day"]);
-        return;
-    }
-    if (!current.includes(nextLabel)) {
-        dayLabels.set(key, [...current, nextLabel]);
-    }
 }
 
 export function getAutoStartForDate(spot: AvailabilitySpot | null, ymd: string) {
