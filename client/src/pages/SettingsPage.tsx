@@ -8,6 +8,7 @@ import AppPageState from "../components/AppPageState";
 import { AppButton, AppField, AppInput } from "../components/ui/AppForm";
 import { apiDelete, apiGet, apiPatch, readErrorMessage } from "../lib/api";
 import { useAuth, useStripeConnect } from "../lib/auth";
+import { formatDateDisplay } from "./pagesShared";
 import type { User } from "../types";
 import {
     getPasswordStrength,
@@ -153,9 +154,7 @@ export default function SettingsPage() {
         ? readErrorMessage(settingsQuery.error, "Failed to load settings")
         : null;
     const memberSince = settingsQuery.data?.createdAt
-        ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(
-              new Date(settingsQuery.data.createdAt)
-          )
+        ? formatDateDisplay(settingsQuery.data.createdAt, "Recently joined")
         : "Recently joined";
 
     async function handleBeginConnectOnboarding(mode: "stripe" | "demo" = "stripe") {

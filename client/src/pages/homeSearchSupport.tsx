@@ -22,9 +22,7 @@ export function HomeDatePickerDialog({
 }) {
     const selected = useMemo(() => parseYmd(selectedDate) ?? undefined, [selectedDate]);
     const today = useMemo(() => {
-        const now = new Date();
-        now.setHours(0, 0, 0, 0);
-        return now;
+        return parseYmd(toLocalDateInput(new Date())) ?? new Date();
     }, []);
     const [visibleMonth, setVisibleMonth] = useState(() => selected ?? today);
 

@@ -102,9 +102,9 @@ const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 function buildEditSnapshot(listing: ParkingSpot, ownerContact: OwnerContactForEdit): DraftSnapshot {
     const rawAvailability = listing.availability_json;
     const av = rawAvailability && typeof rawAvailability === "object" ? (rawAvailability as RawAvailabilityForEdit) : null;
-    const todayYmd = toLocalDateInput(new Date());
     const plus30 = new Date();
-    plus30.setDate(plus30.getDate() + 30);
+    plus30.setUTCDate(plus30.getUTCDate() + 30);
+    const todayYmd = toLocalDateInput(new Date());
     const fallbackFrom = typeof av?.date_from === "string" ? av.date_from : todayYmd;
     const fallbackTo = typeof av?.date_to === "string" ? av.date_to : toLocalDateInput(plus30);
 
