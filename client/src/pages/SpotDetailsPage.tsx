@@ -788,6 +788,8 @@ export default function SpotDetailsPage() {
             <SlotDialog
                 open={slotDialogOpen}
                 spot={spot}
+                bookings={bookings}
+                capacity={capacity}
                 startDateLabel={slotDialogDraft.startDate}
                 endDateLabel={slotDialogDraft.endDate}
                 startTime={slotDialogDraft.startTime}

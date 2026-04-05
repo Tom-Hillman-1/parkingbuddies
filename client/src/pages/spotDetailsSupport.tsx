@@ -183,6 +183,8 @@ export function SlotCalendar<TSpot extends AvailabilitySpot>({
 export type SlotDialogProps = {
     open: boolean;
     spot: AvailabilitySpot;
+    bookings?: SlotBookingLike[];
+    capacity?: number;
     startDateLabel: string;
     endDateLabel: string;
     startTime: string;
@@ -193,9 +195,17 @@ export type SlotDialogProps = {
     onClose: () => void;
 };
 
+type SlotDialogSubtitle = {
+    text: string;
+    checkIn: string | null;
+    checkOut: string | null;
+};
+
 export function SlotDialog({
     open,
     spot,
+    bookings = [],
+    capacity = 1,
     startDateLabel,
     endDateLabel,
     startTime,
@@ -207,6 +217,10 @@ export function SlotDialog({
 }: SlotDialogProps) {
     const formattedStartDate = formatDateDisplay(startDateLabel, startDateLabel);
     const formattedEndDate = formatDateDisplay(endDateLabel, endDateLabel);
+    const slotSubtitle = useMemo(
+        () => buildSlotDialogSubtitle(spot, bookings, Math.max(1, capacity), startDateLabel, endDateLabel),
+        [spot, bookings, capacity, startDateLabel, endDateLabel]
+    );
     const parsedStartDate = parseYmd(startDateLabel);
     const parsedEndDate = parseYmd(endDateLabel);
     const slotStart = parsedStartDate ? setTime(parsedStartDate, normalizeTimeInput(startTime)) : null;
@@ -219,7 +233,18 @@ export function SlotDialog({
             open={open}
             onClose={onClose}
             title="Pick slot timing"
-            subtitle={`${formattedStartDate} -> ${formattedEndDate}`}
+            subtitle={
+                slotSubtitle.checkIn && slotSubtitle.checkOut ? (
+                    <>
+                        <div>{slotSubtitle.text}</div>
+                        <div>
+                            From <strong>{slotSubtitle.checkIn}</strong> | Until <strong>{slotSubtitle.checkOut}</strong>
+                        </div>
+                    </>
+                ) : (
+                    slotSubtitle.text
+                )
+            }
             width="compact"
             className="slotDialog"
         >
@@ -365,15 +390,7 @@ function getDayKey(day: Date) {
 
 function buildDayAvailabilityState(spot: AvailabilitySpot, bookings: SlotBookingLike[], capacity: number) {
     const dayWindows = new Map<string, Array<{ start: Date; end: Date }>>();
-    const bookedRanges = bookings
-        .map((booking) => {
-            if (!booking.start_time || !booking.end_time) return null;
-            const start = new Date(booking.start_time);
-            const end = new Date(booking.end_time);
-            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || !(start < end)) return null;
-            return { start, end };
-        })
-        .filter((range): range is { start: Date; end: Date } => Boolean(range));
+    const bookedRanges = readBookedRanges(bookings);
     const safeCapacity = Math.max(1, capacity);
 
     for (const window of readSavedSlots(spot)) {
@@ -421,6 +438,109 @@ function buildDayAvailabilityState(spot: AvailabilitySpot, bookings: SlotBooking
         fullyBookedDays: fullDays,
         dayLabels: new Map(Array.from(dayLabels.entries()).map(([key, labels]) => [key, labels.slice(0, 3)])),
     };
+}
+
+function buildSlotDialogSubtitle(
+    spot: AvailabilitySpot,
+    bookings: SlotBookingLike[],
+    capacity: number,
+    startDateLabel: string,
+    endDateLabel: string
+): SlotDialogSubtitle {
+    if (startDateLabel === endDateLabel) {
+        return {
+            text: "Press View slots to view available slots.",
+            checkIn: null,
+            checkOut: null,
+        };
+    }
+
+    const startLabel = summarizeSlotDialogBoundary(
+        getDayAvailableSegments(spot, bookings, capacity, startDateLabel),
+        "checkIn"
+    );
+    const endLabel = summarizeSlotDialogBoundary(
+        getDayAvailableSegments(spot, bookings, capacity, endDateLabel),
+        "checkOut"
+    );
+    return {
+        text: "Check-in / check-out time",
+        checkIn: startLabel,
+        checkOut: endLabel,
+    };
+}
+
+function summarizeSlotDialogBoundary(
+    segments: Array<{ start: number; end: number }>,
+    edge: "checkIn" | "checkOut"
+) {
+    if (!segments.length) return "No time slots listed";
+
+    if (edge === "checkIn") {
+        const overnightSegments = segments.filter((segment) => segment.end >= 24 * 60);
+        const chosen = (overnightSegments.length ? overnightSegments : segments).sort((a, b) => a.start - b.start)[0];
+        if (chosen.start <= 0) return "All day";
+        return formatSlotDialogBoundaryTime(chosen.start);
+    }
+
+    const carryThroughSegments = segments.filter((segment) => segment.start <= 0);
+    const chosen = (carryThroughSegments.length ? carryThroughSegments : segments).sort((a, b) => b.end - a.end)[0];
+    if (chosen.start <= 0 && chosen.end >= 24 * 60) return "All day";
+    return formatSlotDialogBoundaryTime(chosen.end);
+}
+
+function getDayAvailableSegments(
+    spot: AvailabilitySpot,
+    bookings: SlotBookingLike[],
+    capacity: number,
+    dayKey: string
+) {
+    const day = parseYmd(dayKey);
+    if (!day) return [] as Array<{ start: number; end: number }>;
+
+    const bookedRanges = readBookedRanges(bookings);
+    const safeCapacity = Math.max(1, capacity);
+    const dayStart = startOfDay(day);
+    const nextDay = addDays(dayStart, 1);
+    const segments: Array<{ start: number; end: number }> = [];
+
+    for (const window of readSavedSlots(spot)) {
+        if (dayKey < window.date_from || dayKey > window.date_to) continue;
+
+        const segmentStart = dayKey === window.date_from ? setTime(dayStart, window.start) : dayStart;
+        const segmentEnd = dayKey === window.date_to ? setTime(dayStart, window.end) : nextDay;
+        if (!(segmentStart < segmentEnd)) continue;
+
+        for (const available of subtractBlockedRanges(segmentStart, segmentEnd, bookedRanges, safeCapacity)) {
+            const start = Math.max(0, Math.round((available.start.getTime() - dayStart.getTime()) / 60000));
+            const rawEnd = Math.round((available.end.getTime() - dayStart.getTime()) / 60000);
+            const end = Math.max(0, Math.min(24 * 60, rawEnd));
+            if (end > start) {
+                segments.push({ start, end });
+            }
+        }
+    }
+
+    return segments;
+}
+
+function readBookedRanges(bookings: SlotBookingLike[]) {
+    return bookings
+        .map((booking) => {
+            if (!booking.start_time || !booking.end_time) return null;
+            const start = new Date(booking.start_time);
+            const end = new Date(booking.end_time);
+            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || !(start < end)) return null;
+            return { start, end };
+        })
+        .filter((range): range is { start: Date; end: Date } => Boolean(range));
+}
+
+function formatSlotDialogBoundaryTime(totalMinutes: number) {
+    const bounded = Math.max(0, Math.min(24 * 60, totalMinutes));
+    const hours = Math.floor(bounded / 60);
+    const minutes = bounded % 60;
+    return `${pad2(hours % 24)}:${pad2(minutes)}`;
 }
 
 function subtractBlockedRanges(

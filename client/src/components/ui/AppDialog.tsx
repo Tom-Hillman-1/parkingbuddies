@@ -6,7 +6,7 @@ type AppDialogProps = {
     open: boolean;
     onClose: () => void;
     title: string;
-    subtitle?: string;
+    subtitle?: ReactNode;
     children: ReactNode;
     width?: "default" | "wide" | "compact";
     className?: string;
