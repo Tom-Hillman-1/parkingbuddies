@@ -789,11 +789,11 @@
 
 .appCalendarSlotMore {
     position: absolute;
-    top: calc(100% + 0.07rem);
+    top: calc(100% + 0.135rem);
     left: 50%;
     z-index: 2;
-    padding: 0.16rem 0.34rem;
-    border: 2px solid #d6e2f2;
+    padding: 0.135rem 0.34rem;
+    border: 1.5px solid #d6e2f2;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.96);
     box-shadow: 0 8px 18px rgba(45, 67, 97, 0.12);
