@@ -791,11 +791,15 @@
 .appCalendarSlotMore {
     position: absolute;
     top: calc(100% + 0.28rem);
-    left: 50%;
+    left: 0;
+    right: 0;
     z-index: 2;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    width: max-content;
+    max-width: calc(100% - 0.16rem);
+    margin-inline: auto;
     padding: 0.08rem 0.34rem;
     border: 1px solid #d6e2f2;
     border-radius: 999px;
@@ -805,8 +809,9 @@
     font-weight: 700;
     line-height: 1.1;
     text-align: center;
-    transform: translateX(-50%);
     white-space: nowrap;
+    appearance: none;
+    -webkit-appearance: none;
 }
 
 .appCalendarSlotMore:hover,
