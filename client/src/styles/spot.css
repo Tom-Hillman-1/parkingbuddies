@@ -11,8 +11,7 @@
 .spotSimpleSide,
 .spotSimpleMain,
 .spotSimpleMedia,
-.spotSimpleAction,
-.spotSimpleBidList {
+.spotSimpleAction {
     display: grid;
     gap: 0.72rem;
 }
@@ -124,32 +123,6 @@
     color: #6c7f96;
     font-size: 0.72rem;
     font-weight: 700;
-}
-
-.spotSimpleBid {
-    border: 1px solid rgba(255, 255, 255, 0.72);
-    border-radius: 14px;
-    background: linear-gradient(135deg, #fbfdff 0%, #f0f6ff 100%);
-    padding: 0.58rem 0.66rem;
-    display: grid;
-    gap: 0.35rem;
-}
-
-.spotSimpleBid.pending {
-    border-color: #f2ddbc;
-    background: #fff9ee;
-}
-
-.spotSimpleBid.accepted,
-.spotSimpleBid.won {
-    border-color: #b8e6ca;
-    background: #f1fbf5;
-}
-
-.spotSimpleBid.rejected,
-.spotSimpleBid.declined {
-    border-color: #f0cbcb;
-    background: #fff2f2;
 }
 
 .slotCal {

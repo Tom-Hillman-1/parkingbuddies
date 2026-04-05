@@ -15,7 +15,6 @@ import {
     calcUnitsForMinutes,
     capitalizeLabel,
     formatDateDisplay,
-    formatDateTimeCompact,
     formatGbp,
     STRIPE_MIN_GBP_PAYMENT,
     formatTimeDisplay,
@@ -26,7 +25,6 @@ import {
 } from "./pagesShared";
 import {
     formatAvailability,
-    formatBidAmount,
     getAutoStartForDate,
     getRangeCapacityState,
     isSlotAllowed,
@@ -50,8 +48,7 @@ type ParkingSpot = Omit<SharedParkingSpot, "price_gbp" | "availability_json"> & 
 };
 
 type SpotBooking = Pick<SharedBooking, "id" | "start_time" | "end_time" | "status" | "pay_method" | "total_price_gbp">;
-type AuctionBid = { id: string; amount_gbp?: number; amount_points?: number; pay_method?: PayMethod; status: string; start_time?: string; end_time?: string; bidder_name?: string; bidder_email?: string };
-type AuctionInfo = { pending_bids?: AuctionBid[]; sold_out?: boolean };
+type AuctionInfo = { sold_out?: boolean };
 
 export default function SpotDetailsPage() {
     const { id } = useParams<{ id: string }>();
@@ -117,18 +114,15 @@ export default function SpotDetailsPage() {
     const [actionMsg, setActionMsg] = useState<string | null>(null);
     const [bidMsg, setBidMsg] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
-    const [bidBusy, setBidBusy] = useState(false);
 
     const spot = spotQuery.data ?? null;
     const bookings = useMemo(() => bookingsQuery.data ?? [], [bookingsQuery.data]);
     const auctionQuery = useQuery({
-        queryKey: ["spot-auction", spot?.id, token ? "auth" : "anon"],
+        queryKey: ["spot-auction", spot?.id],
         enabled: !!spot && spot.mode === "auction",
         queryFn: async () => {
             try {
-                const summary = token
-                    ? await apiGet<{ auction: AuctionInfo }>(`/auctions/${spot?.id}`, token)
-                    : await apiGet<{ auction: AuctionInfo }>(`/auctions/${spot?.id}`);
+                const summary = await apiGet<{ auction: AuctionInfo }>(`/auctions/${spot?.id}`);
                 return summary.auction ?? null;
             } catch {
                 return null as AuctionInfo | null;
@@ -452,20 +446,6 @@ export default function SpotDetailsPage() {
         navigate(`/bids/confirm?${params.toString()}`);
     }
 
-    async function acceptBid(bidId: string) {
-        if (!token || !spot) return;
-        setBidBusy(true);
-        try {
-            await apiPost(`/auctions/${spot.id}/accept`, { bid_id: bidId }, token);
-            await Promise.all([auctionQuery.refetch(), bookingsQuery.refetch()]);
-            setBidMsg("Bid accepted.");
-        } catch (error: unknown) {
-            setBidMsg(readErrorMessage(error, "Failed to accept bid."));
-        } finally {
-            setBidBusy(false);
-        }
-    }
-
     if (spotQuery.isPending) return null;
     if (spotQuery.isError) {
         return (
@@ -492,7 +472,6 @@ export default function SpotDetailsPage() {
                 ? `Bid from ${formatGbp(auctionMinPerUnit)} / ${listingUnit}`
                 : `${formatGbp(listingPrice)} / ${listingUnit}`;
 
-    const pendingBids = auctionInfo?.pending_bids ?? [];
     const estimatedBookingTotalLabel =
         spot.mode === "free"
             ? "Free"
@@ -580,7 +559,7 @@ export default function SpotDetailsPage() {
                             startDate={calendarStartDate}
                             endDate={calendarEndDate}
                             onPickDate={pickCalendarDate}
-                            disabled={busy || bidBusy || listingInactive}
+                            disabled={busy || listingInactive}
                         />
 
                         <div className="slotRangeSummary">
@@ -590,7 +569,7 @@ export default function SpotDetailsPage() {
                                     type="button"
                                     className="btn"
                                     onClick={resetCalendarSelection}
-                                    disabled={busy || bidBusy || listingInactive}
+                                    disabled={busy || listingInactive}
                                     style={{ padding: "6px 12px", fontSize: 12 }}
                                 >
                                     Reset
@@ -642,7 +621,7 @@ export default function SpotDetailsPage() {
                                 orientation="horizontal"
                                 value={bidPayMethod}
                                 onChange={setBidPayMethod}
-                                isDisabled={auctionClosed || bidBusy || listingInactive}
+                                isDisabled={auctionClosed || listingInactive}
                                 options={[
                                     ...(canUseMoneyBids ? [{ id: "money" as const, content: "Money" }] : []),
                                     ...(canUsePoints ? [{ id: "points" as const, content: "Points" }] : []),
@@ -664,7 +643,7 @@ export default function SpotDetailsPage() {
                                         value={bidMoneyPerHour}
                                         onChange={(e) => setBidMoneyPerHour(e.target.value)}
                                         placeholder={`Your bid per ${listingUnit} (GBP)`}
-                                        disabled={auctionClosed || bidBusy || listingInactive}
+                                        disabled={auctionClosed || listingInactive}
                                     />
                                 </label>
                             ) : (
@@ -681,7 +660,7 @@ export default function SpotDetailsPage() {
                                         value={bidPointsPerHour}
                                         onChange={(e) => setBidPointsPerHour(e.target.value)}
                                         placeholder={`Points per ${listingUnit}`}
-                                        disabled={auctionClosed || bidBusy || listingInactive}
+                                        disabled={auctionClosed || listingInactive}
                                     />
                                 </label>
                             )}
@@ -697,7 +676,7 @@ export default function SpotDetailsPage() {
                                 <button
                                     onClick={goToBidConfirm}
                                     className="btn btn-primary"
-                                    disabled={isOwner || auctionClosed || bidBusy || listingInactive}
+                                    disabled={isOwner || auctionClosed || listingInactive}
                                 >
                                     Review bid
                                 </button>
@@ -755,31 +734,6 @@ export default function SpotDetailsPage() {
                                 </button>
                             </div>
                             {actionMsg && <div className="spotAlert spotAlert--danger">{actionMsg}</div>}
-                        </div>
-                    )}
-
-                    {spot.mode === "auction" && isOwner && pendingBids.length > 0 && (
-                        <div className="card spotSimpleAction">
-                            <div className="h3">Incoming bids</div>
-                            <div className="spotSimpleBidList">
-                                {pendingBids.map((bid) => (
-                                    <div
-                                        key={bid.id}
-                                        className={`spotSimpleBid${["pending", "accepted", "rejected", "declined", "won"].includes(bid.status) ? ` ${bid.status}` : ""}`}
-                                    >
-                                        <div className="rowInline" style={{ justifyContent: "space-between", gap: 10 }}>
-                                            <strong>{formatBidAmount(bid)}</strong>
-                                            <button className="btn btn-primary" onClick={() => acceptBid(bid.id)} disabled={bidBusy}>
-                                                {bidBusy ? "Working..." : "Accept"}
-                                            </button>
-                                        </div>
-                                        <div className="tiny muted">{bid.bidder_name || bid.bidder_email || "Bidder"}</div>
-                                        {bid.start_time && bid.end_time && (
-                                            <div className="tiny muted">{formatDateTimeCompact(bid.start_time)} {" -> "} {formatDateTimeCompact(bid.end_time)}</div>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
                         </div>
                     )}
                 </main>
