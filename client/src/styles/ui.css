@@ -785,22 +785,25 @@
     position: relative;
     display: grid;
     justify-items: center;
+    width: 100%;
 }
 
 .appCalendarSlotMore {
     position: absolute;
-    top: calc(100% + 0.135rem);
+    top: calc(100% + 0.28rem);
     left: 50%;
     z-index: 2;
-    padding: 0.135rem 0.34rem;
-    border: 1.5px solid #d6e2f2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.08rem 0.34rem;
+    border: 1px solid #d6e2f2;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.96);
-    box-shadow: 0 8px 18px rgba(45, 67, 97, 0.12);
-    color: #5c718b;
-    font-size: 0.46rem;
+    color: #6d7f96;
+    font-size: 0.56rem;
     font-weight: 700;
-    line-height: 1;
+    line-height: 1.1;
     text-align: center;
     transform: translateX(-50%);
     white-space: nowrap;
@@ -820,6 +823,10 @@
 .appCalendar--slots .rdp-range_end .rdp-day_button::after,
 .appCalendar--slots .appCalendarDay--selectedSingle .rdp-day_button::after {
     color: #335a8e;
+}
+
+.appCalendar--availability.appCalendar--slots .appCalendarSlotMore {
+    font-size: 0.5rem;
 }
 
 .appCalendar--availability .rdp-root {
@@ -927,8 +934,10 @@
     }
 
     .appCalendarSlotMore {
-        padding-inline: 0.28rem;
-        font-size: 0.36rem;
+        top: calc(100% + 0.28rem);
+        padding: 0.06rem 0.28rem;
+        font-size: 0.42rem;
+        line-height: 1;
     }
 
     .appCalendar--home .rdp-month_grid {
@@ -956,6 +965,10 @@
         width: 3.02rem;
         font-size: 0.39rem;
         line-height: 1.01;
+    }
+
+    .appCalendar--availability.appCalendar--slots .appCalendarSlotMore {
+        font-size: 0.39rem;
     }
 
     .appTimePickerDialogFooter {

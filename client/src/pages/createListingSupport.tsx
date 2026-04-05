@@ -561,7 +561,7 @@ function AvailabilityDayCell({
                             onViewSlots(day.isoDate, labels);
                         }}
                     >
-                        View time slots
+                        View slots
                     </button>
                 ) : null}
             </div>
