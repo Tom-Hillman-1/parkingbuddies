@@ -53,18 +53,14 @@ const HOME_SEARCH_RADIUS_KM = 10;
 const MAP_COORD_TOLERANCE = 0.000001;
 const DEFAULT_MODE_FILTER: ModeFilter = { free: true, rent: true, auction: true };
 const HOME_DURATION_OPTIONS = [
-    { value: 30, label: "30 min" },
-    { value: 60, label: "1 hour" },
-    { value: 120, label: "2 hours" },
-    { value: 180, label: "3 hours" },
-    { value: 240, label: "4 hours" },
-    { value: 360, label: "6 hours" },
-    { value: 480, label: "8 hours" },
-    { value: 600, label: "10 hours" },
-    { value: 720, label: "12 hours" },
-    { value: 960, label: "16 hours" },
-    { value: 1200, label: "20 hours" },
-    { value: 1440, label: "24+ hours" },
+    ...Array.from({ length: 24 }, (_, index) => {
+        const hours = index + 1;
+        return { value: hours * 60, label: hours === 1 ? "1 hour" : `${hours} hours` };
+    }),
+    ...Array.from({ length: 89 }, (_, index) => {
+        const days = index + 2;
+        return { value: days * 24 * 60, label: `${days} days` };
+    }),
 ];
 const SORT_OPTIONS: Array<{ value: SortMode; label: string }> = [
     { value: "distance", label: "Closest first" },
@@ -728,7 +724,7 @@ export default function HomePage() {
                                 </button>
                             </div>
 
-                            <label className="homeFilterField">
+                            <div className="homeFilterField">
                                 <span className="homeFilterFieldEyebrow">Duration</span>
                                 <HomeDurationSelect
                                     value={draftSearch.durationMinutes}
@@ -740,7 +736,7 @@ export default function HomePage() {
                                     }
                                     disabled={!draftSearch.date}
                                 />
-                            </label>
+                            </div>
                         </HomeFilterSection>
 
                         <HomeFilterSection

@@ -3,7 +3,7 @@ import { formatDateDisplay, formatTimeDisplay, parseYmd } from "./pagesShared";
 import {
     addMinutes,
     formatDurationLabel,
-    getRangeCapacityState,
+    hasContinuousAvailabilityForRange,
     isSlotAllowed,
     normalizeTimeInput,
     setTime,
@@ -55,5 +55,5 @@ export function isSpotAvailableForSearchWindow(
 
     const capacity = Math.max(1, Number(spot.capacity_total ?? 1));
     const occupied = Array.isArray(spot.occupied_slots) ? spot.occupied_slots : [];
-    return !getRangeCapacityState(occupied, searchWindow.start, searchWindow.end, capacity).isFull;
+    return hasContinuousAvailabilityForRange(spot, occupied, capacity, searchWindow.start, searchWindow.end);
 }

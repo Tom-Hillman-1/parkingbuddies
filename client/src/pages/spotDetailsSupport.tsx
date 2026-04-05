@@ -543,6 +543,40 @@ export function isSlotAllowed(spot: AvailabilitySpot, start: Date, end: Date) {
     return windows.some((window) => isWindowRangeAllowed(window, start, end));
 }
 
+export function hasContinuousAvailabilityForRange(
+    spot: AvailabilitySpot,
+    bookings: SlotBookingLike[],
+    capacity: number,
+    start: Date,
+    end: Date
+) {
+    if (!(start < end)) return false;
+
+    const bookedRanges = bookings
+        .map((booking) => {
+            if (!booking.start_time || !booking.end_time) return null;
+            const bookingStart = new Date(booking.start_time);
+            const bookingEnd = new Date(booking.end_time);
+            if (Number.isNaN(bookingStart.getTime()) || Number.isNaN(bookingEnd.getTime()) || !(bookingStart < bookingEnd)) {
+                return null;
+            }
+            return { start: bookingStart, end: bookingEnd };
+        })
+        .filter((range): range is { start: Date; end: Date } => Boolean(range));
+
+    const safeCapacity = Math.max(1, capacity);
+    return readSavedSlots(spot).some((window) => {
+        if (!isWindowRangeAllowed(window, start, end)) return false;
+        const windowStart = parseUtcDateTime(window.date_from, window.start);
+        const windowEnd = parseUtcDateTime(window.date_to, window.end);
+        if (!windowStart || !windowEnd || !(windowStart < windowEnd)) return false;
+
+        return subtractBlockedRanges(windowStart, windowEnd, bookedRanges, safeCapacity).some(
+            (segment) => start >= segment.start && end <= segment.end
+        );
+    });
+}
+
 function SlotDayButton({
     day,
     modifiers,
