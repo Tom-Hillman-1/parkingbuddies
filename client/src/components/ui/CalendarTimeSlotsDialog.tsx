@@ -15,7 +15,7 @@ export function CalendarTimeSlotsDialog({
         <AppDialog
             open={open}
             onClose={onClose}
-            title="Time slots"
+            title="Avilable time slots"
             subtitle={dayLabel}
             width="compact"
             className="calendarSlotsDialog"
