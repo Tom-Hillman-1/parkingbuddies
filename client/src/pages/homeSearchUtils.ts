@@ -1,7 +1,10 @@
+import type { ParkingSpot } from "../types";
 import { formatDateDisplay, formatTimeDisplay, parseYmd } from "./pagesShared";
 import {
     addMinutes,
     formatDurationLabel,
+    getRangeCapacityState,
+    isSlotAllowed,
     normalizeTimeInput,
     setTime,
 } from "./spotDetailsSupport";
@@ -21,8 +24,6 @@ function getChosenDay(search: HomeSearchState) {
 }
 
 function getSearchStart(day: Date, search: HomeSearchState) {
-    // Search uses the same time nrmalising helpers as the booking screen so
-    // time basical-y 0" means the same thing in both places
     return setTime(day, normalizeTimeInput(search.startTime));
 }
 
@@ -43,4 +44,16 @@ export function formatSearchWindowSummary(search: HomeSearchState) {
     const timeLabel = formatTimeDisplay(start);
 
     return `${dayLabel} \u00b7 ${timeLabel} \u00b7 ${formatDurationLabel(search.durationMinutes)}`;
+}
+
+export function isSpotAvailableForSearchWindow(
+    spot: ParkingSpot,
+    searchWindow: { start: Date; end: Date } | null
+) {
+    if (!searchWindow) return true;
+    if (!isSlotAllowed(spot, searchWindow.start, searchWindow.end)) return false;
+
+    const capacity = Math.max(1, Number(spot.capacity_total ?? 1));
+    const occupied = Array.isArray(spot.occupied_slots) ? spot.occupied_slots : [];
+    return !getRangeCapacityState(occupied, searchWindow.start, searchWindow.end, capacity).isFull;
 }

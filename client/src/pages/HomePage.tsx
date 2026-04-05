@@ -30,12 +30,12 @@ import { capitalizeLabel, formatDateDisplay, toFiniteNumber } from "./pagesShare
 import {
     buildSearchWindow,
     formatSearchWindowSummary,
+    isSpotAvailableForSearchWindow,
     type HomeSearchState,
 } from "./homeSearchUtils";
 import { HomeDatePickerDialog, HomeTimePickerDialog } from "./homeSearchSupport";
 import { listingFeatureLabel, listingFeatureTone } from "./createListingSupport";
 import {
-    isSlotAllowed as isSpotSlotAllowed,
     nextWholeQuarterHour,
     normalizeTimeInput,
     toTimeInput,
@@ -49,8 +49,7 @@ const LONDON = { lat: 51.5074, lng: -0.1278 };
 const LOCATION_SEARCH_LABEL = "Using your location";
 const HOME_HERO_BACKGROUND_URL = new URL("../assets/loading_hero.json", import.meta.url).href;
 const HOME_HERO_CITY_URL = new URL("../assets/city.json", import.meta.url).href;
-const HOME_MAP_FOCUS_RADIUS_KM = 5;
-const HOME_ADDRESS_RESULT_LIMIT = 10;
+const HOME_SEARCH_RADIUS_KM = 10;
 const MAP_COORD_TOLERANCE = 0.000001;
 const DEFAULT_MODE_FILTER: ModeFilter = { free: true, rent: true, auction: true };
 const HOME_DURATION_OPTIONS = [
@@ -357,7 +356,7 @@ export default function HomePage() {
             }
             if (priceValue(spot) < minPrice) return false;
             if (Number.isFinite(maxPrice) && priceValue(spot) > maxPrice) return false;
-            if (searchWindow && !isSpotSlotAllowed(spot, searchWindow.start, searchWindow.end)) return false;
+            if (!isSpotAvailableForSearchWindow(spot, searchWindow)) return false;
             return true;
         });
     }, [spots, activeSearch, activeModeFilter, activeSearchLocation, userLoc]);
@@ -376,7 +375,7 @@ export default function HomePage() {
         }));
 
         const candidateRows = activeSearchLocation
-            ? [...rows].sort((a, b) => a.distKm - b.distKm).slice(0, HOME_ADDRESS_RESULT_LIMIT)
+            ? rows.filter((row) => row.distKm <= HOME_SEARCH_RADIUS_KM)
             : rows;
 
         candidateRows.sort((a, b) => {
@@ -498,6 +497,10 @@ export default function HomePage() {
             trimmedQuery.length >= 3 &&
             trimmedQuery.toLowerCase() !== LOCATION_SEARCH_LABEL.toLowerCase();
 
+        if (!resolvedSearchLocation && userLoc && draftSearch.query.trim().toLowerCase() === LOCATION_SEARCH_LABEL.toLowerCase()) {
+            resolvedSearchLocation = { lat: userLoc.lat, lng: userLoc.lng };
+        }
+
         if (canResolveTypedAddress) {
             try {
                 const firstSuggestion =
@@ -515,7 +518,6 @@ export default function HomePage() {
                     setDraftSearchLocation(resolvedSearchLocation);
                 }
             } catch {
-                // Keep plain-text search working even if address lookup is temporarily unavailable.
             }
         }
 
@@ -838,7 +840,7 @@ export default function HomePage() {
                         {error && !loading && (
                             <AppPageState
                                 card
-                                title="The map took a scenic route."
+                                title="Map results are unavailable."
                                 copy="Those spots did not load properly. Head back home and try again in a moment."
                                 actionLabel={null}
                             />
@@ -933,7 +935,7 @@ export default function HomePage() {
                     <SpotsMap
                         spots={mapSpots}
                         center={mapCenter}
-                        focusArea={activeSearchLocation ? { center: activeSearchLocation, radiusKm: HOME_MAP_FOCUS_RADIUS_KM } : null}
+                        focusArea={activeSearchLocation ? { center: activeSearchLocation, radiusKm: HOME_SEARCH_RADIUS_KM } : null}
                         selectedId={selectedId}
                         hoveredId={hoveredId}
                         userLocation={isLocEnabled ? userLoc : null}

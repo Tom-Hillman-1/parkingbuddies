@@ -64,8 +64,6 @@ export function toLocalDateInput(date: Date) {
 }
 
 export function parseYmd(value: string) {
-    // Treat YYYY-MM-DD values as fixed UTC calendar days so booking dates
-    // do not drift when different users open the site in different time zones.
     if (!YMD_PATTERN.test(value)) return null;
     const [yearRaw, monthRaw, dayRaw] = value.split("-");
     const year = Number(yearRaw);
@@ -173,6 +171,18 @@ export function pushCalendarDayLabel(dayLabels: Map<string, string[]>, dayKey: s
     }
 }
 
+export function sortCalendarDayLabelsByStartTime(labels: string[]) {
+    return [...labels].sort((left, right) => {
+        const leftRange = parseCalendarDayLabel(left);
+        const rightRange = parseCalendarDayLabel(right);
+        if (!leftRange || !rightRange) return left.localeCompare(right);
+        if (leftRange.start !== rightRange.start) {
+            return leftRange.start - rightRange.start;
+        }
+        return leftRange.end - rightRange.end;
+    });
+}
+
 function compareCalendarDayLabels(left: string, right: string) {
     const leftRange = parseCalendarDayLabel(left);
     const rightRange = parseCalendarDayLabel(right);
@@ -199,4 +209,3 @@ function parseCalendarDayLabel(label: string) {
 
     return { start, end };
 }
-

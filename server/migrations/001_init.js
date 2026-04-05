@@ -129,7 +129,6 @@ exports.up = (pgm) => {
         check: "type IN ('earn', 'spend')",
     });
 
-    // PAYMENTS (store test payments later)
     pgm.createTable("payments", {
         id: { type: "uuid", primaryKey: true, default: pgm.func("gen_random_uuid()") },
 

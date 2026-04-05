@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { DayButton as DayPickerDayButton, type DayButtonProps } from "react-day-picker";
+import { DayButton as DayPickerDayButton, type DayButtonProps, type DayProps } from "react-day-picker";
 import { AppCalendar } from "../components/ui/AppCalendar";
 import { AppDialog } from "../components/ui/AppDialog";
 import { AppButton } from "../components/ui/AppForm";
+import { CalendarTimeSlotsDialog } from "../components/ui/CalendarTimeSlotsDialog";
 import { InfoTooltip } from "../components/ui/InfoTooltip";
 import {
     formatDateDisplay,
@@ -12,6 +13,7 @@ import {
     parseUtcDateTime,
     parseYmd,
     pushCalendarDayLabel,
+    sortCalendarDayLabelsByStartTime,
     timeToMinutes as minutes,
     toLocalDateInput,
 } from "./pagesShared";
@@ -113,7 +115,7 @@ export const CREATE_FLOW_COPY: Record<FlowStep, { panelTitle: string; panelCopy:
 
 export const PRICE_UNIT_CHOICES: Array<{ id: PriceUnit; label: string }> = [{ id: "hour", label: "Hourly" }, { id: "day", label: "Daily" }, { id: "week", label: "Weekly" }];
 export const PRICE_UNIT_HELP: Record<PriceUnit, string> = {
-    hour: "Charges by hour. Drivers can choose any start and end time within your availability.",
+    hour: "Charges by hour. Drivers can choose any start and end time within your availability, and partial hours are rounded up.",
     day: "Charges by day. Shorter bookings are still billed as a full day.",
     week: "Charges by week. Longer stays are rounded up by full weeks.",
 };
@@ -367,6 +369,7 @@ export function AvailabilityCalendarSection({
 }) {
     const anchorYmd = dateFrom || windows.at(-1)?.from || toLocalDateInput(new Date());
     const [visibleMonth, setVisibleMonth] = useState(() => calendarMonthFromYmd(anchorYmd));
+    const [slotInfo, setSlotInfo] = useState<{ dayKey: string; labels: string[] } | null>(null);
     const today = useMemo(() => {
         return parseYmd(toLocalDateInput(new Date())) ?? new Date();
     }, []);
@@ -419,11 +422,25 @@ export function AvailabilityCalendarSection({
                         selectedSingle: "appCalendarDay--selectedSingle",
                     }}
                     components={{
+                        Day: (props) => (
+                            <AvailabilityDayCell
+                                {...props}
+                                dayLabels={dayLabels}
+                                onViewSlots={(dayKey, labels) => setSlotInfo({ dayKey, labels })}
+                            />
+                        ),
                         DayButton: (props) => <AvailabilityDayButton {...props} dayLabels={dayLabels} />,
                     }}
                     className="appCalendar--availability appCalendar--slots"
                 />
             </div>
+
+            <CalendarTimeSlotsDialog
+                open={!!slotInfo}
+                dayLabel={slotInfo ? formatYmdLabel(slotInfo.dayKey) : ""}
+                labels={slotInfo ? sortCalendarDayLabelsByStartTime(slotInfo.labels) : []}
+                onClose={() => setSlotInfo(null)}
+            />
 
             <div className="createFieldHint">Pick a start date, then an end date to add a slot.</div>
 
@@ -504,13 +521,51 @@ function AvailabilityDayButton({
     dayLabels,
     className,
     ...buttonProps
-}: DayButtonProps & { dayLabels: Map<string, string> }) {
-    const slotLabel = dayLabels.get(day.isoDate) ?? "";
+}: DayButtonProps & { dayLabels: Map<string, string[]> }) {
+    const labels = dayLabels.get(day.isoDate) ?? [];
+    const slotLabel = labels.length <= 1 ? (labels[0] ?? "") : "";
 
     return (
         <DayPickerDayButton day={day} modifiers={modifiers} className={className} data-slot-time={slotLabel} {...buttonProps}>
             {Number(day.isoDate.slice(8, 10))}
         </DayPickerDayButton>
+    );
+}
+
+function AvailabilityDayCell({
+    day,
+    modifiers,
+    dayLabels,
+    onViewSlots,
+    children,
+    ...cellProps
+}: DayProps & {
+    dayLabels: Map<string, string[]>;
+    onViewSlots: (dayKey: string, labels: string[]) => void;
+}) {
+    const labels = dayLabels.get(day.isoDate) ?? [];
+    const showViewButton = labels.length > 1 && !modifiers.disabled;
+
+    return (
+        <td {...cellProps}>
+            <div className="appCalendarDayStack">
+                {children}
+                {showViewButton ? (
+                    <button
+                        type="button"
+                        className="appCalendarSlotMore"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            onViewSlots(day.isoDate, labels);
+                        }}
+                    >
+                        View time slots
+                    </button>
+                ) : null}
+            </div>
+        </td>
     );
 }
 
@@ -530,7 +585,7 @@ function buildAvailabilityDayLabels(windows: AvailabilityWindow[]) {
         }
     }
 
-    return new Map(Array.from(labels.entries()).map(([dayKey, dayLabels]) => [dayKey, dayLabels.slice(0, 3).join("\n")]));
+    return new Map(Array.from(labels.entries()).map(([dayKey, dayLabels]) => [dayKey, dayLabels.slice(0, 3)]));
 }
 
 

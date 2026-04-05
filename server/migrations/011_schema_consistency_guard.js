@@ -28,6 +28,4 @@ exports.up = (pgm) => {
     `);
 };
 
-exports.down = (_pgm) => {
-    // No-op guard migration.
-};
+exports.down = (_pgm) => {};

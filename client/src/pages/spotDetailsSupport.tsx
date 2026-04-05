@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { DayButton as DayPickerDayButton, type DayButtonProps } from "react-day-picker";
+import { DayButton as DayPickerDayButton, type DayButtonProps, type DayProps } from "react-day-picker";
 import { AppCalendar } from "../components/ui/AppCalendar";
 import { AppDialog } from "../components/ui/AppDialog";
 import { AppButton } from "../components/ui/AppForm";
+import { CalendarTimeSlotsDialog } from "../components/ui/CalendarTimeSlotsDialog";
 import { AppTimePicker } from "../components/ui/AppTimePicker";
 import {
     formatDateDisplay,
@@ -12,6 +13,7 @@ import {
     parseUtcDateTime,
     parseYmd,
     pushCalendarDayLabel,
+    sortCalendarDayLabelsByStartTime,
     timeToMinutes,
     toFiniteNumber,
     toLocalDateInput,
@@ -115,6 +117,7 @@ export function SlotCalendar<TSpot extends AvailabilitySpot>({
     disabled,
 }: SlotCalendarProps<TSpot>) {
     const [visibleMonth, setVisibleMonth] = useState(() => calendarMonthFromYmd(startDate));
+    const [slotInfo, setSlotInfo] = useState<{ dayKey: string; labels: string[] } | null>(null);
     const dayAvailability = useMemo(
         () => buildDayAvailabilityState(spot, bookings, Math.max(1, capacity)),
         [spot, bookings, capacity]
@@ -151,6 +154,13 @@ export function SlotCalendar<TSpot extends AvailabilitySpot>({
                     availableEnd: "appCalendarDay--availableEnd",
                 }}
                 components={{
+                    Day: (props) => (
+                        <SlotDayCell
+                            {...props}
+                            dayLabels={dayLabels}
+                            onViewSlots={(dayKey, labels) => setSlotInfo({ dayKey, labels })}
+                        />
+                    ),
                     DayButton: (props) => <SlotDayButton {...props} dayLabels={dayLabels} />,
                 }}
                 onDayClick={(day, modifiers) => {
@@ -158,6 +168,13 @@ export function SlotCalendar<TSpot extends AvailabilitySpot>({
                     onPickDate(toLocalDateInput(day));
                 }}
                 className="appCalendar--slots"
+            />
+
+            <CalendarTimeSlotsDialog
+                open={!!slotInfo}
+                dayLabel={slotInfo ? formatDateDisplay(slotInfo.dayKey, slotInfo.dayKey) : ""}
+                labels={slotInfo ? sortCalendarDayLabelsByStartTime(slotInfo.labels) : []}
+                onClose={() => setSlotInfo(null)}
             />
         </div>
     );
@@ -402,7 +419,7 @@ function buildDayAvailabilityState(spot: AvailabilitySpot, bookings: SlotBooking
 
     return {
         fullyBookedDays: fullDays,
-        dayLabels: new Map(Array.from(dayLabels.entries()).map(([key, labels]) => [key, labels.slice(0, 3).join("\n")])),
+        dayLabels: new Map(Array.from(dayLabels.entries()).map(([key, labels]) => [key, labels.slice(0, 3)])),
     };
 }
 
@@ -532,8 +549,9 @@ function SlotDayButton({
     dayLabels,
     className,
     ...buttonProps
-}: DayButtonProps & { dayLabels: Map<string, string> }) {
-    const slotLabel = dayLabels.get(day.isoDate) ?? "";
+}: DayButtonProps & { dayLabels: Map<string, string[]> }) {
+    const labels = dayLabels.get(day.isoDate) ?? [];
+    const slotLabel = labels.length <= 1 ? (labels[0] ?? "") : "";
 
     return (
         <DayPickerDayButton
@@ -545,6 +563,43 @@ function SlotDayButton({
         >
             {Number(day.isoDate.slice(8, 10))}
         </DayPickerDayButton>
+    );
+}
+
+function SlotDayCell({
+    day,
+    modifiers,
+    dayLabels,
+    onViewSlots,
+    children,
+    ...cellProps
+}: DayProps & {
+    dayLabels: Map<string, string[]>;
+    onViewSlots: (dayKey: string, labels: string[]) => void;
+}) {
+    const labels = dayLabels.get(day.isoDate) ?? [];
+    const showViewButton = labels.length > 1 && !modifiers.disabled;
+
+    return (
+        <td {...cellProps}>
+            <div className="appCalendarDayStack">
+                {children}
+                {showViewButton ? (
+                    <button
+                        type="button"
+                        className="appCalendarSlotMore"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            onViewSlots(day.isoDate, labels);
+                        }}
+                    >
+                        View time slots
+                    </button>
+                ) : null}
+            </div>
+        </td>
     );
 }
 

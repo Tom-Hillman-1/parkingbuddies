@@ -13,12 +13,7 @@ export function toMoney(value: unknown) {
     return toFiniteNumber(value, 0);
 }
 
-function roundHourlyUnits(minutes: number, mode: "booking" | "auction") {
-    if (mode === "booking") {
-        const roundedMinutes = Math.max(5, Math.ceil(minutes / 5) * 5);
-        return roundedMinutes / 60;
-    }
-
+function roundHourlyUnits(minutes: number, _mode: "booking" | "auction") {
     const roundedMinutes = Math.max(60, Math.ceil(minutes / 60) * 60);
     return roundedMinutes / 60;
 }

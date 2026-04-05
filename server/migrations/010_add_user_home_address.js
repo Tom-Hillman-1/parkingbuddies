@@ -3,11 +3,6 @@
  */
 exports.shorthands = undefined;
 
-exports.up = (pgm) => {
-    // Home address was removed from the app before submission.
-    // Keep this migration as a no-op so the history stays stable.
-};
+exports.up = (_pgm) => {};
 
-exports.down = (pgm) => {
-    // No-op.
-};
+exports.down = (_pgm) => {};

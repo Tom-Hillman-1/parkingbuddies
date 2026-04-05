@@ -35,6 +35,10 @@ export type ParkingSpot = {
         }>;
         features?: string[];
     } | null;
+    occupied_slots?: Array<{
+        start_time: string;
+        end_time: string;
+    }>;
 
     is_active: boolean;
     created_at: string;

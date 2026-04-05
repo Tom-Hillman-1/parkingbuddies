@@ -2,7 +2,13 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool } from "../db";
 import { requireAuth, AuthRequest } from "../middleware/auth";
-import { availabilityDateRange, isWindowSlot, parseUtcDateTime, remainingMinutes } from "../lib/availability";
+import {
+    availabilityDateRange,
+    isWindowSlot,
+    occupiedBookingWhereClause,
+    parseUtcDateTime,
+    remainingMinutes,
+} from "../lib/availability";
 import {
     LISTING_PUBLISH_REWARD_POINTS,
     MAX_LISTING_PUBLISH_REWARDS,
@@ -513,7 +519,36 @@ router.get("/", async (_req, res) => {
        ORDER BY created_at DESC`
         );
         const spots = r.rows ?? [];
+        const spotIds = spots.map((spot: any) => spot.id);
         const auctionIds = spots.filter((s: any) => s.mode === "auction").map((s: any) => s.id);
+
+        for (const spot of spots) {
+            spot.occupied_slots = [];
+        }
+
+        if (spotIds.length) {
+            const bookingsR = await pool.query(
+                `SELECT b.parking_spot_id, b.start_time, b.end_time
+                 FROM bookings b
+                 WHERE b.parking_spot_id = ANY($1)
+                   AND ${occupiedBookingWhereClause("b")}`,
+                [spotIds]
+            );
+
+            const occupiedBySpot = new Map<string, Array<{ start_time: string; end_time: string }>>();
+            for (const booking of bookingsR.rows as Array<{ parking_spot_id: string; start_time: string | Date; end_time: string | Date }>) {
+                const ranges = occupiedBySpot.get(booking.parking_spot_id) ?? [];
+                ranges.push({
+                    start_time: booking.start_time instanceof Date ? booking.start_time.toISOString() : String(booking.start_time),
+                    end_time: booking.end_time instanceof Date ? booking.end_time.toISOString() : String(booking.end_time),
+                });
+                occupiedBySpot.set(booking.parking_spot_id, ranges);
+            }
+
+            for (const spot of spots) {
+                spot.occupied_slots = occupiedBySpot.get(spot.id) ?? [];
+            }
+        }
 
         if (auctionIds.length) {
             const bidsR = await pool.query(

@@ -174,7 +174,6 @@ function BidCardForm({
                 try {
                     await apiPost("/payments/auction-intent/cancel", { payment_intent_id: paymentIntentId }, token);
                 } catch {
-                    // Best-effort cleanup only.
                 }
             }
             onError(message);
@@ -312,11 +311,11 @@ export default function BidConfirmPage() {
     const end = useQueryValue("end");
     const pay = useQueryValue("pay", "money") as "money" | "points";
     const moneyPerUnitPrimary = useQueryValue("moneyPerUnit");
-    const moneyPerUnitLegacy = useQueryValue("perHour");
+    const moneyPerUnitFallback = useQueryValue("perHour");
     const pointsPerUnitPrimary = useQueryValue("pointsPerUnit");
-    const pointsPerUnitLegacy = useQueryValue("pointsPerHour");
-    const moneyPerUnit = moneyPerUnitPrimary || moneyPerUnitLegacy;
-    const pointsPerUnit = pointsPerUnitPrimary || pointsPerUnitLegacy;
+    const pointsPerUnitFallback = useQueryValue("pointsPerHour");
+    const moneyPerUnit = moneyPerUnitPrimary || moneyPerUnitFallback;
+    const pointsPerUnit = pointsPerUnitPrimary || pointsPerUnitFallback;
 
     const [err, setErr] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
