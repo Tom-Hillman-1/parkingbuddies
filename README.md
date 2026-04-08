@@ -15,7 +15,7 @@ Live site:
 This folder is ready to run locally.
 
 - The submission copy already includes `client/.env` and `server/.env` for local demo use.
-- If those files are missing for any reason, copy from `.env.example` in each folder.
+- No extra environment-variable setup is required before first run.
 - Local payments use Stripe test keys.
 - The local database is provided through Docker and the demo data is created by the seed script.
 
@@ -37,6 +37,8 @@ npm.cmd install
 cd ..\client
 npm.cmd install
 ```
+
+The included `.env` files are already configured for local demo use, so you do not need to create or rename any environment files before starting.
 
 ### 2. Start PostgreSQL in Docker
 
