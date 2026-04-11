@@ -17,7 +17,7 @@ This folder is ready to run locally.
 - The submission copy already includes `client/.env` and `server/.env` for local demo use.
 - No extra environment-variable setup is required before first run.
 - Local payments use Stripe test keys.
-- The local database is provided through Docker and the demo data is created by the seed script.
+- The local database is provided through Docker and the default setup restores a curated manual demo snapshot.
 
 ## Local run guide
 
@@ -48,21 +48,23 @@ From the repo root:
 docker compose up -d db
 ```
 
-### 3. Run migrations and seed the demo database
+### 3. Run migrations and restore the curated demo database
 
 ```powershell
 cd server
 npm.cmd run db:setup
 ```
 
-This creates the schema and seeds demo users, listings, bids, and bookings.
+This creates the schema and restores the curated demo users, listings, bookings, bids, and receipts from:
 
-The seed currently creates `11` demo listings covering:
+- `server/scripts/manual_demo_snapshot.sql`
 
-- rent, free, and auction listings
-- hourly, daily, and weekly pricing
-- single-space and multi-space listings
-- listings with and without images
+The restored demo state was created through the real UI flows and includes:
+
+- manually created listings
+- real bookings and bid activity
+- payment and points history
+- uploaded listing images embedded directly in the snapshot
 
 ### 4. Start the app
 
@@ -121,9 +123,9 @@ npm.cmd run build
 
 ## Project structure
 
-- `client/public/seed/` contains the seeded demo listing images.
 - `server/migrations/` contains the database migrations.
-- `server/scripts/seed.js` creates the demo data used for local testing.
+- `server/scripts/manual_demo_snapshot.sql` stores the curated manual demo state used by the default local setup.
+- `server/scripts/restore-manual-demo.ps1` restores that curated demo state.
 - `render.yaml` contains the Render deployment blueprint for the live site.
 
 ## Notes

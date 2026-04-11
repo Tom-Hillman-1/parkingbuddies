@@ -10,8 +10,8 @@
     "check": "tsc --noEmit -p tsconfig.json",
     "migrate:up": "node -r dotenv/config ./node_modules/node-pg-migrate/bin/node-pg-migrate up -m migrations",
     "migrate:down": "node -r dotenv/config ./node_modules/node-pg-migrate/bin/node-pg-migrate down -m migrations",
-    "db:seed": "node -r dotenv/config ./scripts/seed.js",
-    "db:setup": "npm run migrate:up && npm run db:seed"
+    "db:restore:manual": "powershell -ExecutionPolicy Bypass -File ./scripts/restore-manual-demo.ps1",
+    "db:setup": "npm run migrate:up && npm run db:restore:manual"
   },
   "keywords": [],
   "author": "",
